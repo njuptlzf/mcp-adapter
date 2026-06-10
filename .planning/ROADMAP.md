@@ -27,8 +27,14 @@ Restructure package.json to support universal architecture.
 - Verify backward compatibility
 
 **Deliverables:**
-- Updated package.json
-- Config path functions in config.ts
+- Updated package.json (done in Phase 1)
+- `interfaces/agent-paths.ts` — AgentPathResolver contract + Pi default
+- Rewired `config.ts` using resolver while preserving Pi behavior
+
+**Plans:** 1 plan
+
+Plans:
+- [x] 02-01-PLAN.md — introduce AgentPathResolver, rewire config.ts, add non-Pi integration test
 
 ---
 
