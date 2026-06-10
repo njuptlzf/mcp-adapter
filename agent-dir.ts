@@ -16,5 +16,6 @@ export function getAgentDir(): string {
 }
 
 export function getAgentPath(...segments: string[]): string {
+  // Source of truth for the default Pi resolver (see interfaces/agent-paths.ts).
   return join(getAgentDir(), ...segments);
 }
