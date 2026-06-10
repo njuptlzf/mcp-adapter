@@ -2,7 +2,6 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { getAgentPath } from "./agent-dir.ts";
 import { resolveAgentGlobalConfigPath, DEFAULT_AGENT_RESOLVER, type AgentPathResolver } from "./interfaces/agent-paths.ts";
 import type { McpConfig, ServerEntry, McpSettings, ImportKind, ServerProvenance } from "./types.ts";
 
