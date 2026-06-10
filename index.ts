@@ -10,6 +10,14 @@ import { executeCall, executeConnect, executeDescribe, executeList, executeSearc
 import { getConfigPathFromArgv, truncateAtWord } from "./utils.ts";
 import { initializeOAuth, shutdownOAuth } from "./mcp-auth-flow.ts";
 import { createMcpDirectToolCallRenderer, renderMcpProxyToolCall, renderMcpToolResult } from "./tool-result-renderer.ts";
+import { PiAdapter, adaptPiContext } from "./adapters/pi-adapter.ts";
+import type { AgentAPI, AgentContext, UISystem } from "./interfaces/agent-api.ts";
+
+export { PiAdapter, adaptPiContext };
+export type { AgentAPI, AgentContext, UISystem };
+// Backward-compatible alias for the default `mcpAdapter` export. Existing
+// Pi users can `import { piMcpAdapter } from "pi-mcp-adapter"` (D-15).
+export { default as piMcpAdapter } from "./index.ts";
 
 export default function mcpAdapter(pi: ExtensionAPI) {
   let state: McpExtensionState | null = null;
