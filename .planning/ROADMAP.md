@@ -63,7 +63,6 @@ Plans:
 
 ### Phase 4: Testing & Verification
 
-### Phase 4: Testing & Verification
 Comprehensive testing of the universal adapter.
 
 **Goals:**
@@ -75,3 +74,9 @@ Comprehensive testing of the universal adapter.
 - `__tests__/pi-adapter.test.ts`
 - `__tests__/integration.test.ts`
 - Test coverage reports
+
+**Plans:** 2 plans
+
+Plans:
+- [x] 04-01-PLAN.md — mock adapter + contract tests for universal adapter pattern
+- [x] 04-02-PLAN.md — configure coverage reporting, generate coverage report
