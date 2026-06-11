@@ -22,6 +22,7 @@ import { UiResourceHandler } from "./ui-resource-handler.ts";
 import { openUrl, parallelLimit } from "./utils.ts";
 import { logger } from "./logger.ts";
 import { getMissingConfiguredDirectToolServers } from "./direct-tools.ts";
+import { PiAdapter } from "./adapters/pi-adapter.ts";
 
 const FAILURE_BACKOFF_MS = 60 * 1000;
 
@@ -29,6 +30,7 @@ export async function initializeMcp(
   pi: ExtensionAPI,
   ctx: ExtensionContext
 ): Promise<McpExtensionState> {
+  const adapter = new PiAdapter(pi);
   const configPath = pi.getFlag("mcp-config") as string | undefined;
   const config = loadMcpConfig(configPath, ctx.cwd);
 
@@ -69,7 +71,7 @@ export async function initializeMcp(
     consentManager,
     uiServer: null,
     completedUiSessions: [],
-    openBrowser: (url: string) => openUrl(pi, url, process.env.BROWSER),
+    openBrowser: (url: string) => openUrl(adapter, url, process.env.BROWSER),
     ui,
     sendMessage: (message, options) => pi.sendMessage(message as unknown as Parameters<typeof pi.sendMessage>[0], options),
   };

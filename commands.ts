@@ -19,6 +19,7 @@ import { supportsOAuth, authenticate, removeAuth } from "./mcp-auth-flow.ts";
 import { getAuthForUrl } from "./mcp-auth.ts";
 import { loadOnboardingState, markSetupCompleted as persistSetupCompleted, markSharedConfigHintShown } from "./onboarding-state.ts";
 import { openPath } from "./utils.ts";
+import { PiAdapter } from "./adapters/pi-adapter.ts";
 
 export async function showStatus(state: McpExtensionState, ctx: ExtensionContext): Promise<void> {
   if (!ctx.hasUI) return;
@@ -242,6 +243,7 @@ export async function openMcpSetup(
   configOverridePath?: string,
   mode: "empty" | "setup" = "setup",
 ): Promise<PanelFlowResult> {
+  const adapter = new PiAdapter(pi);
   if (!ctx.hasUI) return { configChanged: false };
 
   const discovery = getMcpDiscoverySummary(configOverridePath, ctx.cwd);
@@ -277,7 +279,7 @@ export async function openMcpSetup(
       return { path, serverName: repoPrompt.serverName };
     },
     openPath: async (targetPath: string) => {
-      await openPath(pi, targetPath);
+      await openPath(adapter, targetPath);
     },
     markSetupCompleted: () => {
       persistSetupCompleted(discovery.fingerprint);
