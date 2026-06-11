@@ -78,5 +78,5 @@ Comprehensive testing of the universal adapter.
 **Plans:** 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md — mock adapter + contract tests for universal adapter pattern
-- [ ] 04-02-PLAN.md — configure coverage reporting, generate coverage report
+- [x] 04-01-PLAN.md — mock adapter + contract tests for universal adapter pattern
+- [x] 04-02-PLAN.md — configure coverage reporting, generate coverage report
