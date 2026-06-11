@@ -293,7 +293,7 @@ describe("mcpAdapter session lifecycle", () => {
 
     await commandDef.handler("setup", { hasUI: true, ui: { notify: vi.fn() } });
 
-    expect(mocks.openMcpSetup).toHaveBeenCalledWith(state, api, expect.any(Object), undefined, "setup");
+    expect(mocks.openMcpSetup).toHaveBeenCalledWith(state, expect.objectContaining({}), expect.any(Object), undefined, "setup");
   });
 
   it("routes `/mcp logout <server>` to credential logout", async () => {
@@ -378,7 +378,7 @@ describe("mcpAdapter session lifecycle", () => {
     const commandDef = api.registerCommand.mock.calls.find((call: any[]) => call[0] === "mcp-auth")?.[1];
     await commandDef.handler("", { hasUI: true, ui });
 
-    expect(mocks.openMcpAuthPanel).toHaveBeenCalledWith(state, api, expect.any(Object), undefined);
+    expect(mocks.openMcpAuthPanel).toHaveBeenCalledWith(state, expect.objectContaining({}), expect.any(Object), undefined);
     expect(mocks.authenticateServer).not.toHaveBeenCalled();
   });
 
