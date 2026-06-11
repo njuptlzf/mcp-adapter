@@ -55,9 +55,9 @@ Gradually migrate core logic to use generic interfaces.
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — migrate utils.ts, state.ts, lifecycle.ts to AgentAPI/UISystem
-- [ ] 03-02-PLAN.md — wire init.ts + index.ts entry point through PiAdapter
-- [ ] 03-03-PLAN.md — migrate commands.ts + panel entry points to AgentContext
+- [x] 03-01-PLAN.md — migrate utils.ts, state.ts, lifecycle.ts to AgentAPI/UISystem
+- [x] 03-02-PLAN.md — wire init.ts + index.ts entry point through PiAdapter
+- [x] 03-03-PLAN.md — migrate commands.ts + panel entry points to AgentContext
 
 ---
 
