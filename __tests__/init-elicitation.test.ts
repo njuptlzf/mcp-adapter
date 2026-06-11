@@ -20,6 +20,19 @@ vi.mock("../server-manager.ts", () => ({
   }),
 }));
 
+vi.mock("../adapters/pi-adapter.ts", () => ({
+  PiAdapter: vi.fn().mockImplementation((pi: unknown) => ({
+    getFlag: pi?.getFlag?.bind(pi),
+    sendMessage: pi?.sendMessage?.bind(pi),
+    exec: pi?.exec?.bind(pi),
+    registerTool: pi?.registerTool?.bind(pi),
+    registerCommand: pi?.registerCommand?.bind(pi),
+    registerFlag: pi?.registerFlag?.bind(pi),
+    on: pi?.on?.bind(pi),
+    getAllTools: pi?.getAllTools?.bind(pi),
+  })),
+}));
+
 describe("initializeMcp elicitation config", () => {
   beforeEach(() => {
     mocks.managers.length = 0;
@@ -29,8 +42,18 @@ describe("initializeMcp elicitation config", () => {
   it("enables elicitation when UI is available", async () => {
     const { initializeMcp } = await import("../init.ts");
     const ui = { form: vi.fn(), confirm: vi.fn(), notify: vi.fn() };
+    const agentapi = {
+      getFlag: vi.fn(),
+      sendMessage: vi.fn(),
+      exec: vi.fn(),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      registerFlag: vi.fn(),
+      on: vi.fn(),
+      getAllTools: vi.fn(() => []),
+    };
 
-    await initializeMcp({ getFlag: vi.fn() } as any, {
+    await initializeMcp(agentapi as any, {
       cwd: "/tmp/project",
       hasUI: true,
       ui,
@@ -45,8 +68,18 @@ describe("initializeMcp elicitation config", () => {
 
   it("does not enable elicitation without UI or when disabled in settings", async () => {
     const { initializeMcp } = await import("../init.ts");
+    const agentapi = {
+      getFlag: vi.fn(),
+      sendMessage: vi.fn(),
+      exec: vi.fn(),
+      registerTool: vi.fn(),
+      registerCommand: vi.fn(),
+      registerFlag: vi.fn(),
+      on: vi.fn(),
+      getAllTools: vi.fn(() => []),
+    };
 
-    await initializeMcp({ getFlag: vi.fn() } as any, {
+    await initializeMcp(agentapi as any, {
       cwd: "/tmp/project",
       hasUI: false,
       modelRegistry: {},
@@ -54,7 +87,7 @@ describe("initializeMcp elicitation config", () => {
     expect(mocks.managers[0].setElicitationConfig).not.toHaveBeenCalled();
 
     mocks.loadMcpConfig.mockReturnValue({ mcpServers: {}, settings: { elicitation: false } });
-    await initializeMcp({ getFlag: vi.fn() } as any, {
+    await initializeMcp(agentapi as any, {
       cwd: "/tmp/project",
       hasUI: true,
       ui: { form: vi.fn() },
