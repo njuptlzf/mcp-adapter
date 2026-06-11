@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentContext, AgentAPI } from "./interfaces/agent-api.ts";
 import type { McpExtensionState } from "./state.ts";
 import type { McpAuthResult, McpConfig, ServerEntry, McpPanelCallbacks, McpPanelResult, ImportKind } from "./types.ts";
 import {
@@ -19,9 +19,8 @@ import { supportsOAuth, authenticate, removeAuth } from "./mcp-auth-flow.ts";
 import { getAuthForUrl } from "./mcp-auth.ts";
 import { loadOnboardingState, markSetupCompleted as persistSetupCompleted, markSharedConfigHintShown } from "./onboarding-state.ts";
 import { openPath } from "./utils.ts";
-import { PiAdapter } from "./adapters/pi-adapter.ts";
 
-export async function showStatus(state: McpExtensionState, ctx: ExtensionContext): Promise<void> {
+export async function showStatus(state: McpExtensionState, ctx: AgentContext): Promise<void> {
   if (!ctx.hasUI) return;
 
   const lines: string[] = ["MCP Server Status:", ""];
@@ -61,7 +60,7 @@ export async function showStatus(state: McpExtensionState, ctx: ExtensionContext
   ctx.ui.notify(lines.join("\n"), "info");
 }
 
-export async function showTools(state: McpExtensionState, ctx: ExtensionContext): Promise<void> {
+export async function showTools(state: McpExtensionState, ctx: AgentContext): Promise<void> {
   if (!ctx.hasUI) return;
 
   const allTools = [...state.toolMetadata.values()].flat().map(m => m.name);
@@ -84,7 +83,7 @@ export async function showTools(state: McpExtensionState, ctx: ExtensionContext)
 
 export async function reconnectServers(
   state: McpExtensionState,
-  ctx: ExtensionContext,
+  ctx: AgentContext,
   targetServer?: string
 ): Promise<void> {
   if (targetServer && !state.config.mcpServers[targetServer]) {
@@ -140,7 +139,7 @@ export async function reconnectServers(
 export async function authenticateServer(
   serverName: string,
   config: McpConfig,
-  ctx: ExtensionContext
+  ctx: AgentContext
 ): Promise<McpAuthResult> {
   if (!ctx.hasUI) return { ok: false, message: "OAuth authentication requires an interactive session." };
 
@@ -196,7 +195,7 @@ export async function authenticateServer(
 export async function logoutServer(
   serverName: string,
   state: McpExtensionState,
-  ctx: ExtensionContext
+  ctx: AgentContext
 ): Promise<{ ok: boolean; message: string }> {
   const definition = state.config.mcpServers[serverName];
   if (!definition) {
@@ -238,12 +237,11 @@ function buildSharedConfigNoticeLines(configOverridePath: string | undefined, cw
 
 export async function openMcpSetup(
   _state: McpExtensionState,
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  agentapi: AgentAPI,
+  ctx: AgentContext,
   configOverridePath?: string,
   mode: "empty" | "setup" = "setup",
 ): Promise<PanelFlowResult> {
-  const adapter = new PiAdapter(pi);
   if (!ctx.hasUI) return { configChanged: false };
 
   const discovery = getMcpDiscoverySummary(configOverridePath, ctx.cwd);
@@ -279,7 +277,7 @@ export async function openMcpSetup(
       return { path, serverName: repoPrompt.serverName };
     },
     openPath: async (targetPath: string) => {
-      await openPath(adapter, targetPath);
+      await openPath(agentapi, targetPath);
     },
     markSetupCompleted: () => {
       persistSetupCompleted(discovery.fingerprint);
@@ -302,7 +300,7 @@ export async function openMcpSetup(
 function buildMcpPanelCallbacks(
   state: McpExtensionState,
   config: McpConfig,
-  ctx: ExtensionContext,
+  ctx: AgentContext,
 ): McpPanelCallbacks {
   return {
     reconnect: (serverName: string) => lazyConnect(state, serverName),
@@ -339,17 +337,17 @@ function buildMcpPanelCallbacks(
 
 export async function openMcpPanel(
   state: McpExtensionState,
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  agentapi: AgentAPI,
+  ctx: AgentContext,
   configOverridePath?: string,
 ): Promise<PanelFlowResult> {
   if (Object.keys(state.config.mcpServers).length === 0) {
-    return openMcpSetup(state, pi, ctx, configOverridePath, "empty");
+    return openMcpSetup(state, agentapi, ctx, configOverridePath, "empty");
   }
 
   const config = state.config;
   const cache = loadMetadataCache();
-  const configPath = pi.getFlag("mcp-config") as string | undefined ?? configOverridePath;
+  const configPath = agentapi.getFlag("mcp-config") as string | undefined ?? configOverridePath;
   const provenanceMap = getServerProvenance(configPath, ctx.cwd);
   const { lines: noticeLines, fingerprint } = buildSharedConfigNoticeLines(configPath, ctx.cwd);
 
@@ -384,8 +382,8 @@ export async function openMcpPanel(
 
 export async function openMcpAuthPanel(
   state: McpExtensionState,
-  pi: ExtensionAPI,
-  ctx: ExtensionContext,
+  agentapi: AgentAPI,
+  ctx: AgentContext,
   configOverridePath?: string,
 ): Promise<PanelFlowResult> {
   if (!ctx.hasUI) return { configChanged: false };
@@ -398,7 +396,7 @@ export async function openMcpAuthPanel(
   }
 
   const cache = loadMetadataCache();
-  const configPath = pi.getFlag("mcp-config") as string | undefined ?? configOverridePath;
+  const configPath = agentapi.getFlag("mcp-config") as string | undefined ?? configOverridePath;
   const provenanceMap = getServerProvenance(configPath, ctx.cwd);
   const callbacks = buildMcpPanelCallbacks(state, config, ctx);
   const { createMcpPanel } = await import("./mcp-panel.ts");
