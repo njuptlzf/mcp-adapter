@@ -119,7 +119,9 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       console.error("MCP OAuth initialization failed:", err);
     });
 
-    const promise = initializeMcp(pi, ctx);
+    const agentapi = new PiAdapter(pi);
+    const agentctx = adaptPiContext(ctx);
+    const promise = initializeMcp(agentapi, agentctx);
     initPromise = promise;
 
     promise.then(async (nextState) => {
