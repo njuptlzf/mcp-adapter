@@ -287,8 +287,8 @@ export async function openMcpSetup(
   return new Promise<PanelFlowResult>((resolve) => {
     ctx.ui.custom(
       (tui, _theme, _keybindings, done) => {
-        return createMcpSetupPanel(discovery, callbacks, { mode, onboardingState }, tui, () => {
-          done(undefined);
+        return createMcpSetupPanel(discovery, callbacks, { mode, onboardingState }, tui as { requestRender(): void }, () => {
+          (done as (result?: unknown) => void)(undefined);
           resolve({ configChanged });
         });
       },
@@ -359,13 +359,13 @@ export async function openMcpPanel(
   await new Promise<void>((resolve) => {
     ctx.ui.custom(
       (tui, _theme, _keybindings, done) => {
-        return createMcpPanel(config, cache, provenanceMap, callbacks, tui, (result: McpPanelResult) => {
+        return createMcpPanel(config, cache, provenanceMap, callbacks, tui as { requestRender(): void }, (result: McpPanelResult) => {
           if (!result.cancelled && result.changes.size > 0) {
             writeDirectToolsConfig(result.changes, provenanceMap, config);
             configChanged = true;
             ctx.ui.notify("Direct tools updated. Pi will reload after this panel closes.", "info");
           }
-          done(undefined);
+          (done as (result?: unknown) => void)(undefined);
           resolve();
         }, { noticeLines });
       },
@@ -404,8 +404,8 @@ export async function openMcpAuthPanel(
   await new Promise<void>((resolve) => {
     ctx.ui.custom(
       (tui, _theme, _keybindings, done) => {
-        return createMcpPanel(config, cache, provenanceMap, callbacks, tui, () => {
-          done(undefined);
+        return createMcpPanel(config, cache, provenanceMap, callbacks, tui as { requestRender(): void }, () => {
+          (done as (result?: unknown) => void)(undefined);
           resolve();
         }, {
           authOnly: true,
