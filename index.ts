@@ -25,6 +25,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
   let state: McpExtensionState | null = null;
   let initPromise: Promise<McpExtensionState> | null = null;
   let lifecycleGeneration = 0;
+  let agentapi: AgentAPI | null = null;
 
   async function shutdownState(currentState: McpExtensionState | null, reason: string): Promise<void> {
     if (!currentState) return;
@@ -119,7 +120,9 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       console.error("MCP OAuth initialization failed:", err);
     });
 
-    const promise = initializeMcp(pi, ctx);
+    agentapi = new PiAdapter(pi);
+    const agentctx = adaptPiContext(ctx);
+    const promise = initializeMcp(agentapi, agentctx);
     initPromise = promise;
 
     promise.then(async (nextState) => {
@@ -193,7 +196,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
           await showTools(state, ctx);
           break;
         case "setup": {
-          const result = await openMcpSetup(state, pi, ctx, earlyConfigPath, "setup");
+          const result = await openMcpSetup(state, agentapi!, ctx, earlyConfigPath, "setup");
           if (result?.configChanged) {
             await ctx.reload();
             return;
@@ -213,7 +216,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
         case "":
         default:
           if (ctx.hasUI) {
-            const result = await openMcpPanel(state, pi, ctx, earlyConfigPath);
+            const result = await openMcpPanel(state, agentapi!, ctx, earlyConfigPath);
             if (result?.configChanged) {
               await ctx.reload();
               return;
@@ -249,7 +252,7 @@ export default function mcpAdapter(pi: ExtensionAPI) {
       }
 
       if (!serverName) {
-        await openMcpAuthPanel(state, pi, ctx, earlyConfigPath);
+        await openMcpAuthPanel(state, agentapi!, ctx, earlyConfigPath);
         return;
       }
 

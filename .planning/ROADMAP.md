@@ -42,15 +42,26 @@ Plans:
 Gradually migrate core logic to use generic interfaces.
 
 **Goals:**
-- Replace direct Pi API calls with AgentAPI interface
-- Abstract sampling/elicitation handlers
-- Maintain all existing functionality
+- Migrate init.ts, utils.ts, commands.ts from ExtensionAPI/ExtensionContext to AgentAPI/AgentContext/UISystem
+- Wire index.ts entry point to use PiAdapter internally
+- Maintain backward compatibility — activate signature unchanged
 
 **Deliverables:**
-- Updated init.ts, commands.ts, utils.ts
-- Modified sampling-handler.ts, elicitation-handler.ts
+- `init.ts` — generic AgentAPI + AgentContext based initialization
+- `utils.ts` — AgentAPI-compatible openUrl/openPath
+- `commands.ts` — AgentContext-based command handlers
+- `state.ts` — UISystem-typed ui field
+
+**Plans:** 3 plans
+
+Plans:
+- [x] 03-01-PLAN.md — migrate utils.ts, state.ts, lifecycle.ts to AgentAPI/UISystem
+- [x] 03-02-PLAN.md — wire init.ts + index.ts entry point through PiAdapter
+- [x] 03-03-PLAN.md — migrate commands.ts + panel entry points to AgentContext
 
 ---
+
+### Phase 4: Testing & Verification
 
 ### Phase 4: Testing & Verification
 Comprehensive testing of the universal adapter.

@@ -1,4 +1,4 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { UISystem } from "./interfaces/agent-api.ts";
 import type { ConsentManager } from "./consent-manager.ts";
 import type { McpLifecycleManager } from "./lifecycle.ts";
 import type { McpServerManager } from "./server-manager.ts";
@@ -16,13 +16,8 @@ export interface CompletedUiSession {
 }
 
 export type SendMessageFn = (
-  message: {
-    customType: string;
-    content: Array<{ type: "text"; text: string }>;
-    display?: string;
-    details?: unknown;
-  },
-  options?: { triggerTurn?: boolean }
+  message: unknown,
+  options?: unknown
 ) => void;
 
 export interface McpExtensionState {
@@ -36,6 +31,6 @@ export interface McpExtensionState {
   uiServer: UiServerHandle | null;
   completedUiSessions: CompletedUiSession[];
   openBrowser: (url: string) => Promise<void>;
-  ui?: ExtensionContext["ui"];
+  ui?: UISystem;
   sendMessage?: SendMessageFn;
 }

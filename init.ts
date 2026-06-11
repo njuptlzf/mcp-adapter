@@ -1,6 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata } from "./types.ts";
+import type { AgentAPI, AgentContext } from "./interfaces/agent-api.ts";
 import { existsSync } from "node:fs";
 import { loadMcpConfig } from "./config.ts";
 import { ConsentManager } from "./consent-manager.ts";
@@ -26,10 +26,10 @@ import { getMissingConfiguredDirectToolServers } from "./direct-tools.ts";
 const FAILURE_BACKOFF_MS = 60 * 1000;
 
 export async function initializeMcp(
-  pi: ExtensionAPI,
-  ctx: ExtensionContext
+  agentapi: AgentAPI,
+  ctx: AgentContext
 ): Promise<McpExtensionState> {
-  const configPath = pi.getFlag("mcp-config") as string | undefined;
+  const configPath = agentapi.getFlag("mcp-config") as string | undefined;
   const config = loadMcpConfig(configPath, ctx.cwd);
 
   const manager = new McpServerManager();
@@ -41,7 +41,7 @@ export async function initializeMcp(
       modelRegistry: ctx.modelRegistry,
       getCurrentModel: () => ctx.model,
       getSignal: () => ctx.signal,
-    });
+    } as Parameters<typeof manager.setSamplingConfig>[0]);
   }
   const elicitationEnabled =
     config.settings?.elicitation !== false &&
@@ -49,9 +49,9 @@ export async function initializeMcp(
     typeof (ctx.ui as { form?: unknown }).form === "function";
   if (elicitationEnabled) {
     manager.setElicitationConfig({
-      ui: ctx.ui as any,
+      ui: ctx.ui,
       autoOpenUrls: config.settings?.elicitationAutoOpenUrls === true,
-    });
+    } as Parameters<typeof manager.setElicitationConfig>[0]);
   }
   const lifecycle = new McpLifecycleManager(manager);
   const toolMetadata = new Map<string, ToolMetadata[]>();
@@ -69,9 +69,9 @@ export async function initializeMcp(
     consentManager,
     uiServer: null,
     completedUiSessions: [],
-    openBrowser: (url: string) => openUrl(pi, url, process.env.BROWSER),
+    openBrowser: (url: string) => openUrl(agentapi, url, process.env.BROWSER),
     ui,
-    sendMessage: (message, options) => pi.sendMessage(message as unknown as Parameters<typeof pi.sendMessage>[0], options),
+    sendMessage: (message, options) => agentapi.sendMessage(message, options),
   };
 
   const serverEntries = Object.entries(config.mcpServers);

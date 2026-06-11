@@ -1,31 +1,39 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentAPI } from "./interfaces/agent-api.ts";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import type { McpConfig, ServerEntry } from "./types.ts";
 
-async function execOpen(pi: ExtensionAPI, target: string, browser?: string) {
+interface ExecResult {
+  code: number;
+  stderr?: string;
+}
+
+async function execOpen(agent: AgentAPI, target: string, browser?: string): Promise<ExecResult> {
   const os = platform();
 
   if (os === "darwin") {
-    return browser ? pi.exec("open", ["-a", browser, target]) : pi.exec("open", [target]);
+    return browser ? (await agent.exec("open", ["-a", browser, target])) as ExecResult
+      : (await agent.exec("open", [target])) as ExecResult;
   }
   if (os === "win32") {
     return browser
-      ? pi.exec("cmd", ["/c", "start", "", browser, target])
-      : pi.exec("cmd", ["/c", "start", "", target]);
+      ? (await agent.exec("cmd", ["/c", "start", "", browser, target])) as ExecResult
+      : (await agent.exec("cmd", ["/c", "start", "", target])) as ExecResult;
   }
-  return browser ? pi.exec(browser, [target]) : pi.exec("xdg-open", [target]);
+  return browser
+    ? (await agent.exec(browser, [target])) as ExecResult
+    : (await agent.exec("xdg-open", [target])) as ExecResult;
 }
 
-export async function openUrl(pi: ExtensionAPI, url: string, browser?: string): Promise<void> {
-  const result = await execOpen(pi, url, browser);
+export async function openUrl(agent: AgentAPI, url: string, browser?: string): Promise<void> {
+  const result = await execOpen(agent, url, browser);
   if (result.code !== 0) {
     throw new Error(result.stderr || `Failed to open browser (exit code ${result.code})`);
   }
 }
 
-export async function openPath(pi: ExtensionAPI, targetPath: string): Promise<void> {
-  const result = await execOpen(pi, targetPath);
+export async function openPath(agent: AgentAPI, targetPath: string): Promise<void> {
+  const result = await execOpen(agent, targetPath);
   if (result.code !== 0) {
     throw new Error(result.stderr || `Failed to open path (exit code ${result.code})`);
   }

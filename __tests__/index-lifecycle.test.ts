@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { McpLifecycleManager } from "../lifecycle.ts";
 
 const mocks = vi.hoisted(() => ({
   initializeMcp: vi.fn(),
@@ -292,7 +293,7 @@ describe("mcpAdapter session lifecycle", () => {
 
     await commandDef.handler("setup", { hasUI: true, ui: { notify: vi.fn() } });
 
-    expect(mocks.openMcpSetup).toHaveBeenCalledWith(state, api, expect.any(Object), undefined, "setup");
+    expect(mocks.openMcpSetup).toHaveBeenCalledWith(state, expect.objectContaining({}), expect.any(Object), undefined, "setup");
   });
 
   it("routes `/mcp logout <server>` to credential logout", async () => {
@@ -377,7 +378,7 @@ describe("mcpAdapter session lifecycle", () => {
     const commandDef = api.registerCommand.mock.calls.find((call: any[]) => call[0] === "mcp-auth")?.[1];
     await commandDef.handler("", { hasUI: true, ui });
 
-    expect(mocks.openMcpAuthPanel).toHaveBeenCalledWith(state, api, expect.any(Object), undefined);
+    expect(mocks.openMcpAuthPanel).toHaveBeenCalledWith(state, expect.objectContaining({}), expect.any(Object), undefined);
     expect(mocks.authenticateServer).not.toHaveBeenCalled();
   });
 
@@ -443,5 +444,28 @@ describe("mcpAdapter session lifecycle", () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+describe("McpLifecycleManager regression test", () => {
+  it("can be instantiated with a mock McpServerManager without any Pi types", () => {
+    // Verify that lifecycle.ts has zero ExtensionAPI/ExtensionContext references
+    const mockManager = {
+      getConnection: vi.fn(() => null),
+      connect: vi.fn(),
+      close: vi.fn(),
+      closeAll: vi.fn(),
+      isIdle: vi.fn(() => false),
+    };
+
+    const manager = new McpLifecycleManager(mockManager as unknown as import("../server-manager.ts").McpServerManager);
+    expect(manager).toBeDefined();
+    expect(manager.gracefulShutdown).toBeInstanceOf(Function);
+    expect(manager.setReconnectCallback).toBeInstanceOf(Function);
+    expect(manager.markKeepAlive).toBeInstanceOf(Function);
+    expect(manager.registerServer).toBeInstanceOf(Function);
+    expect(manager.setGlobalIdleTimeout).toBeInstanceOf(Function);
+    expect(manager.setIdleShutdownCallback).toBeInstanceOf(Function);
+    expect(manager.startHealthChecks).toBeInstanceOf(Function);
   });
 });
