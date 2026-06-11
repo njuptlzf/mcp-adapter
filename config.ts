@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { getAgentPath } from "./agent-dir.ts";
+import { resolveAgentGlobalConfigPath, DEFAULT_AGENT_RESOLVER, type AgentPathResolver } from "./interfaces/agent-paths.ts";
 import type { McpConfig, ServerEntry, McpSettings, ImportKind, ServerProvenance } from "./types.ts";
 
 const GENERIC_GLOBAL_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
@@ -90,7 +90,14 @@ export interface ConfigWritePreview {
 }
 
 export function getPiGlobalConfigPath(overridePath?: string): string {
-  return overridePath ? resolve(overridePath) : getAgentPath("mcp.json");
+  return resolveAgentGlobalConfigPath(DEFAULT_AGENT_RESOLVER, overridePath);
+}
+
+export function getAgentGlobalConfigPath(
+  resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER,
+  overridePath?: string,
+): string {
+  return resolveAgentGlobalConfigPath(resolver, overridePath);
 }
 
 export function getGenericGlobalConfigPath(): string {
@@ -192,10 +199,11 @@ export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpCo
   return config;
 }
 
-function getConfigSources(overridePath?: string, cwd = process.cwd()): ConfigSourceSpec[] {
-  const userPath = getPiGlobalConfigPath(overridePath);
+function getConfigSources(overridePath?: string, cwd = process.cwd(), resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER): ConfigSourceSpec[] {
+  const userPath = resolveAgentGlobalConfigPath(resolver, overridePath);
   const projectPath = getProjectConfigPath(cwd);
-  const projectPiPath = getProjectPiConfigPath(cwd);
+  const projectPiConfigName = resolver.projectConfigName?.() ?? PROJECT_PI_CONFIG_NAME;
+  const projectPiPath = resolve(cwd, projectPiConfigName);
   const sources: ConfigSourceSpec[] = [];
 
   if (GENERIC_GLOBAL_CONFIG_PATH !== userPath) {

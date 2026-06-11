@@ -27,7 +27,7 @@ Create a universal adapter architecture:
 
 ## Current State
 
-**Phase 01 (universal-adapter) complete** — Generic `AgentAPI` and `UISystem` interfaces defined, `PiAdapter` class wrapping `ExtensionAPI` with `adaptPiContext` conversion, MAPPING.md documentation, `pi-coding-agent` moved to optional `peerDependency`, `pi-ai`/`pi-tui` to `optionalDependencies`. 22 new tests passing. `mcpAdapter` default export unchanged — full backward compat preserved.
+**Phase 02 (dependency-restructuring) complete** — `AgentPathResolver` contract in `interfaces/agent-paths.ts` (with `createPiResolver` factory, `DEFAULT_AGENT_RESOLVER`, `resolveAgentGlobalConfigPath`); `config.ts` rewired to thread resolver through `getConfigSources` while `getPiGlobalConfigPath` remains as backward-compat wrapper. 7 new tests (4 unit + 3 integration), full suite 349/351 pass (2 pre-existing `interactive-visualizer-server` failures unrelated). New exports surfaced in `index.ts`: `DEFAULT_AGENT_RESOLVER`, `createPiResolver`, `resolveAgentGlobalConfigPath`, `AgentPathResolver`, `AgentId`. Pi users see zero behavior change.
 
 ## Validated Requirements
 
@@ -35,9 +35,9 @@ Create a universal adapter architecture:
 - REQ-02 (UI System Interface) — Validated in Phase 01: `interfaces/agent-api.ts`
 - REQ-03 (Pi Adapter Implementation) — Validated in Phase 01: `adapters/pi-adapter.ts`
 - REQ-04 (Backward Compatibility) — Validated in Phase 01: `index.ts` default `mcpAdapter` unchanged, `piMcpAdapter` alias added
-- REQ-05 (Dependency Restructuring) — Validated in Phase 01: `package.json` peer/optional deps
+- REQ-05 (Dependency Restructuring) — Validated in Phase 01: `package.json` peer/optional deps; Phase 02: `AgentPathResolver` abstraction lets non-Pi agents supply their own global config path
 - REQ-06 (Documentation) — Validated in Phase 01: `MAPPING.md`
-- REQ-07 (Testing) — Validated in Phase 01: `__tests__/pi-adapter.test.ts` + `__tests__/integration.test.ts`
+- REQ-07 (Testing) — Validated in Phase 01: `__tests__/pi-adapter.test.ts` + `__tests__/integration.test.ts`; Phase 02: `__tests__/agent-paths.test.ts` + `__tests__/agent-paths-integration.test.ts`
 
 ---
 Last updated: 2026-06-10
