@@ -25,11 +25,25 @@ Create a universal adapter architecture:
 - **Easy upstream updates**: Clean separation allows merging upstream changes without conflicts
 - **Gradual migration**: Existing code works as-is, new features use generic interfaces
 
+## Current Milestone: v2.0 — Multi-Agent Adapter Completion
+
+**Goal:** Complete "for every agent" transformation — decouple all remaining Pi type bindings, add at least one non-Pi agent adapter, rebuild integration test as agent-agnostic, and update `README.md` to clearly communicate that the project remains fully Pi-compatible while supporting every agent.
+
+**Target phases:**
+- Phase 5 — Type Decoupling & Entry Point Refactor: Replace Pi types in 6 source files, add agent-agnostic entry point
+- Phase 6 — Second Agent Adapter: Implement non-Pi AgentAPI adapter, prove portability
+- Phase 7 — Integration Test Rebuild: Rebuild skill as "for every agent" with per-adapter verification; revise `README.md` to highlight Pi compatibility + universal agent support + integration test verification results
+
 ## Current State
 
-**Phase 03 (core-logic-abstraction) complete** — `utils.ts`/`state.ts`/`lifecycle.ts`/`init.ts`/`commands.ts`/`mcp-panel.ts`/`mcp-setup-panel.ts` migrated from `ExtensionAPI`/`ExtensionContext` to generic `AgentAPI`/`AgentContext`/`UISystem`; `index.ts` creates `PiAdapter` and `adaptPiContext` internally at entry point. `activate` signature unchanged for Pi backward compat. Full suite 350/352 pass (2 pre-existing `interactive-visualizer-server` failures unrelated).
+**Milestone v1.0 complete (4 phases, 7 plans)** — Internal interfaces abstracted (AgentAPI/UISystem/PiAdapter), init.ts/core logic migrated to AgentAPI. However:
+- `index.ts` still accepts `ExtensionAPI` (blocks non-Pi agents)
+- 6 source files still import Pi types (`AgentToolResult`, `ExtensionUIContext`, etc.)
+- Only one adapter implementation (`PiAdapter`) in `adapters/`
+- `agent-dir.ts` hardcodes `PI_CODING_AGENT_DIR`
+- Integration test skill only validates against Pi mock
 
-**Phase 02 (dependency-restructuring) complete** — `AgentPathResolver` contract in `interfaces/agent-paths.ts` (with `createPiResolver` factory, `DEFAULT_AGENT_RESOLVER`, `resolveAgentGlobalConfigPath`); `config.ts` rewired to thread resolver through `getConfigSources` while `getPiGlobalConfigPath` remains as backward-compat wrapper. 7 new tests (4 unit + 3 integration), full suite 349/351 pass (2 pre-existing `interactive-visualizer-server` failures unrelated). New exports surfaced in `index.ts`: `DEFAULT_AGENT_RESOLVER`, `createPiResolver`, `resolveAgentGlobalConfigPath`, `AgentPathResolver`, `AgentId`. Pi users see zero behavior change.
+Test suite: 350/352 pass.
 
 ## Validated Requirements
 
@@ -41,5 +55,21 @@ Create a universal adapter architecture:
 - REQ-06 (Documentation) — Validated in Phase 01: `MAPPING.md`
 - REQ-07 (Testing) — Validated in Phase 01: `__tests__/pi-adapter.test.ts` + `__tests__/integration.test.ts`; Phase 02: `__tests__/agent-paths.test.ts` + `__tests__/agent-paths-integration.test.ts`; Phase 03: regression test for McpLifecycleManager Pi-coupling check
 
+## Evolution
+
+This document evolves at phase transitions and milestone boundaries.
+
+**After each phase transition:**
+1. Requirements invalidated? → Move to Out of Scope with reason
+2. Requirements validated? → Move to Validated with phase reference
+3. New requirements emerged? → Add to Active
+4. Decisions to log? → Add to Key Decisions
+
+**After each milestone:**
+1. Full review of all sections
+2. Core Value check
+3. Audit Out of Scope
+4. Update Context with current state
+
 ---
-Last updated: 2026-06-11
+Last updated: 2026-06-15

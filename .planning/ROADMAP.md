@@ -80,3 +80,90 @@ Comprehensive testing of the universal adapter.
 Plans:
 - [x] 04-01-PLAN.md — mock adapter + contract tests for universal adapter pattern
 - [x] 04-02-PLAN.md — configure coverage reporting, generate coverage report
+
+---
+
+### Phase 5: Type Decoupling & Entry Point Refactor
+
+Decouple all remaining Pi type imports across 6 source files, create agent-agnostic entry point.
+
+**Goals:**
+- Replace `AgentToolResult`, `ExtensionUIContext`, `ExtensionContext`, `ToolInfo` imports with generic equivalents from interfaces/agent-api.ts
+- Extract Pi-specific sampling handler logic (Model, complete, AssistantMessage) into optional wrapper
+- Replace `@earendil-works/pi-tui` Text dependency with generic rendering interface
+- Replace `PI_CODING_AGENT_DIR` with `AgentPathResolver` in agent-dir.ts
+- Create new agent-agnostic entry point accepting `AgentAPI`
+- Refactor existing `mcpAdapter(pi: ExtensionAPI)` as Pi-specific wrapper
+
+**Requirements:** DECOUPLE-01 through DECOUPLE-07, ENTRY-01 through ENTRY-03
+
+**Affected files:**
+- `proxy-modes.ts` — AgentToolResult, ToolInfo
+- `direct-tools.ts` — AgentToolResult, AgentToolUpdateCallback, ExtensionContext
+- `tool-result-renderer.ts` — AgentToolResult, Text (pi-tui)
+- `sampling-handler.ts` — ExtensionUIContext, Model, complete (pi-ai)
+- `elicitation-handler.ts` — ExtensionUIContext
+- `index.ts` — ExtensionAPI, ToolInfo
+- `agent-dir.ts` — PI_CODING_AGENT_DIR
+
+---
+
+### Phase 6: Second Agent Adapter
+
+Implement a non-Pi AgentAPI adapter to prove interface portability.
+
+**Goals:**
+- Implement QoderAdapter (or equivalent) in adapters/ implementing AgentAPI
+- Implement corresponding AgentPathResolver
+- Integration test proving initializeMcp() works with the new adapter
+- Verify 10 demo MCP servers function through the new adapter
+
+**Requirements:** ADAPTER-01 through ADAPTER-03
+
+**Deliverables:**
+- `adapters/qoder-adapter.ts` (or equivalent)
+- Corresponding AgentPathResolver
+- New integration test
+
+---
+
+### Phase 7: Integration Test Rebuild
+
+Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verification.
+
+**Goals:**
+- Capability Gate runs FIRST, clearly reports agent environment and available paths
+- Replace Pi-specific MockAgent with generic AgentAPI mock
+- Add per-adapter contract verification layer
+- Test skill clearly states "Agent X supports Path Y. Agent Z not yet supported"
+- Rebuild SKILL.md Phase 4 for any supported agent
+- Update `README.md` to communicate Pi compatibility + universal agent support and highlight integration test verification results
+
+**Requirements:** TEST-01 through TEST-05, DOC-01 through DOC-03
+
+**Deliverables:**
+- Updated `skills/mcp-adapter-test/SKILL.md`
+- New/updated test infrastructure for generic AgentAPI mocking
+- Per-adapter contract test framework
+- Revised `README.md` with compatibility/verification section
+
+---
+
+### Phase 8: Upstream Merge Conflict Resolution
+
+Establish fork-maintainer workflow for merging upstream features and bugfixes from https://github.com/nicobailon/pi-mcp-adapter.
+
+**Goals:**
+- Create `UPSTREAM-CHANGES.md` manifest tracking every file diverged from upstream with rationale
+- Create `skills/upstream-merge/SKILL.md` — agent skill for automated conflict resolution
+- Define conflict resolution rules: adapter files always kept, type-replacement changes preferred, upstream bugfixes accepted if Pi-coupling-free
+- Guide Phase 5-6 implementation to minimize source edits via adapter/wrapper patterns
+
+**Requirements:** UPSTREAM-01 through UPSTREAM-04
+
+**Deliverables:**
+- `UPSTREAM-CHANGES.md` — change manifest for all diverged files
+- `skills/upstream-merge/SKILL.md` — merge conflict resolution skill
+- Updated Phase 5-6 implementation patterns to prefer wrappers over direct edits
+
+**Plans:** — (to be planned with `/gsd-plan-phase 8`)
