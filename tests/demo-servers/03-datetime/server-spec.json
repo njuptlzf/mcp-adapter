@@ -1,0 +1,64 @@
+{
+  "name": "datetime",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "now",
+      "description": "Get current date and time",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "format": { "type": "string", "enum": ["iso", "unix", "readable"], "description": "Output format", "default": "iso" }
+        }
+      }
+    },
+    {
+      "name": "format",
+      "description": "Format a date",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": ["number", "string"], "description": "Unix timestamp or ISO date string" },
+          "format": { "type": "string", "enum": ["iso", "unix", "readable", "date", "time"], "description": "Output format", "default": "iso" }
+        },
+        "required": ["timestamp"]
+      }
+    },
+    {
+      "name": "parse",
+      "description": "Parse date string to timestamp",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dateString": { "type": "string", "description": "Date string to parse" }
+        },
+        "required": ["dateString"]
+      }
+    },
+    {
+      "name": "diff",
+      "description": "Calculate difference between two dates",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "from": { "type": ["number", "string"], "description": "Start date (Unix timestamp or ISO string)" },
+          "to": { "type": ["number", "string"], "description": "End date (Unix timestamp or ISO string)" },
+          "unit": { "type": "string", "enum": ["ms", "s", "m", "h", "d"], "description": "Unit for difference", "default": "s" }
+        },
+        "required": ["from", "to"]
+      }
+    },
+    {
+      "name": "add_days",
+      "description": "Add days to a date",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date": { "type": ["number", "string"], "description": "Base date (Unix timestamp or ISO string)" },
+          "days": { "type": "number", "description": "Number of days to add (can be negative)" }
+        },
+        "required": ["date", "days"]
+      }
+    }
+  ]
+}

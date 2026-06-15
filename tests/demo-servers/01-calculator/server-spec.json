@@ -1,0 +1,77 @@
+{
+  "name": "calculator",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "add",
+      "description": "Add two numbers together",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "First operand" },
+          "b": { "type": "number", "description": "Second operand" }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "subtract",
+      "description": "Subtract second number from first",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "First operand" },
+          "b": { "type": "number", "description": "Second operand" }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "multiply",
+      "description": "Multiply two numbers",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "First operand" },
+          "b": { "type": "number", "description": "Second operand" }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "divide",
+      "description": "Divide first number by second",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": { "type": "number", "description": "Dividend" },
+          "b": { "type": "number", "description": "Divisor (must not be zero)" }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "power",
+      "description": "Raise base to exponent",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "base": { "type": "number", "description": "Base" },
+          "exponent": { "type": "number", "description": "Exponent" }
+        },
+        "required": ["base", "exponent"]
+      }
+    },
+    {
+      "name": "sqrt",
+      "description": "Calculate square root",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value (must be non-negative)" }
+        },
+        "required": ["value"]
+      }
+    }
+  ]
+}

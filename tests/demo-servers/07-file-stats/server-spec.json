@@ -1,0 +1,77 @@
+{
+  "name": "file-stats",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "line_count",
+      "description": "Count lines in a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" }
+        },
+        "required": ["filePath"]
+      }
+    },
+    {
+      "name": "word_count",
+      "description": "Count words in a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" }
+        },
+        "required": ["filePath"]
+      }
+    },
+    {
+      "name": "char_count",
+      "description": "Count characters in a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" },
+          "includeSpaces": { "type": "boolean", "description": "Whether to count spaces", "default": true }
+        },
+        "required": ["filePath"]
+      }
+    },
+    {
+      "name": "find_pattern",
+      "description": "Find pattern in file content",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" },
+          "pattern": { "type": "string", "description": "Text or regex pattern to search for" },
+          "regex": { "type": "boolean", "description": "Whether pattern is a regex", "default": false }
+        },
+        "required": ["filePath", "pattern"]
+      }
+    },
+    {
+      "name": "head",
+      "description": "Get first N lines of a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" },
+          "lines": { "type": "number", "description": "Number of lines to return" }
+        },
+        "required": ["filePath", "lines"]
+      }
+    },
+    {
+      "name": "tail",
+      "description": "Get last N lines of a file",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "filePath": { "type": "string", "description": "Path to the file" },
+          "lines": { "type": "number", "description": "Number of lines to return" }
+        },
+        "required": ["filePath", "lines"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+{
+  "name": "string-utils",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "upper",
+      "description": "Convert string to uppercase",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "lower",
+      "description": "Convert string to lowercase",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "trim",
+      "description": "Trim whitespace from both ends",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "split",
+      "description": "Split string by delimiter",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" },
+          "delimiter": { "type": "string", "description": "Delimiter to split by" }
+        },
+        "required": ["text", "delimiter"]
+      }
+    },
+    {
+      "name": "replace",
+      "description": "Replace substring in string",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" },
+          "search": { "type": "string", "description": "Substring to replace" },
+          "replace": { "type": "string", "description": "Replacement string" }
+        },
+        "required": ["text", "search", "replace"]
+      }
+    },
+    {
+      "name": "reverse",
+      "description": "Reverse a string",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "count_chars",
+      "description": "Count characters in string",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Input string" },
+          "include_spaces": { "type": "boolean", "description": "Whether to count spaces", "default": true }
+        },
+        "required": ["text"]
+      }
+    }
+  ]
+}
