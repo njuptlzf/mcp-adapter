@@ -356,27 +356,31 @@ export function createMcpAdapter(
 
 **If this table is empty:** N/A — 本阶段存在若干低风险的实现选择型假设。
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Sampling provider 的接口粒度**
    - What we know: 需要把 `complete`、`resolveModel`、`confirm` 抽象出来，Pi 侧实现。
    - What's unclear: `resolveModel` 是否应返回 Pi `Model<Api>` 的通用子集，还是完全隐藏 Pi 类型？
    - Recommendation: 返回完全隐藏 Pi 类型的 `SamplingModel`（仅 provider/id/name），Pi provider 内部持有 Pi `Model` 引用，避免把 `Api` 泛型泄漏到核心。
+   - **RESOLVED:** `SamplingProvider` returns `SamplingModel` (plain object with provider/id/name); Pi implementation internally maps to Pi `Model<Api>`.
 
 2. **Renderer 抽象层级**
    - What we know: `renderMcpToolResult` 与 `renderMcpProxyToolCall` 当前返回 `Text`。
    - What's unclear: 是否应让核心 renderer 返回 `string`，还是返回 `{ text: string }` 以便未来扩展 ANSI/样式元数据？
    - Recommendation: 先返回 `string` 以最小化改动；如需样式元数据，后续可在 Pi renderer bridge 中扩展，不影响核心。
+   - **RESOLVED:** Core renderer functions return `string`; Pi-specific `adapters/pi-renderer.ts` wraps the string into `pi-tui.Text`.
 
 3. **`agent-dir.ts` 的通用化边界**
    - What we know: `getAgentPath` 被 `createPiResolver` 用作 Pi 默认路径源。
    - What's unclear: 是否需要为 `agent-dir.ts` 引入 `AgentPathResolver` 参数，还是保持其为 Pi 默认实现、由其他 agent 提供自己的 resolver？
    - Recommendation: 保持 `agent-dir.ts` 为 Pi 默认实现，仅把 env 变量名扩展为 `MCP_AGENT_DIR` + `PI_CODING_AGENT_DIR` fallback；非 Pi agent 通过 `interfaces/agent-paths.ts` 提供自己的 resolver。
+   - **RESOLVED:** `agent-dir.ts` keeps its current Pi-default implementation and adds `MCP_AGENT_DIR` env variable with `PI_CODING_AGENT_DIR` fallback. Non-Pi agents implement their own `AgentPathResolver` via `interfaces/agent-paths.ts`.
 
 4. **测试覆盖范围**
    - What we know: 现有测试对 `sampling-handler.ts` 和 `elicitation-handler.ts` 依赖 Pi 类型/函数有 mock。
    - What's unclear: 是否需要在 Phase 5 新增 `createMcpAdapter` 的集成测试，还是留给 Phase 7？
    - Recommendation: Phase 5 至少新增 `__tests__/entry.test.ts` 验证通用入口注册行为；更完整的跨 agent 测试留给 Phase 7。
+   - **RESOLVED:** Phase 5 adds `__tests__/entry.test.ts` to verify `createMcpAdapter` registration behavior. Cross-agent per-adapter verification remains in Phase 7.
 
 ## Environment Availability
 
