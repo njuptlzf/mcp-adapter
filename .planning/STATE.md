@@ -1,62 +1,49 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
+milestone: v2.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 3 complete, ready to plan Phase 4
-last_updated: "2026-06-11T12:21:16.257Z"
+status: planning
+stopped_at: Phase 5 context gathered
+last_updated: "2026-06-15T07:25:59.921Z"
+last_activity: 2026-06-15 — Milestone v2.0 initialized
 progress:
-  total_phases: 4
+  total_phases: 8
   completed_phases: 4
   total_plans: 7
   completed_plans: 7
-  percent: 100
+  percent: 50
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-11T10:46:00+08:00
-**Status:** Milestone complete
+**Last updated:** 2026-06-15T12:00:00+08:00
+**Status:** Planning — Milestone v2.0 started
+
+## Current Position
+
+Phase: Requirements defined (Phase 5-7 pending)
+Plan: —
+Status: Defining requirements complete, ready for phase planning
+Last activity: 2026-06-15 — Milestone v2.0 initialized
 
 ## Recent Progress
 
-### Phase 3: Core Logic Abstraction (complete)
+### Milestone v1.0 — Complete (4 phases, 7 plans)
 
-- 03-01: Migrated `utils.ts` / `state.ts` / `lifecycle.ts` to `AgentAPI` / `UISystem`
-- 03-02: Wired `init.ts` + `index.ts` entry point through `PiAdapter`
-- 03-03: Migrated `commands.ts` + panel entry points to `AgentContext`; fixed `UISystem.custom` renderer type mismatch
-- Test suite: 350/352 pass (2 pre-existing `interactive-visualizer-server` failures unrelated)
-
-### Phase 2: Dependency Restructuring (complete)
-
-- 02-01: Introduced `AgentPathResolver` contract; rewired `config.ts`; added non-Pi integration test
-- New module `interfaces/agent-paths.ts` with `createPiResolver`, `DEFAULT_AGENT_RESOLVER`, `resolveAgentGlobalConfigPath`
-- Test suite: 349/351 pass
-
-### Phase 1: Foundation - Universal Interfaces (complete)
-
-- 01-01: Established `AgentAPI` / `UISystem` interfaces; `PiAdapter` wrapping `ExtensionAPI`; `MAPPING.md`
+- Phase 1: Foundation — AgentAPI/UISystem interfaces, PiAdapter, MAPPING.md
+- Phase 2: Dependency Restructuring — AgentPathResolver, config.ts rewired
+- Phase 3: Core Logic Abstraction — init.ts/commands.ts migrated to AgentAPI
+- Phase 4: Testing & Verification — mock adapter + contract tests + coverage
 
 ## Next Actions
 
-**Phase 4 - Testing & Verification:** Planned (2 plans)
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Ready to plan
 
-Goals from ROADMAP:
+Requirements: DECOUPLE-01~07, ENTRY-01~03
+Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, sampling-handler.ts, elicitation-handler.ts, index.ts, agent-dir.ts
 
-- Unit tests for all adapter functions
-- Integration tests for backward compatibility
-- Test against multiple agent scenarios
-
-Planned deliverables:
-
-- `__tests__/pi-adapter.test.ts` (exists)
-- `__tests__/integration.test.ts` (exists)
-- `__tests__/mock-adapter.test.ts` (new)
-- `__tests__/adapter-contract.test.ts` (new)
-- Test coverage reports
-
-Ready for execution: `/gsd-execute-phase 4`
+Run `/gsd-plan-phase 5` to create detailed execution plan.
 
 ---
 
@@ -100,5 +87,5 @@ Ready for execution: `/gsd-execute-phase 4`
 
 ## Session Tracking
 
-**Last session:** 2026-06-11
-**Stopped at:** Phase 3 complete, ready to plan Phase 4
+**Last session:** 2026-06-15T07:25:59.913Z
+**Stopped at:** Phase 5 context gathered
