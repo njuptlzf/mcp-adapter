@@ -90,6 +90,10 @@ No new threat surface introduced beyond what was captured in the plan's `<threat
 
 None. All sampling abstractions are wired to real implementations.
 
+## Out-of-Scope Discoveries
+
+- `__tests__/interactive-visualizer-server.test.ts` fails because `examples/interactive-visualizer/dist/app.html` and `dist/server.js` are missing. This is unrelated to the 05-03 changes and was not fixed. See `deferred-items.md` in this phase directory.
+
 ## Self-Check: PASSED
 
 - [x] `interfaces/sampling.ts` exists
