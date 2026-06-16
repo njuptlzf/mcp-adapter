@@ -3,15 +3,18 @@
 ## Phases
 
 ### Phase 1: Foundation - Universal Interfaces
+
 Establish the core interface abstractions and Pi adapter implementation.
 
 **Goals:**
+
 - AgentAPI interface with all required methods
 - UISystem interface with optional UI capabilities  
 - PiAdapter implementation wrapping ExtensionAPI
 - MAPPING.md documentation
 
 **Deliverables:**
+
 - `interfaces/agent-api.ts` - Generic interfaces
 - `adapters/pi-adapter.ts` - Pi implementation
 - `MAPPING.md` - Interface mapping documentation
@@ -19,14 +22,17 @@ Establish the core interface abstractions and Pi adapter implementation.
 ---
 
 ### Phase 2: Dependency Restructuring
+
 Restructure package.json to support universal architecture.
 
 **Goals:**
+
 - Move Pi packages to optional peer dependencies
 - Add config path abstraction
 - Verify backward compatibility
 
 **Deliverables:**
+
 - Updated package.json (done in Phase 1)
 - `interfaces/agent-paths.ts` — AgentPathResolver contract + Pi default
 - Rewired `config.ts` using resolver while preserving Pi behavior
@@ -34,19 +40,23 @@ Restructure package.json to support universal architecture.
 **Plans:** 1 plan
 
 Plans:
+
 - [x] 02-01-PLAN.md — introduce AgentPathResolver, rewire config.ts, add non-Pi integration test
 
 ---
 
 ### Phase 3: Core Logic Abstraction
+
 Gradually migrate core logic to use generic interfaces.
 
 **Goals:**
+
 - Migrate init.ts, utils.ts, commands.ts from ExtensionAPI/ExtensionContext to AgentAPI/AgentContext/UISystem
 - Wire index.ts entry point to use PiAdapter internally
 - Maintain backward compatibility — activate signature unchanged
 
 **Deliverables:**
+
 - `init.ts` — generic AgentAPI + AgentContext based initialization
 - `utils.ts` — AgentAPI-compatible openUrl/openPath
 - `commands.ts` — AgentContext-based command handlers
@@ -55,6 +65,7 @@ Gradually migrate core logic to use generic interfaces.
 **Plans:** 3 plans
 
 Plans:
+
 - [x] 03-01-PLAN.md — migrate utils.ts, state.ts, lifecycle.ts to AgentAPI/UISystem
 - [x] 03-02-PLAN.md — wire init.ts + index.ts entry point through PiAdapter
 - [x] 03-03-PLAN.md — migrate commands.ts + panel entry points to AgentContext
@@ -66,11 +77,13 @@ Plans:
 Comprehensive testing of the universal adapter.
 
 **Goals:**
+
 - Unit tests for all adapter functions
 - Integration tests for backward compatibility
 - Test against multiple agent scenarios
 
 **Deliverables:**
+
 - `__tests__/pi-adapter.test.ts`
 - `__tests__/integration.test.ts`
 - Test coverage reports
@@ -78,6 +91,7 @@ Comprehensive testing of the universal adapter.
 **Plans:** 2 plans
 
 Plans:
+
 - [x] 04-01-PLAN.md — mock adapter + contract tests for universal adapter pattern
 - [x] 04-02-PLAN.md — configure coverage reporting, generate coverage report
 
@@ -88,6 +102,7 @@ Plans:
 Decouple all remaining Pi type imports across 6 source files, create agent-agnostic entry point.
 
 **Goals:**
+
 - Replace `AgentToolResult`, `ExtensionUIContext`, `ExtensionContext`, `ToolInfo` imports with generic equivalents from interfaces/agent-api.ts
 - Extract Pi-specific sampling handler logic (Model, complete, AssistantMessage) into optional wrapper
 - Replace `@earendil-works/pi-tui` Text dependency with generic rendering interface
@@ -98,6 +113,7 @@ Decouple all remaining Pi type imports across 6 source files, create agent-agnos
 **Requirements:** DECOUPLE-01 through DECOUPLE-07, ENTRY-01 through ENTRY-03
 
 **Affected files:**
+
 - `proxy-modes.ts` — AgentToolResult, ToolInfo
 - `direct-tools.ts` — AgentToolResult, AgentToolUpdateCallback, ExtensionContext
 - `tool-result-renderer.ts` — AgentToolResult, Text (pi-tui)
@@ -106,9 +122,10 @@ Decouple all remaining Pi type imports across 6 source files, create agent-agnos
 - `index.ts` — ExtensionAPI, ToolInfo
 - `agent-dir.ts` — PI_CODING_AGENT_DIR
 
-**Plans:** 5 plans
+**Plans:** 6/6 plans complete
 
 Plans:
+
 - [x] 05-00-PLAN.md — Wave 0 stubs: Pi peer type declarations + missing test file + validation update
 - [x] 05-01-PLAN.md — localize McpToolResult and decouple proxy-modes.ts / direct-tools.ts
 - [x] 05-02-PLAN.md — add MCP_AGENT_DIR fallback in agent-dir.ts and verify integration tests
@@ -123,6 +140,7 @@ Plans:
 Implement a non-Pi AgentAPI adapter to prove interface portability.
 
 **Goals:**
+
 - Implement QoderAdapter (or equivalent) in adapters/ implementing AgentAPI
 - Implement corresponding AgentPathResolver
 - Integration test proving initializeMcp() works with the new adapter
@@ -131,6 +149,7 @@ Implement a non-Pi AgentAPI adapter to prove interface portability.
 **Requirements:** ADAPTER-01 through ADAPTER-03
 
 **Deliverables:**
+
 - `adapters/qoder-adapter.ts` (or equivalent)
 - Corresponding AgentPathResolver
 - New integration test
@@ -142,6 +161,7 @@ Implement a non-Pi AgentAPI adapter to prove interface portability.
 Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verification.
 
 **Goals:**
+
 - Capability Gate runs FIRST, clearly reports agent environment and available paths
 - Replace Pi-specific MockAgent with generic AgentAPI mock
 - Add per-adapter contract verification layer
@@ -152,6 +172,7 @@ Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verificati
 **Requirements:** TEST-01 through TEST-05, DOC-01 through DOC-03
 
 **Deliverables:**
+
 - Updated `skills/mcp-adapter-test/SKILL.md`
 - New/updated test infrastructure for generic AgentAPI mocking
 - Per-adapter contract test framework
@@ -164,6 +185,7 @@ Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verificati
 Establish fork-maintainer workflow for merging upstream features and bugfixes from https://github.com/nicobailon/pi-mcp-adapter.
 
 **Goals:**
+
 - Create `UPSTREAM-CHANGES.md` manifest tracking every file diverged from upstream with rationale
 - Create `skills/upstream-merge/SKILL.md` — agent skill for automated conflict resolution
 - Define conflict resolution rules: adapter files always kept, type-replacement changes preferred, upstream bugfixes accepted if Pi-coupling-free
@@ -172,6 +194,7 @@ Establish fork-maintainer workflow for merging upstream features and bugfixes fr
 **Requirements:** UPSTREAM-01 through UPSTREAM-04
 
 **Deliverables:**
+
 - `UPSTREAM-CHANGES.md` — change manifest for all diverged files
 - `skills/upstream-merge/SKILL.md` — merge conflict resolution skill
 - Updated Phase 5-6 implementation patterns to prefer wrappers over direct edits
