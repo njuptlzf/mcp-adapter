@@ -10,6 +10,7 @@ import {
 import { getAgentGlobalConfigPath } from "../config.ts";
 
 describe("agent path resolution integration", () => {
+  const originalMcpDir = process.env.MCP_AGENT_DIR;
   const originalPiDir = process.env.PI_CODING_AGENT_DIR;
 
   beforeEach(() => {
@@ -17,6 +18,11 @@ describe("agent path resolution integration", () => {
   });
 
   afterEach(() => {
+    if (originalMcpDir === undefined) {
+      delete process.env.MCP_AGENT_DIR;
+    } else {
+      process.env.MCP_AGENT_DIR = originalMcpDir;
+    }
     if (originalPiDir === undefined) {
       delete process.env.PI_CODING_AGENT_DIR;
     } else {
@@ -29,8 +35,17 @@ describe("agent path resolution integration", () => {
     expect((mod as unknown as { getConfigSources?: unknown }).getConfigSources).toBeUndefined();
   });
 
-  it("default resolver honors PI_CODING_AGENT_DIR and returns the agent-specific path", () => {
+  it("default resolver honors MCP_AGENT_DIR and returns the agent-specific path", () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), "mcp-agent-paths-"));
+    process.env.MCP_AGENT_DIR = tmpRoot;
+    const expected = resolve(tmpRoot, "mcp.json");
+    expect(getAgentGlobalConfigPath()).toBe(expected);
+    expect(resolveAgentGlobalConfigPath(DEFAULT_AGENT_RESOLVER)).toBe(expected);
+  });
+
+  it("default resolver falls back to PI_CODING_AGENT_DIR when MCP_AGENT_DIR is unset", () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), "pi-mcp-agent-paths-"));
+    delete process.env.MCP_AGENT_DIR;
     process.env.PI_CODING_AGENT_DIR = tmpRoot;
     const expected = resolve(tmpRoot, "mcp.json");
     expect(getAgentGlobalConfigPath()).toBe(expected);
