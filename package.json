@@ -86,6 +86,7 @@
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.2.2",
     "@modelcontextprotocol/sdk": "^1.25.1",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.3",
     "open": "^10.2.0",
     "recheck": "^4.5.0",
     "typebox": "^1.1.24",
