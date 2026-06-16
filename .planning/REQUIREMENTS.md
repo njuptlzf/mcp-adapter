@@ -63,7 +63,7 @@
 
 - [ ] **ADAPTER-01**: Implement at least one non-Pi `AgentAPI` adapter (e.g., QoderAdapter) in adapters/
 - [ ] **ADAPTER-02**: Implement corresponding `AgentPathResolver` for the new agent
-- [ ] **ADAPTER-03**: Integration test proving the new adapter works with initializeMcp()
+- [x] **ADAPTER-03**: Integration test proving the new adapter works with initializeMcp()
 - Priority: Must
 
 ### TEST: Agent-Agnostic Test Skill

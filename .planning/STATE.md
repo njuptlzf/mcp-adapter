@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 05 execution complete; phase verification passed
-last_updated: "2026-06-16T13:35:58.591Z"
-last_activity: 2026-06-16 -- Phase 06 execution started
+stopped_at: Phase 06 Plan 04 complete (ADAPTER-03 satisfied)
+last_updated: "2026-06-16T13:49:27Z"
+last_activity: 2026-06-16 -- Phase 06 Plan 04 complete (QoderAdapter integration test landed)
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 18
-  completed_plans: 16
-  percent: 63
+  completed_plans: 19
+  percent: 70
 ---
 
 # Project State
@@ -23,9 +23,9 @@ progress:
 ## Current Position
 
 Phase: 06 (second-agent-adapter) — EXECUTING
-Plan: 2 of 5
+Plan: 5 of 5 (final plan — qodercli smoke test pending)
 Status: Ready to execute
-Last activity: 2026-06-16 -- Phase 06 execution started
+Last activity: 2026-06-16 -- Phase 06 Plan 04 complete (QoderAdapter integration test landed, ADAPTER-03 satisfied)
 
 ## Recent Progress
 
@@ -86,6 +86,14 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - `PiSamplingProvider` is the only sampling boundary importing `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`
 - `init.ts` only advertises sampling when `ctx.samplingProvider` is present
 
+### QoderAdapter Integration Test (06-04)
+
+- `__tests__/qoder-adapter-integration.test.ts` proves `createMcpAdapter` + `initializeMcp` work end-to-end through `QoderAdapter` against the calculator demo server
+- Default CI run executes 8 tests (~2s); full 10-server smoke gated behind `QODER_INTEGRATION=1` env var (T-06-IT-04 DoS mitigation)
+- No real qodercli spawned (fake Query via `streamInput` shim); no live LLM (samplingProvider unset)
+- ADAPTER-03 satisfied; the QoderAdapter is empirically proven a drop-in replacement for PiAdapter at the universal entry point
+- Two pre-existing `__tests__/interactive-visualizer-server.test.ts` failures (missing dist/ artifacts) confirmed unrelated to this plan; deferred
+
 ### Path Resolution (Phase 2)
 
 - `AgentPathResolver` contract in `interfaces/agent-paths.ts`
@@ -111,11 +119,12 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T13:33:17.293Z
-**Stopped at:** Phase 05 execution complete; phase verification passed
+**Last session:** 2026-06-16T13:49:27Z
+**Stopped at:** Phase 06 Plan 04 complete (ADAPTER-03 satisfied)
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 06 P03 | 10 | 2 tasks | 3 files |
+| Phase 06 P04 | ~10min | 1 task | 1 file (__tests__/qoder-adapter-integration.test.ts, 313 lines, 18 tests / 8 active + 10 gated; ADAPTER-03 satisfied) |
