@@ -88,8 +88,11 @@ None. The change only reorders an existing environment-variable read and adds a 
 
 ## Self-Check
 
+**Status: PASSED**
+
 - [x] `agent-dir.ts` modified and committed
 - [x] `__tests__/agent-paths-integration.test.ts` modified and committed
 - [x] Integration tests pass
 - [x] Task-specific TypeScript check passes
+- [x] Full project `npx tsc --noEmit` passes
 - [x] Commits recorded in git log
