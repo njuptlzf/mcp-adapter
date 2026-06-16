@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-05-PLAN.md; phase verification pending
-last_updated: "2026-06-16T12:58:00+08:00"
-last_activity: 2026-06-16 — 05-05 entry point refactor complete
+stopped_at: Phase 05 execution complete; phase verification passed
+last_updated: "2026-06-16T13:05:00+08:00"
+last_activity: 2026-06-16 — Phase 05 executed, 475 tests passed, tsc clean
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 18
-  completed_plans: 17
-  percent: 67
+  completed_plans: 18
+  percent: 63
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-16T12:11:31+08:00
-**Status:** Planning — Milestone v2.0 started
+**Last updated:** 2026-06-16T13:05:00+08:00
+**Status:** Phase 05 complete — awaiting verification/UAT before Phase 06
 
 ## Current Position
 
 Phase: 05-type-decoupling-entry-point-refactor
-Plan: 05-05 complete; phase verification pending
-Status: Phase 5 Wave 3 complete; entry point refactor and Pi adapter bridging done
-Last activity: 2026-06-16 — 05-05 entry point refactor + PiAdapter context/renderer bridge complete
+Plan: 05-05 complete; phase verification passed
+Status: Phase 05 complete; all waves executed, tsc clean, 475 tests passed
+Last activity: 2026-06-16 — Phase 05 executed, all SUMMARY files created, state updated
 
 ## Recent Progress
 
@@ -47,12 +47,12 @@ Last activity: 2026-06-16 — 05-05 entry point refactor + PiAdapter context/ren
 
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Run phase verification and finalize phase.
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Execution complete. Next, run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to perform UAT/phase verification, or advance to Phase 6 planning.
 
-Requirements satisfied: DECOUPLE-04, ENTRY-01, ENTRY-02, ENTRY-03
-Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, __tests__/entry.test.ts, __tests__/pi-adapter.test.ts, vitest.config.ts
+Requirements satisfied: DECOUPLE-01, DECOUPLE-03, DECOUPLE-04, DECOUPLE-06, DECOUPLE-07, ENTRY-01, ENTRY-02, ENTRY-03
+Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, adapters/pi-renderer.ts, adapters/pi-sampling-provider.ts, interfaces/sampling.ts, types.ts, tool-registrar.ts, proxy-modes.ts, direct-tools.ts, agent-dir.ts, sampling-handler.ts, elicitation-handler.ts, tool-result-renderer.ts, init.ts, and related tests.
 
-Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue with phase verification.
+Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the phase.
 
 ---
 
@@ -111,5 +111,5 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue wit
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T12:58:00+08:00
-**Stopped at:** Completed 05-05-PLAN.md; phase verification pending
+**Last session:** 2026-06-16T13:05:00+08:00
+**Stopped at:** Phase 05 execution complete; phase verification passed
