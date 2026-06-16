@@ -44,10 +44,10 @@
 ### DECOUPLE: Type Decoupling
 
 - [ ] **DECOUPLE-01**: Replace `AgentToolResult` imports in proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts with generic types from interfaces/agent-api.ts
-- [ ] **DECOUPLE-02**: Replace `ExtensionUIContext` imports in sampling-handler.ts, elicitation-handler.ts with generic `UISystem` from interfaces/agent-api.ts
+- [x] **DECOUPLE-02**: Replace `ExtensionUIContext` imports in sampling-handler.ts, elicitation-handler.ts with generic `UISystem` from interfaces/agent-api.ts
 - [ ] **DECOUPLE-03**: Replace `ExtensionContext` import in direct-tools.ts with generic `AgentContext`
 - [ ] **DECOUPLE-04**: Replace `ToolInfo` import in proxy-modes.ts and index.ts with generic `ToolInfo` from interfaces/agent-api.ts
-- [ ] **DECOUPLE-05**: Replace `Model`, `complete`, `AssistantMessage` etc. in sampling-handler.ts with agent-agnostic abstractions (or extract to Pi-specific sampling wrapper)
+- [x] **DECOUPLE-05**: Replace `Model`, `complete`, `AssistantMessage` etc. in sampling-handler.ts with agent-agnostic abstractions (or extract to Pi-specific sampling wrapper)
 - [ ] **DECOUPLE-06**: Replace `@earendil-works/pi-tui` Text import in tool-result-renderer.ts with generic rendering interface
 - [x] **DECOUPLE-07**: Replace `PI_CODING_AGENT_DIR` in agent-dir.ts with `AgentPathResolver` usage
 - Priority: Must

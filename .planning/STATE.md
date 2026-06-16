@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-02-PLAN.md; next 05-03-PLAN.md
-last_updated: "2026-06-16T11:37:00+08:00"
-last_activity: 2026-06-16 — 05-02 agent-dir env decoupling + integration tests complete
+stopped_at: Completed 05-03-PLAN.md; next 05-04-PLAN.md
+last_updated: "2026-06-16T11:45:00+08:00"
+last_activity: 2026-06-16 — 05-03 sampling type decoupling complete
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 18
-  completed_plans: 15
-  percent: 56
+  completed_plans: 16
+  percent: 61
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-15T12:00:00+08:00
+**Last updated:** 2026-06-16T11:45:00+08:00
 **Status:** Planning — Milestone v2.0 started
 
 ## Current Position
 
 Phase: 05-type-decoupling-entry-point-refactor
-Plan: 05-02 complete; next 05-03
-Status: Phase 5 Wave 1 in progress; 05-02 agent-dir env decoupling complete
-Last activity: 2026-06-16 — 05-02 agent-dir env decoupling + integration tests complete
+Plan: 05-03 complete; next 05-04
+Status: Phase 5 Wave 1 in progress; 05-03 sampling decoupling complete
+Last activity: 2026-06-16 — 05-03 sampling type decoupling + provider injection chain complete
 
 ## Recent Progress
 
@@ -36,14 +36,21 @@ Last activity: 2026-06-16 — 05-02 agent-dir env decoupling + integration tests
 - Phase 3: Core Logic Abstraction — init.ts/commands.ts migrated to AgentAPI
 - Phase 4: Testing & Verification — mock adapter + contract tests + coverage
 
+### Phase 5 — Type Decoupling & Entry Point Refactor
+
+- 05-00: Wave 0 stubs and validation update complete
+- 05-01: Complete
+- 05-02: agent-dir env decoupling + integration tests complete
+- 05-03: sampling subsystem decoupled via SamplingProvider / PiSamplingProvider
+
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Plans finalized
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Continue Wave 1 with 05-04
 
 Requirements: DECOUPLE-01~07, ENTRY-01~03
-Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, sampling-handler.ts, elicitation-handler.ts, index.ts, agent-dir.ts, adapters/entry.ts, adapters/pi-renderer.ts, adapters/pi-sampling-provider.ts, interfaces/sampling.ts
+Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, elicitation-handler.ts, index.ts, adapters/entry.ts, adapters/pi-renderer.ts
 
-Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execution.
+Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue execution.
 
 ---
 
@@ -71,6 +78,12 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execut
 - Sampling / elicitation kept in core with adapter abstraction
 - Backward compatibility maintained through existing `mcpAdapter` export + `piMcpAdapter` alias
 
+### Sampling Provider Injection (05-03)
+
+- `AgentContext.samplingProvider?: SamplingProvider` allows agents to opt into MCP sampling
+- `PiSamplingProvider` is the only sampling boundary importing `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`
+- `init.ts` only advertises sampling when `ctx.samplingProvider` is present
+
 ### Path Resolution (Phase 2)
 
 - `AgentPathResolver` contract in `interfaces/agent-paths.ts`
@@ -88,5 +101,5 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execut
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T11:37:00+08:00
-**Stopped at:** Completed 05-02-PLAN.md; next 05-03-PLAN.md
+**Last session:** 2026-06-16T11:45:00+08:00
+**Stopped at:** Completed 05-03-PLAN.md; next 05-04-PLAN.md
