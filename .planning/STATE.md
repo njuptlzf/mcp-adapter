@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 06 Plan 04 complete (ADAPTER-03 satisfied)
-last_updated: "2026-06-16T13:49:27Z"
-last_activity: 2026-06-16 -- Phase 06 Plan 04 complete (QoderAdapter integration test landed)
+stopped_at: Phase 06 Plan 05 complete (D-10 satisfied — Qoder adapter mcp-adapter-test report)
+last_updated: "2026-06-16T22:13:00Z"
+last_activity: 2026-06-16 -- Phase 06 Plan 05 complete (Qoder adapter mcp-adapter-test skill report; D-10 satisfied)
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 18
-  completed_plans: 19
-  percent: 70
+  completed_plans: 20
+  percent: 75
 ---
 
 # Project State
@@ -22,10 +22,10 @@ progress:
 
 ## Current Position
 
-Phase: 06 (second-agent-adapter) — EXECUTING
-Plan: 5 of 5 (final plan — qodercli smoke test pending)
-Status: Ready to execute
-Last activity: 2026-06-16 -- Phase 06 Plan 04 complete (QoderAdapter integration test landed, ADAPTER-03 satisfied)
+Phase: 06 (second-agent-adapter) — COMPLETE
+Plan: 5 of 5 complete (D-10 satisfied — Qoder adapter mcp-adapter-test skill report landed)
+Status: Phase 6 execution complete; next is `/gsd-verify-work 06-second-agent-adapter` or advance to Phase 7 planning.
+Last activity: 2026-06-16 -- Phase 06 Plan 05 complete (D-10 satisfied; report at tests/reports/qoder-adapter-test-report.md, 372 lines)
 
 ## Recent Progress
 
@@ -94,6 +94,17 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - ADAPTER-03 satisfied; the QoderAdapter is empirically proven a drop-in replacement for PiAdapter at the universal entry point
 - Two pre-existing `__tests__/interactive-visualizer-server.test.ts` failures (missing dist/ artifacts) confirmed unrelated to this plan; deferred
 
+### Qoder Adapter mcp-adapter-test Skill Run (06-05)
+
+- `tests/reports/qoder-adapter-test-report.md` (372 lines, gitignored per .gitignore:24) captures the full mcp-adapter-test skill run against the Qoder adapter; D-10 satisfied
+- Section 4 MockAgent compatibility: 44/44 PASS for Qoder, matching Pi baseline exactly
+- Section 5 token benchmark: proxy=250 tokens (≤300 ✓), 10-server savings=94% (baseline-bound; agent-agnostic serializer — same as Pi)
+- Section 5B conversation simulation: search=147 tokens (≤300 ✓), 4-server savings=56% (baseline-bound; same as Pi)
+- Section 6 E2E: 62/62 PASS (13 proxy + 15 directTools + 9 dt-e2e + 25 e2e-all-servers + 18 Qoder integration including all 10 demo servers via QODER_INTEGRATION=1)
+- Capability Gate: Path A — `mcp` proxy tool registered (deterministic integration-test assertion; SKILL.md prose is Pi-biased, Phase 7 TEST-01..05 will generalize)
+- Empty commit (`--allow-empty`) used because tests/reports/ is gitignored and plan threat-model T-06-VT-01 accepts gitignored-or-tracked status; commit body carries full run summary
+- No Qoder regressions found; Phase 7 follow-ups recorded (TEST-01..05, DOC-01..03)
+
 ### Path Resolution (Phase 2)
 
 - `AgentPathResolver` contract in `interfaces/agent-paths.ts`
@@ -119,8 +130,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T13:49:27Z
-**Stopped at:** Phase 06 Plan 04 complete (ADAPTER-03 satisfied)
+**Last session:** 2026-06-16T22:13:00Z
+**Stopped at:** Phase 06 Plan 05 complete (D-10 satisfied — Qoder adapter mcp-adapter-test report)
 
 ## Performance Metrics
 
@@ -128,3 +139,4 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 |-------|------|----------|-------|
 | Phase 06 P03 | 10 | 2 tasks | 3 files |
 | Phase 06 P04 | ~10min | 1 task | 1 file (__tests__/qoder-adapter-integration.test.ts, 313 lines, 18 tests / 8 active + 10 gated; ADAPTER-03 satisfied) |
+| Phase 06 P05 | ~12min | 1 task | 1 file (tests/reports/qoder-adapter-test-report.md, 372 lines; 132 targeted tests across 7 invocations all PASS; D-10 satisfied; Capability Gate Path A) |
