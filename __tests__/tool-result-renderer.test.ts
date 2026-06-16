@@ -1,14 +1,15 @@
-import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
+import type { McpToolResult } from "../types.ts";
 import {
   formatMcpDirectToolCallLines,
   formatMcpProxyToolCallLines,
   formatMcpToolResultLines,
   renderMcpToolResult,
+  type ToolRenderResultOptions,
 } from "../tool-result-renderer.ts";
 
 type TestDetails = Record<string, unknown> & { error?: unknown };
-type TestResult = AgentToolResult<TestDetails>;
+type TestResult = McpToolResult<TestDetails>;
 
 const collapsedOptions: ToolRenderResultOptions = { expanded: false, isPartial: false };
 const plainTheme = { fg: (_name: string, text: string) => text };
@@ -125,7 +126,7 @@ describe("MCP tool result renderer", () => {
       collapsedOptions,
       plainTheme,
       { isError: true },
-    ).render(80).join("\n");
+    );
 
     expect(output).toContain("line 4");
     expect(output).not.toContain("Ctrl+O to expand");
@@ -138,7 +139,7 @@ describe("MCP tool result renderer", () => {
       collapsedOptions,
       plainTheme,
       { isError: false },
-    ).render(80).join("\n");
+    );
 
     expect(output).toContain("line 4");
     expect(output).not.toContain("Ctrl+O to expand");

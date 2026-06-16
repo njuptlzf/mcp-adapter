@@ -1,8 +1,7 @@
-import type { AgentToolResult, ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import type { McpToolResult, ContentBlock } from "./types.ts";
 
 type McpToolResultDetails = Record<string, unknown> & { error?: unknown };
-type McpToolContentBlock = AgentToolResult<McpToolResultDetails>["content"][number];
+type McpToolContentBlock = ContentBlock;
 
 interface RenderTheme {
   fg: (name: string, text: string) => string;
@@ -29,6 +28,13 @@ export interface McpToolResultDisplay {
   lines: string[];
   truncated: boolean;
 }
+
+export interface ToolRenderResultOptions {
+  expanded: boolean;
+  isPartial: boolean;
+}
+
+export type RenderOutput = string;
 
 const DEFAULT_MAX_CALL_INPUT_CHARS = 1500;
 
@@ -96,19 +102,19 @@ export function formatMcpDirectToolCallLines(
   return [displayName, formatJsonish(args, maxInputChars)];
 }
 
-function renderToolCallLines(lines: string[], theme: RenderTheme) {
+function renderToolCallLines(lines: string[], theme: RenderTheme): RenderOutput {
   const [title = "mcp", ...rest] = lines;
   const styledTitle = theme.fg("toolTitle", theme.bold ? theme.bold(title) : title);
   const styledRest = rest.map(line => theme.fg("muted", line));
-  return new Text([styledTitle, ...styledRest].join("\n"), 0, 0);
+  return [styledTitle, ...styledRest].join("\n");
 }
 
-export function renderMcpProxyToolCall(args: McpProxyToolCallInput, theme: RenderTheme) {
+export function renderMcpProxyToolCall(args: McpProxyToolCallInput, theme: RenderTheme): RenderOutput {
   return renderToolCallLines(formatMcpProxyToolCallLines(args), theme);
 }
 
 export function createMcpDirectToolCallRenderer(displayName: string) {
-  return (args: Record<string, unknown>, theme: RenderTheme) => {
+  return (args: Record<string, unknown>, theme: RenderTheme): RenderOutput => {
     return renderToolCallLines(formatMcpDirectToolCallLines(displayName, args), theme);
   };
 }
@@ -121,7 +127,7 @@ function blockToLines(block: McpToolContentBlock): string[] {
 }
 
 export function formatMcpToolResultLines(
-  result: Pick<AgentToolResult<McpToolResultDetails>, "content">,
+  result: Pick<McpToolResult<McpToolResultDetails>, "content">,
   expanded: boolean,
   maxCollapsedLines = 3,
 ): McpToolResultDisplay {
@@ -139,16 +145,16 @@ export function formatMcpToolResultLines(
 }
 
 export function renderMcpToolResult(
-  result: AgentToolResult<McpToolResultDetails>,
+  result: McpToolResult<McpToolResultDetails>,
   options: ToolRenderResultOptions,
   theme: RenderTheme,
   context?: McpToolRenderContext,
-) {
+): RenderOutput {
   if (options.isPartial) {
-    return new Text(theme.fg("warning", "Running MCP tool..."), 0, 0);
+    return theme.fg("warning", "Running MCP tool...");
   }
 
-  const hasErrorDetails = Boolean(result.details.error);
+  const hasErrorDetails = Boolean(result.details?.error);
   const display = formatMcpToolResultLines(result, options.expanded || context?.isError === true || hasErrorDetails);
   const output = display.lines
     .map((line) => line === "…" ? theme.fg("muted", line) : theme.fg("toolOutput", line))
@@ -157,5 +163,5 @@ export function renderMcpToolResult(
     ? `\n${theme.fg("muted", "(Ctrl+O to expand)")}`
     : "";
 
-  return new Text(`${output}${hint}`, 0, 0);
+  return `${output}${hint}`;
 }
