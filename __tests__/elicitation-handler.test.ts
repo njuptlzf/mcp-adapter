@@ -85,13 +85,13 @@ describe("elicitation handler", () => {
             { value: "medium" },
             { value: "high" },
           ],
-          defaultValue: "medium",
+          default: "medium",
         },
         {
           type: "boolean",
           name: "assignToMe",
           label: "Assign to me",
-          defaultValue: false,
+          default: false,
         },
       ],
     });
