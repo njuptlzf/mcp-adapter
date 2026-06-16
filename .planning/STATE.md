@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-00-PLAN.md; ready to execute 05-01-PLAN.md
-last_updated: "2026-06-16T10:45:00+08:00"
-last_activity: 2026-06-16 — 05-00 Wave 0 stubs and validation update complete
+stopped_at: Completed 05-02-PLAN.md; next 05-03-PLAN.md
+last_updated: "2026-06-16T11:37:00+08:00"
+last_activity: 2026-06-16 — 05-02 agent-dir env decoupling + integration tests complete
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 18
-  completed_plans: 14
-  percent: 50
+  completed_plans: 15
+  percent: 56
 ---
 
 # Project State
@@ -23,9 +23,9 @@ progress:
 ## Current Position
 
 Phase: 05-type-decoupling-entry-point-refactor
-Plan: 05-00 complete; next 05-01
-Status: Phase 5 Wave 0 complete; ready to execute Wave 1
-Last activity: 2026-06-16 — 05-00 Wave 0 stubs and validation update complete
+Plan: 05-02 complete; next 05-03
+Status: Phase 5 Wave 1 in progress; 05-02 agent-dir env decoupling complete
+Last activity: 2026-06-16 — 05-02 agent-dir env decoupling + integration tests complete
 
 ## Recent Progress
 
@@ -76,6 +76,7 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execut
 - `AgentPathResolver` contract in `interfaces/agent-paths.ts`
 - `createPiResolver` factory + `DEFAULT_AGENT_RESOLVER` constant
 - `getPiGlobalConfigPath` retained as backward-compat wrapper around `resolveAgentGlobalConfigPath`
+- `getAgentDir` now reads `MCP_AGENT_DIR` first, with `PI_CODING_AGENT_DIR` as backward-compatible fallback (05-02)
 
 ### Core Logic Migration (Phase 3)
 
@@ -87,5 +88,5 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execut
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T10:45:00+08:00
-**Stopped at:** Completed 05-00-PLAN.md; ready to execute 05-01-PLAN.md
+**Last session:** 2026-06-16T11:37:00+08:00
+**Stopped at:** Completed 05-02-PLAN.md; next 05-03-PLAN.md

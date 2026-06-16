@@ -49,7 +49,7 @@
 - [ ] **DECOUPLE-04**: Replace `ToolInfo` import in proxy-modes.ts and index.ts with generic `ToolInfo` from interfaces/agent-api.ts
 - [ ] **DECOUPLE-05**: Replace `Model`, `complete`, `AssistantMessage` etc. in sampling-handler.ts with agent-agnostic abstractions (or extract to Pi-specific sampling wrapper)
 - [ ] **DECOUPLE-06**: Replace `@earendil-works/pi-tui` Text import in tool-result-renderer.ts with generic rendering interface
-- [ ] **DECOUPLE-07**: Replace `PI_CODING_AGENT_DIR` in agent-dir.ts with `AgentPathResolver` usage
+- [x] **DECOUPLE-07**: Replace `PI_CODING_AGENT_DIR` in agent-dir.ts with `AgentPathResolver` usage
 - Priority: Must
 
 ### ENTRY: Entry Point Refactor
