@@ -106,6 +106,16 @@ Decouple all remaining Pi type imports across 6 source files, create agent-agnos
 - `index.ts` — ExtensionAPI, ToolInfo
 - `agent-dir.ts` — PI_CODING_AGENT_DIR
 
+**Plans:** 5 plans
+
+Plans:
+- [x] 05-00-PLAN.md — Wave 0 stubs: Pi peer type declarations + missing test file + validation update
+- [ ] 05-01-PLAN.md — localize McpToolResult and decouple proxy-modes.ts / direct-tools.ts
+- [ ] 05-02-PLAN.md — add MCP_AGENT_DIR fallback in agent-dir.ts and verify integration tests
+- [ ] 05-03-PLAN.md — abstract sampling behind SamplingProvider with PiSamplingProvider adapter
+- [ ] 05-04-PLAN.md — abstract elicitation and rendering behind UISystem / RenderOutput with Pi renderer
+- [ ] 05-05-PLAN.md — create createMcpAdapter entry point, refactor index.ts as Pi wrapper
+
 ---
 
 ### Phase 6: Second Agent Adapter

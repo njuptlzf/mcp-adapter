@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: planning
-stopped_at: Phase 5 context gathered
-last_updated: "2026-06-15T07:25:59.921Z"
-last_activity: 2026-06-15 — Milestone v2.0 initialized
+status: executing
+stopped_at: Completed 05-00-PLAN.md; ready to execute 05-01-PLAN.md
+last_updated: "2026-06-16T10:45:00+08:00"
+last_activity: 2026-06-16 — 05-00 Wave 0 stubs and validation update complete
 progress:
   total_phases: 8
   completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 18
+  completed_plans: 14
   percent: 50
 ---
 
@@ -22,10 +22,10 @@ progress:
 
 ## Current Position
 
-Phase: Requirements defined (Phase 5-7 pending)
-Plan: —
-Status: Defining requirements complete, ready for phase planning
-Last activity: 2026-06-15 — Milestone v2.0 initialized
+Phase: 05-type-decoupling-entry-point-refactor
+Plan: 05-00 complete; next 05-01
+Status: Phase 5 Wave 0 complete; ready to execute Wave 1
+Last activity: 2026-06-16 — 05-00 Wave 0 stubs and validation update complete
 
 ## Recent Progress
 
@@ -38,12 +38,12 @@ Last activity: 2026-06-15 — Milestone v2.0 initialized
 
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Ready to plan
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Plans finalized
 
 Requirements: DECOUPLE-01~07, ENTRY-01~03
-Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, sampling-handler.ts, elicitation-handler.ts, index.ts, agent-dir.ts
+Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, sampling-handler.ts, elicitation-handler.ts, index.ts, agent-dir.ts, adapters/entry.ts, adapters/pi-renderer.ts, adapters/pi-sampling-provider.ts, interfaces/sampling.ts
 
-Run `/gsd-plan-phase 5` to create detailed execution plan.
+Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to begin execution.
 
 ---
 
@@ -87,5 +87,5 @@ Run `/gsd-plan-phase 5` to create detailed execution plan.
 
 ## Session Tracking
 
-**Last session:** 2026-06-15T07:25:59.913Z
-**Stopped at:** Phase 5 context gathered
+**Last session:** 2026-06-16T10:45:00+08:00
+**Stopped at:** Completed 05-00-PLAN.md; ready to execute 05-01-PLAN.md
