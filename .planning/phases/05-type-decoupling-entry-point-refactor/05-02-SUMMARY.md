@@ -61,7 +61,7 @@ metrics:
 | Default Pi directory preserved | `grep -n 'join(homedir(), ".pi", "agent")' agent-dir.ts` | ✅ | Line 10 |
 | Task files type-check | `npx tsc --noEmit --project tsconfig.json` filtered to task files | ✅ | No errors in `agent-dir.ts` or `__tests__/agent-paths-integration.test.ts` |
 | Integration tests pass | `npx vitest run __tests__/agent-paths-integration.test.ts` | ✅ | 4 passed |
-| Full project type-check | `npx tsc --noEmit` | ⚠️ | Fails on pre-existing unrelated error in `adapters/pi-adapter.ts:112` from parallel Wave 1 work (see Deviations) |
+| Full project type-check | `npx tsc --noEmit` | ✅ | Passes (pre-existing parallel Wave 1 error in `adapters/pi-adapter.ts` was resolved by subsequent commits) |
 
 ## Deviations from Plan
 
@@ -69,13 +69,14 @@ metrics:
 
 - **GitNexus impact analysis** for `getAgentDir` returned **CRITICAL** risk (14 upstream processes affected, 5 modules). The risk is due to `getAgentDir` being a central path-resolution utility used by auth, token, cache, and onboarding flows. The actual change is backward-compatible (no signature change, no default behavior change), so the CRITICAL rating reflects blast radius rather than a breaking change. Per `AGENTS.md`, this warning is recorded here and execution proceeded.
 
-### Pre-existing TypeScript Failure
+### Pre-existing TypeScript Failure (Resolved)
 
 - **Found during:** Task 2 verification / overall verification
-- **Issue:** `npx tsc --noEmit` fails with `adapters/pi-adapter.ts(112,47): error TS2344: Type 'Function' does not satisfy the constraint '(...args: any) => any'`.
-- **Root cause:** The error originates from uncommitted modifications in `adapters/pi-adapter.ts` that are part of parallel Wave 1 work (plan 05-03, `PiSamplingProvider` integration). `agent-dir.ts` and the integration test file are not involved.
+- **Issue:** `npx tsc --noEmit` initially failed with `adapters/pi-adapter.ts(112,47): error TS2344: Type 'Function' does not satisfy the constraint '(...args: any) => any'`.
+- **Root cause:** The error originated from uncommitted modifications in `adapters/pi-adapter.ts` that were part of parallel Wave 1 work (plan 05-03, `PiSamplingProvider` integration). `agent-dir.ts` and the integration test file were not involved.
 - **Action taken:** Scoped out of this plan per deviation scope boundary (only auto-fix issues directly caused by the current task's changes). Left untouched to avoid merge conflicts with parallel work.
-- **Impact:** Plan success criterion "`npx tsc --noEmit` passes" is not satisfied at the workspace level, but the task-specific files compile cleanly and all targeted tests pass.
+- **Resolution:** Subsequent parallel commits (05-01 and 05-03) resolved the underlying type error. Re-running `npx tsc --noEmit` after those commits now passes.
+- **Impact:** None remaining. Full project type-check passes.
 
 ## Known Stubs
 
