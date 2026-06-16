@@ -15,6 +15,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionUIContext,
+	ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentAPI,
@@ -25,6 +26,7 @@ import type {
 	ToolRegistration,
 	UISystem,
 } from "../interfaces/agent-api.ts";
+import { PiSamplingProvider } from "./pi-sampling-provider.ts";
 
 /**
  * Type of Pi's UI context, narrowed for the optional capabilities we use.
@@ -33,6 +35,7 @@ import type {
 type PiUI = ExtensionUIContext & {
 	form?: (...args: unknown[]) => Promise<unknown>;
 	custom?: (...args: unknown[]) => unknown;
+	confirm?: (title: string, message: string) => Promise<boolean>;
 	theme?: { fg?: (color: string, text: string) => string };
 };
 
@@ -104,12 +107,23 @@ export class PiAdapter implements AgentAPI {
  */
 export function adaptPiContext(ctx: ExtensionContext): AgentContext {
 	const ui = ctx.hasUI ? adaptPiUI(ctx.ui as PiUI) : undefined;
+	const piUi = ctx.hasUI ? (ctx.ui as PiUI) : undefined;
+	const modelRegistry = ctx.modelRegistry as ModelRegistry | undefined;
+	const currentModel = ctx.model as import("@earendil-works/pi-ai").Model<import("@earendil-works/pi-ai").Api> | undefined;
+	const samplingProvider = modelRegistry
+		? new PiSamplingProvider(
+				modelRegistry,
+				() => currentModel,
+				piUi?.confirm ? (title, message) => piUi.confirm!(title, message) : undefined,
+			)
+		: undefined;
 	return {
 		cwd: ctx.cwd,
 		hasUI: ctx.hasUI,
 		ui,
 		model: ctx.model,
 		modelRegistry: ctx.modelRegistry,
+		samplingProvider,
 		signal: ctx.signal,
 	};
 }

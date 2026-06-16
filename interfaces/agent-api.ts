@@ -15,6 +15,8 @@
  *  - D-06: `UISystem.theme.fg` is optional — not all agents expose theming.
  */
 
+import type { SamplingProvider } from "./sampling.ts";
+
 /** A registered tool's information, as exposed by `AgentAPI.getAllTools`. */
 export interface ToolInfo {
 	name: string;
@@ -83,6 +85,7 @@ export interface AgentContext {
 	ui?: UISystem;
 	model?: unknown;
 	modelRegistry?: unknown;
+	samplingProvider?: SamplingProvider;
 	signal?: AbortSignal;
 	reload?: () => Promise<void>;
 }

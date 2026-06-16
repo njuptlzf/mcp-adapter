@@ -5,6 +5,11 @@ import { join } from "node:path";
 const mocks = vi.hoisted(() => ({
   clients: [] as any[],
   transports: [] as any[],
+  provider: {
+    resolveModel: vi.fn(async () => ({ provider: "test", id: "model" })),
+    complete: vi.fn(async () => ({ text: "hi", model: "test/model", stopReason: "endTurn" })),
+    confirm: vi.fn(async () => true),
+  },
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
@@ -62,8 +67,7 @@ describe("McpServerManager sampling", () => {
     const manager = new McpServerManager();
     manager.setSamplingConfig({
       autoApprove: true,
-      modelRegistry: {} as any,
-      getCurrentModel: () => undefined,
+      provider: mocks.provider as any,
       getSignal: () => undefined,
     });
 
@@ -107,8 +111,7 @@ describe("McpServerManager sampling", () => {
     const manager = new McpServerManager();
     manager.setSamplingConfig({
       autoApprove: true,
-      modelRegistry: {} as any,
-      getCurrentModel: () => undefined,
+      provider: mocks.provider as any,
       getSignal: () => undefined,
     });
     manager.setElicitationConfig({
