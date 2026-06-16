@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-03-PLAN.md; next 05-04-PLAN.md
-last_updated: "2026-06-16T11:45:00+08:00"
-last_activity: 2026-06-16 — 05-03 sampling type decoupling complete
+stopped_at: Completed 05-04-PLAN.md; next 05-05-PLAN.md
+last_updated: "2026-06-16T12:11:31+08:00"
+last_activity: 2026-06-16 — 05-04 elicitation and renderer decoupling complete
 progress:
   total_phases: 8
   completed_phases: 4
@@ -17,15 +17,15 @@ progress:
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-16T11:45:00+08:00
+**Last updated:** 2026-06-16T12:11:31+08:00
 **Status:** Planning — Milestone v2.0 started
 
 ## Current Position
 
 Phase: 05-type-decoupling-entry-point-refactor
-Plan: 05-03 complete; next 05-04
-Status: Phase 5 Wave 1 in progress; 05-03 sampling decoupling complete
-Last activity: 2026-06-16 — 05-03 sampling type decoupling + provider injection chain complete
+Plan: 05-04 complete; next 05-05
+Status: Phase 5 Wave 2 in progress; 05-04 elicitation/renderer decoupling complete
+Last activity: 2026-06-16 — 05-04 elicitation/renderer decoupling + Pi renderer adapter complete
 
 ## Recent Progress
 
@@ -42,13 +42,14 @@ Last activity: 2026-06-16 — 05-03 sampling type decoupling + provider injectio
 - 05-01: Complete
 - 05-02: agent-dir env decoupling + integration tests complete
 - 05-03: sampling subsystem decoupled via SamplingProvider / PiSamplingProvider
+- 05-04: elicitation and rendering decoupled behind UISystem / RenderOutput with Pi renderer
 
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Continue Wave 1 with 05-04
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Continue Wave 3 with 05-05
 
 Requirements: DECOUPLE-01~07, ENTRY-01~03
-Affected files: proxy-modes.ts, direct-tools.ts, tool-result-renderer.ts, elicitation-handler.ts, index.ts, adapters/entry.ts, adapters/pi-renderer.ts
+Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, __tests__/entry.test.ts, __tests__/index-lifecycle.test.ts, vitest.config.ts
 
 Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue execution.
 
@@ -101,5 +102,5 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue exe
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T11:45:00+08:00
-**Stopped at:** Completed 05-03-PLAN.md; next 05-04-PLAN.md
+**Last session:** 2026-06-16T12:11:31+08:00
+**Stopped at:** Completed 05-04-PLAN.md; next 05-05-PLAN.md
