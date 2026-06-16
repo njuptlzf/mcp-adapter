@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-04-PLAN.md; next 05-05-PLAN.md
-last_updated: "2026-06-16T12:11:31+08:00"
-last_activity: 2026-06-16 — 05-04 elicitation and renderer decoupling complete
+stopped_at: Completed 05-05-PLAN.md; phase verification pending
+last_updated: "2026-06-16T12:58:00+08:00"
+last_activity: 2026-06-16 — 05-05 entry point refactor complete
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 18
-  completed_plans: 16
-  percent: 61
+  completed_plans: 17
+  percent: 67
 ---
 
 # Project State
@@ -23,9 +23,9 @@ progress:
 ## Current Position
 
 Phase: 05-type-decoupling-entry-point-refactor
-Plan: 05-04 complete; next 05-05
-Status: Phase 5 Wave 2 in progress; 05-04 elicitation/renderer decoupling complete
-Last activity: 2026-06-16 — 05-04 elicitation/renderer decoupling + Pi renderer adapter complete
+Plan: 05-05 complete; phase verification pending
+Status: Phase 5 Wave 3 complete; entry point refactor and Pi adapter bridging done
+Last activity: 2026-06-16 — 05-05 entry point refactor + PiAdapter context/renderer bridge complete
 
 ## Recent Progress
 
@@ -43,15 +43,16 @@ Last activity: 2026-06-16 — 05-04 elicitation/renderer decoupling + Pi rendere
 - 05-02: agent-dir env decoupling + integration tests complete
 - 05-03: sampling subsystem decoupled via SamplingProvider / PiSamplingProvider
 - 05-04: elicitation and rendering decoupled behind UISystem / RenderOutput with Pi renderer
+- 05-05: agent-agnostic createMcpAdapter entry point + Pi wrapper + PiAdapter context/renderer bridge complete
 
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Continue Wave 3 with 05-05
+**Phase 5 — Type Decoupling & Entry Point Refactor:** Run phase verification and finalize phase.
 
-Requirements: DECOUPLE-01~07, ENTRY-01~03
-Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, __tests__/entry.test.ts, __tests__/index-lifecycle.test.ts, vitest.config.ts
+Requirements satisfied: DECOUPLE-04, ENTRY-01, ENTRY-02, ENTRY-03
+Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, __tests__/entry.test.ts, __tests__/pi-adapter.test.ts, vitest.config.ts
 
-Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue execution.
+Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue with phase verification.
 
 ---
 
@@ -98,9 +99,17 @@ Run `/gsd-execute-phase 05-type-decoupling-entry-point-refactor` to continue exe
 - `index.ts` creates `PiAdapter` and `adaptPiContext` internally at entry point
 - `activate` signature unchanged for Pi backward compat
 
+### Entry Point Decoupling (05-05)
+
+- `adapters/entry.ts` exports agent-agnostic `createMcpAdapter(agentapi, ctx, config, cache)`
+- `index.ts` is now a thin Pi-specific wrapper that loads config/cache, constructs `PiAdapter`, adapts context, and delegates to `createMcpAdapter`
+- `PiAdapter` converts Pi `ExtensionContext` to `AgentContext` for tools, commands, and session events
+- `PiAdapter` wraps string `renderCall`/`renderResult` outputs back to Pi `Text` via `piRenderWrapper`
+- Public exports preserved: `mcpAdapter` default, `piMcpAdapter` alias, agent types, path resolvers
+
 ---
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T12:11:31+08:00
-**Stopped at:** Completed 05-04-PLAN.md; next 05-05-PLAN.md
+**Last session:** 2026-06-16T12:58:00+08:00
+**Stopped at:** Completed 05-05-PLAN.md; phase verification pending

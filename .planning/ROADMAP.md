@@ -114,7 +114,7 @@ Plans:
 - [x] 05-02-PLAN.md — add MCP_AGENT_DIR fallback in agent-dir.ts and verify integration tests
 - [x] 05-03-PLAN.md — abstract sampling behind SamplingProvider with PiSamplingProvider adapter
 - [x] 05-04-PLAN.md — abstract elicitation and rendering behind UISystem / RenderOutput with Pi renderer
-- [ ] 05-05-PLAN.md — create createMcpAdapter entry point, refactor index.ts as Pi wrapper
+- [x] 05-05-PLAN.md — create createMcpAdapter entry point, refactor index.ts as Pi wrapper
 
 ---
 

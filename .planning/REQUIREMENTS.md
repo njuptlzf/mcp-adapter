@@ -54,9 +54,9 @@
 
 ### ENTRY: Entry Point Refactor
 
-- [ ] **ENTRY-01**: Create agent-agnostic entry point accepting `AgentAPI` instead of `ExtensionAPI`
-- [ ] **ENTRY-02**: Refactor existing `mcpAdapter(pi: ExtensionAPI)` in index.ts as Pi-specific wrapper around new entry point
-- [ ] **ENTRY-03**: Maintain 100% backward compatibility — Pi users see zero behavior change
+- [x] **ENTRY-01**: Create agent-agnostic entry point accepting `AgentAPI` instead of `ExtensionAPI`
+- [x] **ENTRY-02**: Refactor existing `mcpAdapter(pi: ExtensionAPI)` in index.ts as Pi-specific wrapper around new entry point
+- [x] **ENTRY-03**: Maintain 100% backward compatibility — Pi users see zero behavior change
 - Priority: Must
 
 ### ADAPTER: Second Agent Adapter
