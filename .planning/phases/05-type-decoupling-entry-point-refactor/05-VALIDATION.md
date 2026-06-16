@@ -2,8 +2,8 @@
 phase: 05
 slug: type-decoupling-entry-point-refactor
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-15
 ---
 
@@ -56,9 +56,9 @@ created: 2026-06-15
 
 ## Wave 0 Requirements
 
-- [ ] `__tests__/sampling-handler.test.ts` — stubs for DECOUPLE-05
-- [ ] `__tests__/tool-result-renderer.test.ts` — stubs for DECOUPLE-06
-- [ ] `__tests__/entry.test.ts` — stubs for ENTRY-01
+- [x] `__tests__/sampling-handler.test.ts` — stubs for DECOUPLE-05
+- [x] `__tests__/tool-result-renderer.test.ts` — stubs for DECOUPLE-06
+- [x] `__tests__/entry.test.ts` — stubs for ENTRY-01
 
 ---
 
