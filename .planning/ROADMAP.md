@@ -169,7 +169,17 @@ Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verificati
 - Rebuild SKILL.md Phase 4 for any supported agent
 - Update `README.md` to communicate Pi compatibility + universal agent support and highlight integration test verification results
 
-**Requirements:** TEST-01 through TEST-05, DOC-01 through DOC-03
+**Requirements:** TEST-01 through TEST-05, DOC-01 through DOC-03, FIX-01
+
+**Status:** ✅ COMPLETE (4/4 plans, 1 deviation, 21/21 decisions, 9/9 requirements)
+
+**Plans:** 4 plans, 1 wave (Wave 1, autonomous) — ALL COMPLETE
+- ✅ `07-01` Adapter Registry + Parametric Test Framework (D-04, D-07, D-08, D-09) — 4 commits
+- ✅ `07-02` Capability Gate + FIX-01 Prebuild (D-01..D-03, D-14, D-15) — 4 commits, 1 deviation
+- ✅ `07-03` SKILL.md Parametric + Per-Agent References (D-10, D-11) — 3 commits
+- ✅ `07-04` Matrix Reporter + README Rewrite (D-12, D-13, D-16, D-17, D-18..D-20) — 4 commits
+
+**Deviations:** 1 (Rule 1) — vitest 3.2.6 SSR race caused removal of `globalSetup` field; `test:prebuild` npm script is the primary build mechanism instead. `tests/global-setup.ts` file retained as safety net.
 
 **Deliverables:**
 
