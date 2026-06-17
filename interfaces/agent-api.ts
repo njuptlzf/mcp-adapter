@@ -179,21 +179,29 @@ export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
 	{
 		id: "pi",
 		displayName: "Pi",
-		// PiAdapter takes a Pi `ExtensionAPI`; the parametric test provides a
-		// vi.fn()-based mock here so the contract tests can exercise the
-		// adapter's surface without a live Pi runtime. See
-		// `__tests__/adapter-contract.test.ts` for the factory wiring.
-		factory: () =>
-			new PiAdapter({
-				registerTool: () => {},
+		// PiAdapter is a pass-through wrapper around Pi's `ExtensionAPI`; the
+		// parametric test provides a tiny in-memory `ExtensionAPI` placeholder
+		// (single-instance scoped to one `factory()` call) so the contract
+		// tests can observe a register → read-back round-trip without a live
+		// Pi runtime. See `__tests__/adapter-contract.test.ts` for usage.
+		factory: () => {
+			const toolStore: ToolRegistration[] = [];
+			const flagStore = new Map<string, string | undefined>();
+			return new PiAdapter({
+				registerTool: (tool: ToolRegistration) => {
+					toolStore.push(tool);
+				},
 				registerCommand: () => {},
-				registerFlag: () => {},
+				registerFlag: (name: string) => {
+					flagStore.set(name, undefined);
+				},
 				on: () => {},
-				getAllTools: () => [],
-				getFlag: () => undefined,
+				getAllTools: () => toolStore.map((t) => ({ name: t.name })),
+				getFlag: (name: string) => flagStore.get(name),
 				sendMessage: () => {},
 				exec: async () => ({ code: 0, stdout: "", stderr: "" }),
-			} as unknown as ConstructorParameters<typeof PiAdapter>[0]),
+			} as unknown as ConstructorParameters<typeof PiAdapter>[0]);
+		},
 		resolverFactory: createPiResolver,
 		envHints: [{ envVar: "PI_CODING_AGENT_DIR" }],
 		capabilities: { ui: true, sampling: true, renderer: true },
