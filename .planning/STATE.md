@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 06 Plan 05 complete (D-10 satisfied — Qoder adapter mcp-adapter-test report)
-last_updated: "2026-06-16T22:13:00Z"
-last_activity: 2026-06-16 -- Phase 06 Plan 05 complete (Qoder adapter mcp-adapter-test skill report; D-10 satisfied)
+stopped_at: Phase 06 LEARNINGS extracted (31 durable items; 11 decisions, 8 lessons, 7 patterns, 5 surprises)
+last_updated: "2026-06-16T22:35:00Z"
+last_activity: 2026-06-16 -- Phase 06 LEARNINGS extracted (06-LEARNINGS.md written; ready for Phase 7 planning)
 progress:
   total_phases: 8
   completed_phases: 6
@@ -24,8 +24,8 @@ progress:
 
 Phase: 06 (second-agent-adapter) — COMPLETE
 Plan: 5 of 5 complete (D-10 satisfied — Qoder adapter mcp-adapter-test skill report landed)
-Status: Phase 6 execution complete; next is `/gsd-verify-work 06-second-agent-adapter` or advance to Phase 7 planning.
-Last activity: 2026-06-16 -- Phase 06 Plan 05 complete (D-10 satisfied; report at tests/reports/qoder-adapter-test-report.md, 372 lines)
+Status: Phase 6 LEARNINGS extracted; next is Phase 7 planning (third agent adapter or generalize Capability Gate).
+Last activity: 2026-06-16 -- Phase 06 LEARNINGS extracted (11 D-/8 L-/7 P-/5 S- items; sign-off ACHIEVED)
 
 ## Recent Progress
 
@@ -130,8 +130,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-16T22:13:00Z
-**Stopped at:** Phase 06 Plan 05 complete (D-10 satisfied — Qoder adapter mcp-adapter-test report)
+**Last session:** 2026-06-16T22:35:00Z
+**Stopped at:** Phase 06 LEARNINGS extracted (06-LEARNINGS.md written, STATE.md updated; 31 items: 11 decisions + 8 lessons + 7 patterns + 5 surprises)
 
 ## Performance Metrics
 
@@ -140,3 +140,4 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 06 P03 | 10 | 2 tasks | 3 files |
 | Phase 06 P04 | ~10min | 1 task | 1 file (__tests__/qoder-adapter-integration.test.ts, 313 lines, 18 tests / 8 active + 10 gated; ADAPTER-03 satisfied) |
 | Phase 06 P05 | ~12min | 1 task | 1 file (tests/reports/qoder-adapter-test-report.md, 372 lines; 132 targeted tests across 7 invocations all PASS; D-10 satisfied; Capability Gate Path A) |
+| Phase 06 LEARN | ~8min | 1 file | 06-LEARNINGS.md (255 lines; 31 items extracted from 5 SUMMARY + CONTEXT + UAT + report) |
