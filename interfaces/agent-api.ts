@@ -16,6 +16,10 @@
  */
 
 import type { SamplingProvider } from "./sampling.ts";
+import type { AgentPathResolver } from "./agent-paths.ts";
+import { createPiResolver, createQoderResolver } from "./agent-paths.ts";
+import { PiAdapter } from "../adapters/pi-adapter.ts";
+import { QoderAdapter } from "../adapters/qoder-adapter.ts";
 
 /** A registered tool's information, as exposed by `AgentAPI.getAllTools`. */
 export interface ToolInfo {
@@ -138,3 +142,68 @@ export interface AgentAPI {
 	/** Run a shell command via the agent. */
 	exec(command: string, args: string[]): Promise<unknown>;
 }
+
+/**
+ * Descriptor for a registered AgentAPI adapter.
+ *
+ * Per D-07 (Phase 7 CONTEXT): static registry in interfaces/agent-api.ts;
+ * consumers (test runner, Capability Gate, README matrix, report writer)
+ * all read from AGENT_ADAPTERS. Adding a new adapter = push one descriptor;
+ * no other file in the project needs to change.
+ */
+export interface AgentAdapterDescriptor {
+	/** Stable identifier matching `AgentId` from `interfaces/agent-paths.ts`. */
+	id: string;
+	/** Human-readable name (e.g. for README matrix / report headers). */
+	displayName: string;
+	/** Factory returning a fresh adapter instance per beforeEach for test isolation. */
+	factory: () => AgentAPI;
+	/** Path resolver factory for this adapter. */
+	resolverFactory: () => AgentPathResolver;
+	/** Optional env hints — env vars or files that indicate this adapter is loaded. */
+	envHints?: ReadonlyArray<{ envVar?: string; filePath?: string }>;
+	/** Capability flags for the README matrix column. */
+	capabilities?: { ui?: boolean; sampling?: boolean; renderer?: boolean };
+}
+
+/**
+ * Static registry of every supported AgentAPI adapter.
+ *
+ * Single source of truth — test runner (`__tests__/adapter-contract.test.ts`),
+ * Capability Gate (Plan 07-02), README matrix (Plan 07-04), and report
+ * matrix all consume this array.
+ *
+ * Per D-07: new adapter = import + push one descriptor; nothing else changes.
+ */
+export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
+	{
+		id: "pi",
+		displayName: "Pi",
+		// PiAdapter takes a Pi `ExtensionAPI`; the parametric test provides a
+		// vi.fn()-based mock here so the contract tests can exercise the
+		// adapter's surface without a live Pi runtime. See
+		// `__tests__/adapter-contract.test.ts` for the factory wiring.
+		factory: () =>
+			new PiAdapter({
+				registerTool: () => {},
+				registerCommand: () => {},
+				registerFlag: () => {},
+				on: () => {},
+				getAllTools: () => [],
+				getFlag: () => undefined,
+				sendMessage: () => {},
+				exec: async () => ({ code: 0, stdout: "", stderr: "" }),
+			} as unknown as ConstructorParameters<typeof PiAdapter>[0]),
+		resolverFactory: createPiResolver,
+		envHints: [{ envVar: "PI_CODING_AGENT_DIR" }],
+		capabilities: { ui: true, sampling: true, renderer: true },
+	},
+	{
+		id: "qoder",
+		displayName: "Qoder",
+		factory: () => new QoderAdapter(),
+		resolverFactory: createQoderResolver,
+		envHints: [{ envVar: "MCP_AGENT_DIR" }],
+		capabilities: { ui: false, sampling: true, renderer: false },
+	},
+];
