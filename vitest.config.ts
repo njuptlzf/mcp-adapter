@@ -5,6 +5,8 @@ export default defineConfig({
 		globals: true,
 		environment: "node",
 		include: ["__tests__/**/*.test.ts", "tests/**/*.test.ts"],
+		// Plan 07-02: globalSetup added. Plan 07-04 will add reporters.
+		globalSetup: ["./tests/global-setup.ts"],
 		coverage: {
 			provider: "v8",
 			include: ["*.ts", "interfaces/**/*.ts", "adapters/**/*.ts"],
