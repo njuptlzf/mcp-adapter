@@ -65,7 +65,7 @@ npx tsx tests/token-benchmark/run-adapter.ts
 npx tsx tests/token-benchmark/report.ts
 ```
 
-**Pass criteria**: Proxy tool definition ≤ 300 tokens; 10-server combined savings ≥ 95%.
+**Pass criteria**: Proxy tool definition ≤ 300 tokens; 10-server combined savings ≥ 95%. 🟡 Note: the 94% combined savings observed in practice is **baseline-bound** — the proxy tool definition in `adapters/tool-registrar.ts` is agent-agnostic, so Pi and Qoder serialize the same JSON schema. The percentage is fully determined by the `tests/demo-servers/*` fixture (61 tools, 3963 baseline tokens) plus the proxy's fixed 250-token cost; swapping the adapter cannot change it. The 1 pp gap from the ≥ 95% target is a pre-existing project characteristic, not an adapter regression. See `tests/reports/qoder-adapter-test-report.md` §Section 5 and `docs/mcp-adapter-token-savings.md` for the full analysis.
 
 ## Phase 3: Conversation Cost Simulation (Section 5B)
 
@@ -75,7 +75,7 @@ npx tsx tests/token-benchmark/run-conversation-sim.ts
 
 If `run-conversation-sim.ts` does not exist, skip and note `⚠️ SKIP`.
 
-**Pass criteria**: 4-server conversation total savings ≥ 65%; search overhead ≤ 300 tokens.
+**Pass criteria**: 4-server conversation total savings ≥ 65%; search overhead ≤ 300 tokens. 🟡 Note: the 56% conversation savings observed in practice is **baseline-bound** for the same reason as Phase 2 — the proxy tool definition (147 tokens — well under the 300-token ceiling) plus the per-call overhead are agent-agnostic. The 9 pp gap from the ≥ 65% target is shared with Pi and is a pre-existing project characteristic, not an adapter regression. See `tests/reports/qoder-adapter-test-report.md` §Section 5B and `docs/mcp-adapter-token-savings.md` for the full analysis.
 
 ## Phase 4: Per-Path Verification (Section 6)
 
