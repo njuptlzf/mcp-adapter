@@ -174,6 +174,7 @@ Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verificati
 **Status:** ✅ COMPLETE (4/4 plans, 1 deviation, 21/21 decisions, 9/9 requirements)
 
 **Plans:** 4 plans, 1 wave (Wave 1, autonomous) — ALL COMPLETE
+
 - ✅ `07-01` Adapter Registry + Parametric Test Framework (D-04, D-07, D-08, D-09) — 4 commits
 - ✅ `07-02` Capability Gate + FIX-01 Prebuild (D-01..D-03, D-14, D-15) — 4 commits, 1 deviation
 - ✅ `07-03` SKILL.md Parametric + Per-Agent References (D-10, D-11) — 3 commits
@@ -189,12 +190,14 @@ Rebuild skills/mcp-adapter-test as "for every agent" with per-adapter verificati
 - Revised `README.md` with compatibility/verification section
 
 **Plans:** 4 plans, 1 wave (Wave 1, autonomous)
+
 - `07-01` Adapter Registry + Parametric Test Framework (D-04, D-07, D-08, D-09)
 - `07-02` Capability Gate + FIX-01 Prebuild (D-01..D-03, D-14, D-15)
 - `07-03` SKILL.md Parametric + Per-Agent References (D-10, D-11)
 - `07-04` Matrix Reporter + README Rewrite (D-12, D-13, D-16, D-17, D-18..D-20)
 
 **Cross-cutting constraints:**
+
 - All 4 plans share `vitest.config.ts` (07-02 adds `globalSetup`, 07-04 adds `reporters`); executors MUST re-read the file before editing.
 - `interfaces/agent-api.ts` is a production interface file modified by 07-01 (per D-07 user-locked decision); layer-violation mitigation recorded in VALIDATION.md §5.55.
 - 07-02 and 07-04 share `vitest.config.ts`; recommended execution order: 07-01 → 07-03 → 07-02 → 07-04 (or full sequential).
@@ -220,7 +223,7 @@ Establish fork-maintainer workflow for merging upstream features and bugfixes fr
 - `skills/upstream-merge/SKILL.md` — merge conflict resolution skill
 - Updated Phase 5-6 implementation patterns to prefer wrappers over direct edits
 
-**Plans:** 2 plans, 2 waves (Wave 1 manifest → Wave 2 skill + dry-run)
+**Plans:** 0/2 plans executed
 
 Plans:
 
