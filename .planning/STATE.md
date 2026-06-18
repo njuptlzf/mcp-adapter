@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: completed
+status: verifying
 stopped_at: Phase 08 plans created (08-01 manifest, 08-02 skill+dry-run, plan-checker PASS)
-last_updated: "2026-06-18T01:50:21.530Z"
+last_updated: "2026-06-18T02:29:16.942Z"
 last_activity: 2026-06-17 -- Phase 7 marked complete
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 24
-  completed_plans: 22
+  completed_plans: 23
   percent: 88
 ---
 
@@ -18,13 +18,13 @@ progress:
 
 **Created:** 2026-06-10T13:45:00+08:00
 **Last updated:** 2026-06-16T13:05:00+08:00
-**Status:** Phase 7 complete
+**Status:** Phase complete — ready for verification
 
 ## Current Position
 
 Phase: 7 — COMPLETE
 Plan: 5 of 5 complete (D-10 satisfied — Qoder adapter mcp-adapter-test skill report landed)
-Status: Phase 7 complete
+Status: Phase complete — ready for verification
 Last activity: 2026-06-17 -- Phase 7 marked complete
 
 ## Recent Progress
@@ -130,8 +130,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-18T01:50:21.521Z
-**Stopped at:** Phase 08 plans created (08-01 manifest, 08-02 skill+dry-run, plan-checker PASS)
+**Last session:** 2026-06-18T02:20:49.983Z
+**Stopped at:** Phase 8 plan 1 of 2 complete — UPSTREAM-CHANGES.md manifest shipped (commit 35db675); Plan 08-02 (SKILL.md + dry-run) next
 
 ## Performance Metrics
 
@@ -141,3 +141,10 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 06 P04 | ~10min | 1 task | 1 file (__tests__/qoder-adapter-integration.test.ts, 313 lines, 18 tests / 8 active + 10 gated; ADAPTER-03 satisfied) |
 | Phase 06 P05 | ~12min | 1 task | 1 file (tests/reports/qoder-adapter-test-report.md, 372 lines; 132 targeted tests across 7 invocations all PASS; D-10 satisfied; Capability Gate Path A) |
 | Phase 06 LEARN | ~8min | 1 file | 06-LEARNINGS.md (255 lines; 31 items extracted from 5 SUMMARY + CONTEXT + UAT + report) |
+| Phase 8 P1 | ~18min | 3 tasks | 1 file (UPSTREAM-CHANGES.md, 247 lines, 209 data rows; D-21 + DECOUPLE-01/02/06/07 cited; static alignment |RAW-MANIFEST|=0) |
+
+## Decisions
+
+- [Phase 8]: Manifest initially-filled by git diff + awk classifier, then refined by judgment (UPSTREAM-01-C)
+- [Phase 8]: Three Pi-coupling residuals tagged: mcp-panel.ts + mcp-setup-panel.ts (DECOUPLE-06 follow-up) + index.ts (D-04 backward-compat)
+- [Phase 8]: Default Resolution distribution: 114 ours / 84 assess / 11 manual — no theirs rows (theirs is a runtime choice, not a static default)

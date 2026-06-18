@@ -223,9 +223,9 @@ Establish fork-maintainer workflow for merging upstream features and bugfixes fr
 - `skills/upstream-merge/SKILL.md` — merge conflict resolution skill
 - Updated Phase 5-6 implementation patterns to prefer wrappers over direct edits
 
-**Plans:** 0/2 plans executed
+**Plans:** 1/2 plans executed
 
 Plans:
 
-- [ ] 08-01-PLAN.md — `UPSTREAM-CHANGES.md` initial-fill (5-column manifest + Decision Anchors + static alignment check)
+- [x] 08-01-PLAN.md — `UPSTREAM-CHANGES.md` initial-fill (5-column manifest + Decision Anchors + static alignment check)
 - [ ] 08-02-PLAN.md — `skills/upstream-merge/SKILL.md` 4-section skill + 2 dry-run scenarios (worktree-isolated) + follow-up issue template
