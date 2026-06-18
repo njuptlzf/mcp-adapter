@@ -722,32 +722,39 @@ Plan 1 task 1 文档注明:如果 `git fetch upstream` 失败(GnuTLS / 网络限
 | R5 | Phase 8 manifest 是 "frozen snapshot" (per UPSTREAM-01-D),upstream 大量变更后过期 | LOW (initial commit 后短期不发生) | manifest 与实际 diverge,agent 误决策 | 每次 sync 重新跑 initial-fill,commit 同步更新 manifest |
 | R6 | Grep `--include '*.ts'` 漏掉 `.md` 文件中的 Pi-coupling(文档 prose) | LOW (docs prose 不算真实耦合) | manifest 误判 docs 类别为 ours | docs 类别用 "assess via intent alignment"(人工判断),非 grep |
 
-### Open Questions
+### Open Questions (RESOLVED)
+
+> All 5 open questions resolved during planning (see 08-01-PLAN.md / 08-02-PLAN.md). Rationales below.
 
 1. **OQ1: `ToolInfo` marker 是否应该完全删除?**
-   - 已知:`ToolInfo` 在 `interfaces/agent-api.ts` 是 generic export (D-07),`grep ToolInfo` 命中 15 files 中 14 个是 generic
-   - 不确定:是否需要保留为 "edge case" marker,要求检查 `import { ToolInfo } from "@earendil-works/..."` 而非 `from "./interfaces/agent-api"`
-   - 建议:**删除**,简单 grep 命中数 false positive 太高,人工 review 容易 skip;manifest 表格的 `interfaces/agent-api.ts` 行已能 anchor "本 fork 重新定义 ToolInfo" 这个事实
+   - 已知：`ToolInfo` 在 `interfaces/agent-api.ts` 是 generic export (D-07)，`grep ToolInfo` 命中 15 files 中 14 个是 generic
+   - 不确定：是否需要保留为 "edge case" marker，要求检查 `import { ToolInfo } from "@earendil-works/..."` 而非 `from "./interfaces/agent-api"`
+   - 建议：**删除**，简单 grep 命中数 false positive 太高，人工 review 容易 skip；manifest 表格的 `interfaces/agent-api.ts` 行已能 anchor "本 fork 重新定义 ToolInfo" 这个事实
+   - **RESOLVED:** DELETED with import-path filter. See Plan 08-02 Task 1 §"File 2" + `skills/upstream-merge/references/pi-coupling-markers.md` §"DELETED markers". `ToolInfo` is flagged only by import path: `from .*pi-coding-agent.*ToolInfo` (NOT `from .*interfaces/agent-api.*ToolInfo`). The 8 `pi.X` patterns are also DELETED from SKILL.md §3.1's runnable grep template; the literal pattern list is catalogued exclusively in the references file (mitigates checker Issue 1 / T-08-02-FP).
 
 2. **OQ2: `ctx.ui.X` 算 Pi-coupling 还是 generic API 表面?**
-   - 已知:`ctx.ui` 在 codebase 是 `UISystem` 接口(generic),但 method 名是 Pi-style (`notify`/`custom`/`theme`)
-   - 不确定:upstream merge 一个新 `ctx.ui.X` 调用算 Pi-coupling 重引入还是合法
-   - 建议:**保留 marker 但标 "structural compatibility"** —— 命中不立即触发 follow-up,而是"rationale 列说明本 fork API 表面故意保持 Pi-style"
+   - 已知：`ctx.ui` 在 codebase 是 `UISystem` 接口(generic)，但 method 名是 Pi-style (`notify`/`custom`/`theme`)
+   - 不确定：upstream merge 一个新 `ctx.ui.X` 调用算 Pi-coupling 重引入还是合法
+   - 建议：**保留 marker 但标 "structural compatibility"** —— 命中不立即触发 follow-up，而是"rationale 列说明本 fork API 表面故意保持 Pi-style"
+   - **RESOLVED:** MEDIUM structural marker, NOT a follow-up trigger. See Plan 08-02 Task 1 §"File 2" (HIGH/MEDIUM/DELETED 3-tier inventory) + `skills/upstream-merge/references/pi-coupling-markers.md` §"MEDIUM-precision markers". `commands.ts` hits are NOT follow-up triggers (D-04 / UISystem structural compatibility). Manifest Rationale column for `commands.ts` row notes this design choice.
 
 3. **OQ3: dry-run 是否需要真实 `git merge upstream/main`?**
-   - 当前方案:worktree + 模拟 patch
-   - 替代方案:`git merge upstream/main --no-commit --no-ff` 真实试 merge,不 commit
-   - 建议:用替代方案更真实,但本环境 `git fetch upstream` 需 workaround;Plan 2 task 3+4 可两者都做(worktree 模拟 + 真实 --no-commit)
+   - 当前方案：worktree + 模拟 patch
+   - 替代方案：`git merge upstream/main --no-commit --no-ff` 真实试 merge，不 commit
+   - 建议：用替代方案更真实，但本环境 `git fetch upstream` 需 workaround；Plan 2 task 3+4 可两者都做(worktree 模拟 + 真实 --no-commit)
+   - **RESOLVED:** worktree simulation only (no real `--no-commit` merge). See Plan 08-02 Tasks 2-3 (Scenario 1 / Scenario 2 both use `git worktree add /tmp/dryrun-* -b dryrun/<name> upstream/main` + `git checkout upstream/main -- <file>` + illustrative comment/sed inserts). Rationale: real `git merge --no-commit` would touch the main repo's index state and complicate clean-up; the worktree pattern is a strictly safer "evidence-only" simulation. The 2 worktrees at `/tmp/dryrun-*` are explicitly listed in the SUMMARY's `## Worktree cleanup` for user audit.
 
 4. **OQ4: Manifest 表格是否需要 "Last verified" 字段?**
-   - 提议:每行加 "Last verified at commit <sha>" 便于过期检测
-   - 不提议:每次 git fetch 后自动跑 grep + update 字段(UPSTREAM-01-D 决策禁止)
-   - 建议:**不加字段**,manifest 顶部加 "Generated at: <date> for upstream vX.Y.Z" 即可,过期检测靠 PR 流程
+   - 提议：每行加 "Last verified at commit <sha>" 便于过期检测
+   - 不提议：每次 git fetch 后自动跑 grep + update 字段(UPSTREAM-01-D 决策禁止)
+   - 建议：**不加字段**，manifest 顶部加 "Generated at: <date> for upstream vX.Y.Z" 即可，过期检测靠 PR 流程
+   - **RESOLVED:** NOT added per-table-column. Manifest 顶部仅 `Generated at: <date> for upstream/main @ <short-sha>` header (per Plan 08-01 Task 2 §"Header section"). Per-row "Last verified" field is explicitly excluded to avoid implying CI automation (UPSTREAM-01-D). Freshness detection relies on the standard PR-flow manifest regeneration (re-run `git diff upstream/main --name-status -- '*.ts' '*.md' '*.json'` + diff against the current manifest).
 
 5. **OQ5: SKILL.md 应不应该有 "deferred" 章节?**
    - CONTEXT 列出 4 个 deferred ideas (CI hook / bot / 反向 contribute / schedule refresh)
-   - 不提议:在 SKILL.md 加 deferred 章节(避免 scope creep)
-   - 建议:**不加**,deferred ideas 在 `.planning/phases/08-*/deferred-items.md`(Phase 7 已建 pattern)
+   - 不提议：在 SKILL.md 加 deferred 章节(避免 scope creep)
+   - 建议：**不加**，deferred ideas 在 `.planning/phases/08-*/deferred-items.md`(Phase 7 已建 pattern)
+   - **RESOLVED:** NOT added to SKILL.md. Deferred ideas go to `.planning/phases/08-upstream-merge-conflict-resolution/deferred-items.md` (mirrors Phase 7 pattern). See Plan 08-02 Task 5 §"File 1" — 4 H2 sections (CI hook / auto-resolve bot / reverse-contribute / refresh schedule) with "Found during / Why deferred / Suggested owner / Action taken" sub-bullets per item.
 
 ### Assumptions Log
 
@@ -878,13 +885,15 @@ git remote get-url upstream || { echo "ERROR: upstream remote not configured. Ru
 | Dry-run scenarios | MEDIUM | worktree 模拟 ≠ actual merge,需后续真实 `--no-commit` 验证 |
 | Git workflow | HIGH | merge vs rebase 决策明确,`--no-ff` audit trail 完整 |
 
-### Open Questions
+### Open Questions (RESOLVED — see body section above)
 
-1. `ToolInfo` marker 是否完全删除?(建议删,减少 false positive)
-2. `ctx.ui.X` 算 Pi-coupling 还是 structural compatibility?(建议标"structural",不触发 follow-up)
-3. dry-run 是否要真实 `git merge --no-commit`?(建议两者都做)
-4. Manifest 是否要 "Last verified at <sha>" 字段?(建议不加,顶部加 "Generated at" 即可)
-5. SKILL.md 是否要 "deferred" 章节?(建议不加,用 `.planning/phases/08/deferred-items.md`)
+> All 5 OQs resolved during planning; per-resolution rationale + plan cross-reference in the "Open Questions (RESOLVED)" section above.
+
+1. `ToolInfo` marker handling — **DELETED with import-path filter** (OQ1 → Plan 08-02 Task 1 + `references/pi-coupling-markers.md` §"DELETED markers")
+2. `ctx.ui.X` Pi-coupling classification — **MEDIUM structural marker, not a follow-up trigger** (OQ2 → Plan 08-02 Task 1 §"File 2" + manifest `commands.ts` row Rationale)
+3. dry-run real-merge vs worktree — **worktree simulation only** (OQ3 → Plan 08-02 Tasks 2-3; no `--no-commit` merge; worktree clean-up listed in SUMMARY)
+4. Manifest "Last verified" column — **NOT added** (OQ4 → Plan 08-01 Task 2 §"Header section"; top-of-file `Generated at:` header only)
+5. SKILL.md "deferred" section — **NOT added** (OQ5 → Plan 08-02 Task 5 §"File 1"; deferred-items.md mirrors Phase 7 pattern)
 
 ### Ready for Planning
 
