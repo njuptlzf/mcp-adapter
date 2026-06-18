@@ -1,0 +1,85 @@
+{
+  "name": "text-analyzer",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "sentiment",
+      "description": "Analyze sentiment of text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to analyze" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "keywords",
+      "description": "Extract keywords from text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to extract keywords from" },
+          "maxKeywords": { "type": "number", "description": "Maximum number of keywords to return", "default": 10 }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "summary",
+      "description": "Generate summary of text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to summarize" },
+          "maxSentences": { "type": "number", "description": "Maximum number of sentences in summary", "default": 3 }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "language_detect",
+      "description": "Detect language of text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to detect language for" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "readability",
+      "description": "Calculate readability score",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to analyze" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "pos_tag",
+      "description": "Perform part-of-speech tagging",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to tag" }
+        },
+        "required": ["text"]
+      }
+    },
+    {
+      "name": "ner",
+      "description": "Perform named entity recognition",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to extract entities from" }
+        },
+        "required": ["text"]
+      }
+    }
+  ]
+}

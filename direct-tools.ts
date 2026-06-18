@@ -1,4 +1,4 @@
-import type { AgentToolResult, AgentToolUpdateCallback, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentContext } from "./interfaces/agent-api.ts";
 import type { McpExtensionState } from "./state.ts";
 import type { DirectToolSpec, McpConfig, McpContent } from "./types.ts";
 import type { MetadataCache } from "./metadata-cache.ts";
@@ -11,6 +11,7 @@ import { formatToolName, isToolExcluded } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { authenticate, supportsOAuth } from "./mcp-auth-flow.ts";
 import { formatAuthRequiredMessage } from "./utils.ts";
+import type { McpToolResult } from "./types.ts";
 
 const BUILTIN_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "mcp"]);
 
@@ -264,9 +265,9 @@ type DirectToolExecute = (
   toolCallId: string,
   params: Record<string, unknown>,
   signal: AbortSignal | undefined,
-  onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined,
-  ctx: ExtensionContext,
-) => Promise<AgentToolResult<Record<string, unknown>>>;
+  onUpdate: ((update: McpToolResult<Record<string, unknown>>) => void) | undefined,
+  ctx: AgentContext,
+) => Promise<McpToolResult<Record<string, unknown>>>;
 
 export function createDirectToolExecutor(
   getState: () => McpExtensionState | null,

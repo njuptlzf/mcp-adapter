@@ -1,4 +1,4 @@
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { UISystem, FormConfig, FormResult, FormField } from "./interfaces/agent-api.ts";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   ElicitRequestSchema,
@@ -17,76 +17,9 @@ export interface ExtensionUIFormSelectOption {
   description?: string;
 }
 
-export type ExtensionUIFormField =
-  | {
-      type: "text";
-      name: string;
-      label: string;
-      description?: string;
-      placeholder?: string;
-      required?: boolean;
-      defaultValue?: string;
-      minLength?: number;
-      maxLength?: number;
-      pattern?: string;
-    }
-  | {
-      type: "number" | "integer";
-      name: string;
-      label: string;
-      description?: string;
-      required?: boolean;
-      defaultValue?: number;
-      minimum?: number;
-      maximum?: number;
-    }
-  | {
-      type: "boolean";
-      name: string;
-      label: string;
-      description?: string;
-      defaultValue?: boolean;
-    }
-  | {
-      type: "select";
-      name: string;
-      label: string;
-      description?: string;
-      required?: boolean;
-      options: ExtensionUIFormSelectOption[];
-      defaultValue?: string;
-    }
-  | {
-      type: "multiSelect";
-      name: string;
-      label: string;
-      description?: string;
-      required?: boolean;
-      options: ExtensionUIFormSelectOption[];
-      defaultValue?: string[];
-    };
-
-export interface ExtensionUIFormRequest {
-  title: string;
-  message?: string;
-  fields: ExtensionUIFormField[];
-  submitLabel?: string;
-  secondaryLabel?: string;
-  cancelLabel?: string;
-}
-
-export type ExtensionUIFormResult =
-  | { action: "submit"; values: Record<string, ExtensionUIFormValue> }
-  | { action: "secondary" }
-  | { action: "cancel" };
-
-export interface ElicitationUIContext extends ExtensionUIContext {
-  form(request: ExtensionUIFormRequest): Promise<ExtensionUIFormResult>;
-}
-
 export interface ElicitationHandlerOptions {
   serverName: string;
-  ui: ElicitationUIContext;
+  ui: UISystem;
   autoOpenUrls: boolean;
 }
 
@@ -114,13 +47,13 @@ export async function handleFormElicitation(
   params: ElicitRequestFormParams,
 ): Promise<ElicitResult> {
   const form = convertMcpSchemaToPiForm(options.serverName, params);
-  const result = await options.ui.form(form);
+  const result = await options.ui.form!(form);
   if (result.action !== "submit") {
     return convertPiFormResultToMcpResult(result);
   }
   return {
     action: "accept",
-    content: coerceAndValidateFormValues(params, result.values),
+    content: coerceAndValidateFormValues(params, result.values as Record<string, ExtensionUIFormValue>),
   };
 }
 
@@ -130,7 +63,7 @@ export async function handleUrlElicitation(
 ): Promise<ElicitResult> {
   const browserUrl = getBrowserElicitationUrl(params.url);
   if (!options.autoOpenUrls) {
-    const result = await options.ui.form({
+    const result = await options.ui.form!({
       title: "MCP Browser Request",
       message: [
         `Server: ${options.serverName}`,
@@ -159,7 +92,7 @@ export async function handleUrlElicitation(
 export function convertMcpSchemaToPiForm(
   serverName: string,
   params: ElicitRequestFormParams,
-): ExtensionUIFormRequest {
+): FormConfig {
   const required = new Set(params.requestedSchema.required ?? []);
   return {
     title: "MCP Input Request",
@@ -167,7 +100,7 @@ export function convertMcpSchemaToPiForm(
     submitLabel: "Submit",
     secondaryLabel: "Decline",
     cancelLabel: "Cancel",
-    fields: Object.entries(params.requestedSchema.properties).map(([name, schema]): ExtensionUIFormField => {
+    fields: Object.entries(params.requestedSchema.properties).map(([name, schema]): FormField => {
       const label = schema.title ?? humanizeName(name);
       const base = {
         name,
@@ -181,7 +114,7 @@ export function convertMcpSchemaToPiForm(
           ...base,
           type: "select" as const,
           options: schema.oneOf.map((option) => ({ value: option.const, label: option.title })),
-          defaultValue: schema.default,
+          default: schema.default,
         });
       }
 
@@ -191,7 +124,7 @@ export function convertMcpSchemaToPiForm(
           ...base,
           type: "select" as const,
           options: schema.enum.map((value, index) => omitUndefined({ value, label: enumNames?.[index] })),
-          defaultValue: schema.default,
+          default: schema.default,
         });
       }
 
@@ -200,7 +133,7 @@ export function convertMcpSchemaToPiForm(
           ...base,
           type: "multiSelect" as const,
           options: extractMultiSelectOptions(schema),
-          defaultValue: schema.default,
+          default: schema.default,
         });
       }
 
@@ -208,7 +141,7 @@ export function convertMcpSchemaToPiForm(
         return omitUndefined({
           ...base,
           type: schema.type,
-          defaultValue: schema.default,
+          default: schema.default,
           minimum: schema.minimum,
           maximum: schema.maximum,
         });
@@ -220,7 +153,7 @@ export function convertMcpSchemaToPiForm(
           name,
           label,
           description: schema.description,
-          defaultValue: schema.default,
+          default: schema.default,
         });
       }
 
@@ -228,7 +161,7 @@ export function convertMcpSchemaToPiForm(
       return omitUndefined({
         ...base,
         type: "text" as const,
-        defaultValue: stringSchema.default,
+        default: stringSchema.default,
         minLength: stringSchema.minLength,
         maxLength: stringSchema.maxLength,
       });
@@ -236,10 +169,10 @@ export function convertMcpSchemaToPiForm(
   };
 }
 
-export function convertPiFormResultToMcpResult(result: ExtensionUIFormResult): ElicitResult {
+export function convertPiFormResultToMcpResult(result: FormResult): ElicitResult {
   if (result.action === "secondary") return { action: "decline" };
   if (result.action === "cancel") return { action: "cancel" };
-  return { action: "accept", content: stripUndefined(result.values) as ElicitResult["content"] };
+  return { action: "accept", content: stripUndefined(result.values as Record<string, ExtensionUIFormValue>) as ElicitResult["content"] };
 }
 
 export function coerceAndValidateFormValues(

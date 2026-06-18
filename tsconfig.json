@@ -10,5 +10,5 @@
     "noEmit": true,
     "resolveJsonModule": true
   },
-  "include": ["*.ts", "interfaces/**/*.ts", "adapters/**/*.ts"]
+  "include": ["*.ts", "interfaces/**/*.ts", "adapters/**/*.ts", "types/**/*.ts"]
 }

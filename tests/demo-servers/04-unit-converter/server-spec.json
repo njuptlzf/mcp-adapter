@@ -1,0 +1,110 @@
+{
+  "name": "unit-converter",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "length",
+      "description": "Convert length units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["mm", "cm", "m", "km", "in", "ft", "yd", "mi"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["mm", "cm", "m", "km", "in", "ft", "yd", "mi"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "weight",
+      "description": "Convert weight units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["mg", "g", "kg", "lb", "oz", "ton"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["mg", "g", "kg", "lb", "oz", "ton"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "temperature",
+      "description": "Convert temperature units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["c", "f", "k"], "description": "Source unit (c/f/k)" },
+          "to": { "type": "string", "enum": ["c", "f", "k"], "description": "Target unit (c/f/k)" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "speed",
+      "description": "Convert speed units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["mps", "kmh", "mph", "knot"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["mps", "kmh", "mph", "knot"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "area",
+      "description": "Convert area units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["mm2", "cm2", "m2", "km2", "in2", "ft2", "yd2", "acre", "hectare"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["mm2", "cm2", "m2", "km2", "in2", "ft2", "yd2", "acre", "hectare"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "volume",
+      "description": "Convert volume units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["ml", "l", "m3", "in3", "ft3", "gal", "qt", "pt", "cup"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["ml", "l", "m3", "in3", "ft3", "gal", "qt", "pt", "cup"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "pressure",
+      "description": "Convert pressure units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["pa", "kpa", "mpa", "bar", "atm", "psi", "mmhg"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["pa", "kpa", "mpa", "bar", "atm", "psi", "mmhg"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    },
+    {
+      "name": "energy",
+      "description": "Convert energy units",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "number", "description": "Value to convert" },
+          "from": { "type": "string", "enum": ["j", "kj", "cal", "kcal", "wh", "kwh", "btu", "ev"], "description": "Source unit" },
+          "to": { "type": "string", "enum": ["j", "kj", "cal", "kcal", "wh", "kwh", "btu", "ev"], "description": "Target unit" }
+        },
+        "required": ["value", "from", "to"]
+      }
+    }
+  ]
+}

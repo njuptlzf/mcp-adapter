@@ -1,0 +1,69 @@
+{
+  "name": "kv-store",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "set",
+      "description": "Set key-value pair",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Key to store" },
+          "value": { "type": "string", "description": "Value to store" }
+        },
+        "required": ["key", "value"]
+      }
+    },
+    {
+      "name": "get",
+      "description": "Get value by key",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Key to retrieve" }
+        },
+        "required": ["key"]
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Delete key-value pair",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Key to delete" }
+        },
+        "required": ["key"]
+      }
+    },
+    {
+      "name": "list_keys",
+      "description": "List all keys",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string", "description": "Optional pattern to filter keys (minimatch style)" }
+        }
+      }
+    },
+    {
+      "name": "exists",
+      "description": "Check if key exists",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Key to check" }
+        },
+        "required": ["key"]
+      }
+    },
+    {
+      "name": "clear",
+      "description": "Clear all key-value pairs",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import type { AgentToolResult, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { ToolInfo } from "./interfaces/agent-api.ts";
 import { checkSync } from "recheck";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata, McpContent } from "./types.ts";
@@ -9,8 +9,9 @@ import { transformMcpContent } from "./tool-registrar.ts";
 import { maybeStartUiSession, type UiSessionRuntime } from "./ui-session.ts";
 import { formatAuthRequiredMessage, truncateAtWord } from "./utils.ts";
 import { authenticate, supportsOAuth } from "./mcp-auth-flow.ts";
+import type { McpToolResult } from "./types.ts";
 
-type ProxyToolResult = AgentToolResult<Record<string, unknown>>;
+type ProxyToolResult = McpToolResult<Record<string, unknown>>;
 
 const MAX_REGEX_SEARCH_QUERY_LENGTH = 256;
 const REGEX_SAFETY_CHECK_PARAMS = {
@@ -476,7 +477,7 @@ export async function executeCall(
   toolName: string,
   args?: Record<string, unknown>,
   serverOverride?: string,
-  getPiTools?: () => ToolInfo[],
+  getAgentTools?: () => ToolInfo[],
 ): Promise<ProxyToolResult> {
   let serverName: string | undefined = serverOverride;
   let toolMeta: ToolMetadata | undefined;
@@ -598,7 +599,7 @@ export async function executeCall(
 
   if (!serverName || !toolMeta) {
     const nativeTool = !serverOverride
-      ? getPiTools?.().find((tool) => tool.name === toolName && tool.name !== "mcp")
+      ? getAgentTools?.().find((tool) => tool.name === toolName && tool.name !== "mcp")
       : undefined;
     if (nativeTool) {
       return {

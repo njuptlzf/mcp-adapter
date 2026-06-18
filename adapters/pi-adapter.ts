@@ -15,6 +15,7 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionUIContext,
+	ModelRegistry,
 } from "@earendil-works/pi-coding-agent";
 import type {
 	AgentAPI,
@@ -25,6 +26,8 @@ import type {
 	ToolRegistration,
 	UISystem,
 } from "../interfaces/agent-api.ts";
+import { PiSamplingProvider } from "./pi-sampling-provider.ts";
+import { piRenderWrapper } from "./pi-renderer.ts";
 
 /**
  * Type of Pi's UI context, narrowed for the optional capabilities we use.
@@ -33,6 +36,7 @@ import type {
 type PiUI = ExtensionUIContext & {
 	form?: (...args: unknown[]) => Promise<unknown>;
 	custom?: (...args: unknown[]) => unknown;
+	confirm?: (title: string, message: string) => Promise<boolean>;
 	theme?: { fg?: (color: string, text: string) => string };
 };
 
@@ -43,13 +47,13 @@ export class PiAdapter implements AgentAPI {
 	registerTool(tool: ToolRegistration): void {
 		// Pi's registerTool has a strict generic; cast at the boundary so
 		// the universal interface can use its own generic ToolRegistration.
-		(this.pi.registerTool as (tool: ToolRegistration) => unknown)(tool);
+		(this.pi.registerTool as (tool: ToolRegistration) => unknown)(this.adaptTool(tool));
 	}
 
 	registerCommand(name: string, config: CommandConfig): void {
 		(this.pi.registerCommand as (name: string, config: CommandConfig) => unknown)(
 			name,
-			config,
+			this.adaptCommand(config),
 		);
 	}
 
@@ -68,8 +72,67 @@ export class PiAdapter implements AgentAPI {
 		// is permissive, so we cast at the boundary.
 		(this.pi.on as (event: string, handler: (...args: unknown[]) => unknown) => unknown)(
 			event,
-			handler,
+			this.adaptEventHandler(event, handler),
 		);
+	}
+
+	/** Bridge a generic ToolRegistration so Pi receives native Text renderers and AgentContext. */
+	private adaptTool(tool: ToolRegistration): ToolRegistration {
+		const adapted: ToolRegistration = { ...tool };
+
+		if (typeof tool.execute === "function") {
+			const originalExecute = tool.execute;
+			adapted.execute = (...args: unknown[]) => {
+				if (args.length > 0) {
+					const lastIndex = args.length - 1;
+					args[lastIndex] = adaptPiContext(args[lastIndex] as ExtensionContext);
+				}
+				return originalExecute(...args);
+			};
+		}
+
+		if (typeof tool.renderCall === "function") {
+			adapted.renderCall = piRenderWrapper(
+				tool.renderCall as (...args: unknown[]) => string,
+			);
+		}
+
+		if (typeof tool.renderResult === "function") {
+			adapted.renderResult = piRenderWrapper(
+				tool.renderResult as (...args: unknown[]) => string,
+			);
+		}
+
+		return adapted;
+	}
+
+	/** Bridge a generic command handler so Pi's ExtensionContext is converted to AgentContext. */
+	private adaptCommand(config: CommandConfig): CommandConfig {
+		return {
+			...config,
+			handler: (...args: unknown[]) => {
+				const adaptedArgs = args.map((arg, index) =>
+					index === 1 ? adaptPiContext(arg as ExtensionContext) : arg,
+				);
+				return config.handler(...adaptedArgs);
+			},
+		};
+	}
+
+	/** Bridge a generic event handler so Pi's ExtensionContext is converted to AgentContext. */
+	private adaptEventHandler(
+		event: string,
+		handler: (...args: unknown[]) => void | Promise<void>,
+	): (...args: unknown[]) => void | Promise<void> {
+		return (...args: unknown[]) => {
+			if (
+				(event === "session_start" || event === "session_shutdown") &&
+				args.length > 1
+			) {
+				args[1] = adaptPiContext(args[1] as ExtensionContext);
+			}
+			return handler(...args);
+		};
 	}
 
 	getAllTools(): ToolInfo[] {
@@ -104,13 +167,25 @@ export class PiAdapter implements AgentAPI {
  */
 export function adaptPiContext(ctx: ExtensionContext): AgentContext {
 	const ui = ctx.hasUI ? adaptPiUI(ctx.ui as PiUI) : undefined;
+	const piUi = ctx.hasUI ? (ctx.ui as PiUI) : undefined;
+	const modelRegistry = ctx.modelRegistry as ModelRegistry | undefined;
+	const currentModel = ctx.model as import("@earendil-works/pi-ai").Model<import("@earendil-works/pi-ai").Api> | undefined;
+	const samplingProvider = modelRegistry
+		? new PiSamplingProvider(
+				modelRegistry,
+				() => currentModel,
+				piUi?.confirm ? (title, message) => piUi.confirm!(title, message) : undefined,
+			)
+		: undefined;
 	return {
 		cwd: ctx.cwd,
 		hasUI: ctx.hasUI,
 		ui,
 		model: ctx.model,
 		modelRegistry: ctx.modelRegistry,
+		samplingProvider,
 		signal: ctx.signal,
+		reload: (ctx as unknown as { reload?: () => Promise<void> }).reload,
 	};
 }
 

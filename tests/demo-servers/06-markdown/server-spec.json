@@ -1,0 +1,61 @@
+{
+  "name": "markdown",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "to_html",
+      "description": "Convert markdown to HTML",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "markdown": { "type": "string", "description": "Markdown text to convert" }
+        },
+        "required": ["markdown"]
+      }
+    },
+    {
+      "name": "to_text",
+      "description": "Convert HTML to plain text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "html": { "type": "string", "description": "HTML text to convert" }
+        },
+        "required": ["html"]
+      }
+    },
+    {
+      "name": "get_headings",
+      "description": "Extract headings from markdown",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "markdown": { "type": "string", "description": "Markdown text" }
+        },
+        "required": ["markdown"]
+      }
+    },
+    {
+      "name": "get_links",
+      "description": "Extract links from markdown",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "markdown": { "type": "string", "description": "Markdown text" }
+        },
+        "required": ["markdown"]
+      }
+    },
+    {
+      "name": "word_count",
+      "description": "Count words in text",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "text": { "type": "string", "description": "Text to count words in" }
+        },
+        "required": ["text"]
+      }
+    }
+  ]
+}

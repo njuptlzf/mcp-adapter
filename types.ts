@@ -2,7 +2,6 @@
 import type { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import type { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
 import type { UiStreamMode } from "./ui-stream-types.ts";
 
 // Transport type (stdio + HTTP)
@@ -259,8 +258,24 @@ export interface McpContent {
   description?: string;
 }
 
-// Pi content block type
-export type ContentBlock = TextContent | ImageContent;
+// Agent-agnostic MCP content block types (structurally compatible with Pi's AgentToolResult)
+export interface McpTextContent {
+  type: "text";
+  text: string;
+}
+
+export interface McpImageContent {
+  type: "image";
+  data: string;
+  mimeType: string;
+}
+
+export interface McpToolResult<T = Record<string, unknown>> {
+  content: Array<McpTextContent | McpImageContent>;
+  details?: T;
+}
+
+export type ContentBlock = McpTextContent | McpImageContent;
 
 // OAuth configuration (SDK handles auto-discovery and dynamic registration)
 export interface OAuthConfig {

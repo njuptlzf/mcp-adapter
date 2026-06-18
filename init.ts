@@ -34,14 +34,13 @@ export async function initializeMcp(
 
   const manager = new McpServerManager();
   const samplingAutoApprove = config.settings?.samplingAutoApprove === true;
-  if (config.settings?.sampling !== false && (ctx.hasUI || samplingAutoApprove)) {
+  if (config.settings?.sampling !== false && ctx.samplingProvider && (ctx.hasUI || samplingAutoApprove)) {
     manager.setSamplingConfig({
-      autoApprove: samplingAutoApprove,
+      provider: ctx.samplingProvider,
       ui: ctx.hasUI ? ctx.ui : undefined,
-      modelRegistry: ctx.modelRegistry,
-      getCurrentModel: () => ctx.model,
+      autoApprove: samplingAutoApprove,
       getSignal: () => ctx.signal,
-    } as Parameters<typeof manager.setSamplingConfig>[0]);
+    });
   }
   const elicitationEnabled =
     config.settings?.elicitation !== false &&

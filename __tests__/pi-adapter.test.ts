@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PiAdapter, adaptPiContext } from "../adapters/pi-adapter.ts";
+import { piRenderWrapper } from "../adapters/pi-renderer.ts";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+
+vi.mock("../adapters/pi-renderer.ts", () => ({
+	piRenderWrapper: vi.fn((fn) => (...args: unknown[]) => `Text(${fn(...args)})`),
+}));
 
 type PiMock = {
 	registerTool: ReturnType<typeof vi.fn>;
@@ -42,13 +47,61 @@ describe("PiAdapter", () => {
 		const tool = { name: "test-tool" };
 		adapter.registerTool(tool);
 		expect(pi.registerTool).toHaveBeenCalledTimes(1);
-		expect(pi.registerTool).toHaveBeenCalledWith(tool);
+		const forwarded = pi.registerTool.mock.calls[0][0];
+		expect(forwarded).toMatchObject({ name: "test-tool" });
+	});
+
+	it("wraps tool execute to convert Pi ExtensionContext to AgentContext", () => {
+		const genericExecute = vi.fn();
+		const tool = {
+			name: "test-tool",
+			execute: genericExecute,
+		};
+		adapter.registerTool(tool);
+
+		const forwarded = pi.registerTool.mock.calls[0][0];
+		const piCtx = { cwd: "/pi", hasUI: false };
+		forwarded.execute("id", {}, undefined, undefined, piCtx);
+
+		expect(genericExecute).toHaveBeenCalledTimes(1);
+		const forwardedCtx = genericExecute.mock.calls[0][4];
+		expect(forwardedCtx).toEqual(expect.objectContaining({ cwd: "/pi", hasUI: false }));
+	});
+
+	it("wraps tool renderCall and renderResult via piRenderWrapper", () => {
+		const renderCall = () => "call";
+		const renderResult = () => "result";
+		const tool = {
+			name: "test-tool",
+			execute: vi.fn(),
+			renderCall,
+			renderResult,
+		};
+		adapter.registerTool(tool);
+
+		expect(piRenderWrapper).toHaveBeenCalledWith(renderCall);
+		expect(piRenderWrapper).toHaveBeenCalledWith(renderResult);
 	});
 
 	it("forwards registerCommand with the given name and config", () => {
 		const config = { description: "demo", handler: vi.fn() };
 		adapter.registerCommand("mcp", config);
-		expect(pi.registerCommand).toHaveBeenCalledWith("mcp", config);
+		expect(pi.registerCommand).toHaveBeenCalledWith("mcp", expect.any(Object));
+		const forwarded = pi.registerCommand.mock.calls[0][1];
+		expect(forwarded.description).toBe("demo");
+	});
+
+	it("wraps command handler to convert Pi ExtensionContext to AgentContext", () => {
+		const genericHandler = vi.fn();
+		const config = { description: "demo", handler: genericHandler };
+		adapter.registerCommand("mcp", config);
+
+		const forwarded = pi.registerCommand.mock.calls[0][1];
+		const piCtx = { cwd: "/pi", hasUI: false };
+		forwarded.handler("args", piCtx);
+
+		expect(genericHandler).toHaveBeenCalledTimes(1);
+		expect(genericHandler).toHaveBeenCalledWith("args", expect.objectContaining({ cwd: "/pi", hasUI: false }));
 	});
 
 	it("forwards registerFlag with the given name and config", () => {
@@ -60,7 +113,31 @@ describe("PiAdapter", () => {
 	it("forwards on() with event name and handler", () => {
 		const handler = vi.fn();
 		adapter.on("session_start", handler);
-		expect(pi.on).toHaveBeenCalledWith("session_start", handler);
+		expect(pi.on).toHaveBeenCalledWith("session_start", expect.any(Function));
+	});
+
+	it("wraps session event handlers to convert Pi ExtensionContext to AgentContext", () => {
+		const handler = vi.fn();
+		adapter.on("session_start", handler);
+
+		const forwarded = pi.on.mock.calls[0][1];
+		const piCtx = { cwd: "/pi", hasUI: false };
+		forwarded("session_start", piCtx);
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith("session_start", expect.objectContaining({ cwd: "/pi", hasUI: false }));
+	});
+
+	it("does not convert context for non-session events", () => {
+		const handler = vi.fn();
+		adapter.on("custom_event", handler);
+
+		const forwarded = pi.on.mock.calls[0][1];
+		const payload = { notAContext: true };
+		forwarded("custom_event", payload);
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith("custom_event", payload);
 	});
 
 	it("returns tools from getAllTools", () => {

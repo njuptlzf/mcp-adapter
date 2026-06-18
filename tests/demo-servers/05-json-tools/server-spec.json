@@ -1,0 +1,66 @@
+{
+  "name": "json-tools",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "parse",
+      "description": "Parse JSON string",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "json": { "type": "string", "description": "JSON string to parse" }
+        },
+        "required": ["json"]
+      }
+    },
+    {
+      "name": "stringify",
+      "description": "Stringify JSON object",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "obj": { "type": "string", "description": "JSON string to stringify (already parsed)" },
+          "space": { "type": "number", "description": "Number of spaces for indentation", "default": 2 }
+        },
+        "required": ["obj"]
+      }
+    },
+    {
+      "name": "get_path",
+      "description": "Get value at JSON path",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "obj": { "type": "string", "description": "JSON object as string" },
+          "path": { "type": "string", "description": "JSON path (e.g., 'a.b[0].c')" }
+        },
+        "required": ["obj", "path"]
+      }
+    },
+    {
+      "name": "merge",
+      "description": "Merge two JSON objects",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "obj1": { "type": "string", "description": "First JSON object" },
+          "obj2": { "type": "string", "description": "Second JSON object" },
+          "mergeArrays": { "type": "boolean", "description": "Whether to merge arrays or replace them", "default": false }
+        },
+        "required": ["obj1", "obj2"]
+      }
+    },
+    {
+      "name": "validate_schema",
+      "description": "Validate JSON against schema",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "data": { "type": "string", "description": "JSON data to validate" },
+          "schema": { "type": "string", "description": "JSON schema to validate against" }
+        },
+        "required": ["data", "schema"]
+      }
+    }
+  ]
+}

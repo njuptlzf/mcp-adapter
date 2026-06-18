@@ -1,0 +1,78 @@
+{
+  "name": "http-mock",
+  "version": "1.0.0",
+  "tools": [
+    {
+      "name": "get",
+      "description": "Mock HTTP GET request",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to request" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Request headers" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "post",
+      "description": "Mock HTTP POST request",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to request" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Request headers" },
+          "body": { "type": ["string", "object"], "description": "Request body" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "put",
+      "description": "Mock HTTP PUT request",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to request" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Request headers" },
+          "body": { "type": ["string", "object"], "description": "Request body" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "delete",
+      "description": "Mock HTTP DELETE request",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to request" },
+          "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "Request headers" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "check_status",
+      "description": "Mock HTTP status check",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "description": "URL to check" }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "parse_headers",
+      "description": "Parse HTTP headers string",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "headers": { "type": "string", "description": "HTTP headers string (one per line)" }
+        },
+        "required": ["headers"]
+      }
+    }
+  ]
+}
