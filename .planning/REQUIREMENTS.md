@@ -92,7 +92,7 @@
 ### UPSTREAM: Upstream Merge Conflict Resolution
 
 - [x] **UPSTREAM-01**: Create `UPSTREAM-CHANGES.md` manifest documenting all files diverged from upstream (https://github.com/nicobailon/pi-mcp-adapter), with per-file rationale (why changed, how to resolve conflicts)
-- [ ] **UPSTREAM-02**: Create `skills/upstream-merge/SKILL.md` — an agent skill that reads UPSTREAM-CHANGES.md when upstream merge conflicts occur, and provides conflict resolution guidance (keep adapter change vs accept upstream vs manual merge)
-- [ ] **UPSTREAM-03**: In the skill, define conflict resolution rules: (a) new files under adapters/, interfaces/, skills/ → always keep ours, (b) type-replacement changes in source files → prefer adapter pattern over Pi-specific imports, (c) upstream bugfixes to core MCP logic → accept if they don't re-introduce Pi coupling, (d) upstream features → assess per-case
+- [x] **UPSTREAM-02**: Create `skills/upstream-merge/SKILL.md` — an agent skill that reads UPSTREAM-CHANGES.md when upstream merge conflicts occur, and provides conflict resolution guidance (keep adapter change vs accept upstream vs manual merge)
+- [x] **UPSTREAM-03**: In the skill, define conflict resolution rules: (a) new files under adapters/, interfaces/, skills/ → always keep ours, (b) type-replacement changes in source files → prefer adapter pattern over Pi-specific imports, (c) upstream bugfixes to core MCP logic → accept if they don't re-introduce Pi coupling, (d) upstream features → assess per-case
 - [x] **UPSTREAM-04**: Minimize source file modifications during Phase 5-6 by preferring adapter/wrapper patterns over direct edits where possible
 - Priority: Must

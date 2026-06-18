@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
 status: verifying
-stopped_at: Phase 08 plans created (08-01 manifest, 08-02 skill+dry-run, plan-checker PASS)
-last_updated: "2026-06-18T02:29:16.942Z"
-last_activity: 2026-06-17 -- Phase 7 marked complete
+stopped_at: Phase 8 plan 2 of 2 complete — upstream-merge SKILL.md + 2 dry-runs + deferred-items landed (commits 1b555cc..15e6b69)
+last_updated: "2026-06-18T03:55:00.000Z"
+last_activity: 2026-06-18 -- Phase 8 Plan 2 complete (SKILL.md + dry-run validation)
 progress:
   total_phases: 8
   completed_phases: 7
   total_plans: 24
-  completed_plans: 23
-  percent: 88
+  completed_plans: 24
+  percent: 92
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-16T13:05:00+08:00
-**Status:** Phase complete — ready for verification
+**Last updated:** 2026-06-18T11:55:00+08:00
+**Status:** Phase 8 complete — ready for verification
 
 ## Current Position
 
-Phase: 7 — COMPLETE
-Plan: 5 of 5 complete (D-10 satisfied — Qoder adapter mcp-adapter-test skill report landed)
+Phase: 8 — COMPLETE
+Plan: 2 of 2 complete (UPSTREAM-01..04 all satisfied: manifest + SKILL.md + 2 dry-runs + deferred-items)
 Status: Phase complete — ready for verification
-Last activity: 2026-06-17 -- Phase 7 marked complete
+Last activity: 2026-06-18 -- Phase 8 Plan 2 complete (skills/upstream-merge/SKILL.md + 2 dry-run logs + deferred-items.md)
 
 ## Recent Progress
 
@@ -130,8 +130,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-18T02:20:49.983Z
-**Stopped at:** Phase 8 plan 1 of 2 complete — UPSTREAM-CHANGES.md manifest shipped (commit 35db675); Plan 08-02 (SKILL.md + dry-run) next
+**Last session:** 2026-06-18T03:55:00.000Z
+**Stopped at:** Phase 8 complete — 2/2 plans landed (UPSTREAM-01..04 satisfied); `/gsd-verify-work 08` may now run
 
 ## Performance Metrics
 
@@ -141,10 +141,15 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 06 P04 | ~10min | 1 task | 1 file (__tests__/qoder-adapter-integration.test.ts, 313 lines, 18 tests / 8 active + 10 gated; ADAPTER-03 satisfied) |
 | Phase 06 P05 | ~12min | 1 task | 1 file (tests/reports/qoder-adapter-test-report.md, 372 lines; 132 targeted tests across 7 invocations all PASS; D-10 satisfied; Capability Gate Path A) |
 | Phase 06 LEARN | ~8min | 1 file | 06-LEARNINGS.md (255 lines; 31 items extracted from 5 SUMMARY + CONTEXT + UAT + report) |
-| Phase 8 P1 | ~18min | 3 tasks | 1 file (UPSTREAM-CHANGES.md, 247 lines, 209 data rows; D-21 + DECOUPLE-01/02/06/07 cited; static alignment |RAW-MANIFEST|=0) |
+| Phase 8 P1 | ~18min | 3 tasks | 1 file (UPSTREAM-CHANGES.md, 247 lines, 209 data rows; D-21 + DECOUPLE-01/02/06/07 cited; static alignment \|RAW-MANIFEST\|=0) |
+| Phase 8 P2 | ~28min | 5 tasks | 5 files (SKILL.md 141 lines + references 127 + Scenario 1 log 180 + Scenario 2 log 362 + deferred-items 112; 922 total lines added; 5 atomic commits 1b555cc..15e6b69) |
 
 ## Decisions
 
 - [Phase 8]: Manifest initially-filled by git diff + awk classifier, then refined by judgment (UPSTREAM-01-C)
 - [Phase 8]: Three Pi-coupling residuals tagged: mcp-panel.ts + mcp-setup-panel.ts (DECOUPLE-06 follow-up) + index.ts (D-04 backward-compat)
 - [Phase 8]: Default Resolution distribution: 114 ours / 84 assess / 11 manual — no theirs rows (theirs is a runtime choice, not a static default)
+- [Phase 8 P2]: 5 atomic commits per user instruction (SKILL.md / references / Scenario 1 / Scenario 2 / deferred-items) — not 1 combined commit
+- [Phase 8 P2]: T-08-02-4 (checkpoint:human-verify) replaced with SELF-VERIFY for autonomous mode; §4 Checklist items marked PASS / DEFERRED with reasoning; user re-verification invited for (c)/(d) in real-merge context
+- [Phase 8 P2]: 8 pi.<method> false-positive patterns catalogued in references §"DELETED markers" with rationale (agentapi.X substring collision) — NOT in SKILL.md §3.1 runnable position
+- [Phase 8 P2]: §3.1 grep template uses RESEARCH Dimension 3 corrected version (\b word boundaries, types/pi-*.d.ts exclusion) — 0 false-positive hits in dry-runs
