@@ -57,11 +57,18 @@ function fetchUpstream(): void {
 }
 
 function parseDiff(stdout: string): string[] {
-  return stdout
-    .split("\n")
-    .filter((l) => l.length > 0)
-    .map((l) => l.split("\t")[1]?.trim() ?? "")
-    .filter((p) => p.length > 0);
+  const out: string[] = [];
+  for (const line of stdout.split("\n")) {
+    if (!line) continue;
+    const parts = line.split("\t");
+    if (parts.length < 2) continue;
+    const status = parts[0];
+    // R and C have 3 columns; use the destination column for these.
+    const path = (status.startsWith("R") || status.startsWith("C")) ? parts[2] : parts[1];
+    const trimmed = path?.trim();
+    if (trimmed) out.push(trimmed);
+  }
+  return out;
 }
 
 function parseRegistry(): Set<string> {
