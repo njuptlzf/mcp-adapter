@@ -72,7 +72,13 @@ function parseDiff(stdout: string): string[] {
 }
 
 function parseRegistry(): Set<string> {
-  const text = readFileSync(REGISTRY_PATH, "utf-8");
+  let text: string;
+  try {
+    text = readFileSync(REGISTRY_PATH, "utf-8");
+  } catch (err) {
+    console.error(`${LOG_PREFIX} FATAL: cannot read registry at ${REGISTRY_PATH}: ${(err as Error).message}`);
+    process.exit(2);
+  }
   const matches = text.matchAll(/^\| `([^`]+)` \|/gm);
   const paths = new Set<string>();
   for (const m of matches) paths.add(m[1]);
