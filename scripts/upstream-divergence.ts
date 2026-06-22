@@ -12,7 +12,7 @@
  *   Auto-disabled in non-tty. Flags: `--no-color`, `--color` force on/off.
  *
  * GnuTLS workaround: copied verbatim from 08-LEARNINGS.md L-4 (do NOT re-derive):
- *   `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream`
+ *   `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags`
  */
 
 import { execFileSync } from "node:child_process";
@@ -46,9 +46,9 @@ function fetchUpstream(): void {
     runGit(["fetch", "upstream"]);
   } catch (err) {
     // GnuTLS workaround from 08-LEARNINGS.md L-4 (verbatim):
-    //   GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream
+    //   GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags
     try {
-      runGit(["-c", "http.sslVerify=false", "fetch", "upstream"], { GIT_SSL_NO_VERIFY: "1" });
+      runGit(["-c", "http.sslVerify=false", "fetch", "upstream", "--tags"], { GIT_SSL_NO_VERIFY: "1" });
     } catch (err2) {
       console.error(`${LOG_PREFIX} FATAL: git fetch upstream failed (and GnuTLS workaround also failed): ${(err2 as Error).message}`);
       process.exit(2);

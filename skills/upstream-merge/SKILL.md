@@ -27,7 +27,7 @@ Invoke this skill at any of the three points in the fork-maintainer workflow:
 - **(b) In-flight, after `git pull upstream main` produces a merge conflict.** Open the skill, look up each conflicting file's `Default Resolution` in the manifest, and apply the decision (run the §3.1 grep for `assess` rows first).
 - **(c) Targeted cherry-pick, before `git cherry-pick <upstream-sha>`.** Same flow as (b), scoped to the files touched by the cherry-picked commit.
 
-> **GnuTLS workaround:** If `git fetch upstream` fails with GnuTLS / SSL errors in this environment, use `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream` (this is the only network-config quirk in this fork's environment).
+> **GnuTLS workaround:** If `git fetch upstream` fails with GnuTLS / SSL errors in this environment, use `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags` (this is the only network-config quirk in this fork's environment — verbatim from `08-LEARNINGS.md` L-4).
 
 ## 2. Read the special-cases registry and run the divergence check
 
@@ -57,7 +57,7 @@ npx tsx scripts/upstream-divergence.ts --no-color
 
 - **Exit 0** — no stale entries. The `diverged-but-not-registered` count is a warning (per D-34: treated as `assess` by the 12-category matrix in §3.2); proceed with the merge.
 - **Exit 1** — stale entries present (registry lists a file that is no longer in `git diff upstream/main --name-status`). STOP and clean stale registry entries before merging.
-- **Exit 2** — fatal: `git fetch upstream` failed AND the GnuTLS workaround also failed, OR the registry parse produced 0 entries. Investigate before proceeding (the GnuTLS workaround per L-4 is `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream`; the script retries with it automatically).
+- **Exit 2** — fatal: `git fetch upstream` failed AND the GnuTLS workaround also failed, OR the registry parse produced 0 entries. Investigate before proceeding (the GnuTLS workaround per L-4 is `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags`; the script retries with it automatically).
 
 Files NOT in the registry are resolved by the 12-category per-file default-resolution matrix inlined in §3.2 below — no need to add them to the registry.
 
