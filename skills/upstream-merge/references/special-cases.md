@@ -30,7 +30,7 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 
 ## How to add an entry
 
-Append a row, choose `Status` from the 5-value taxonomy, point `Why special` at the relevant `D-XX` / `Phase XX` / `DECOUPLE-NN` reference, and run `npm run upstream:check --no-color` to verify the entry is parsed correctly (a malformed row will surface as exit 2).
+Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`. After adding, run `npm run upstream:check --no-color` and visually verify the new path appears in the `✓ registered` section (not in `⚠ diverged-but-not-registered`, which would indicate the registry did not recognise the row). Note: the script only exits 2 when the parsed set is **completely empty** (e.g., the file is unreadable or has no parseable rows). A single malformed row is now logged as a `WARN: registry row not parsed (skipped)` line, but does not change the exit code — so the visual verification step above is required to catch typos.
 
 ## When this registry was last curated
 

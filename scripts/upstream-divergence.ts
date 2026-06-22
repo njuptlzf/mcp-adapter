@@ -79,9 +79,13 @@ function parseRegistry(): Set<string> {
     console.error(`${LOG_PREFIX} FATAL: cannot read registry at ${REGISTRY_PATH}: ${(err as Error).message}`);
     process.exit(2);
   }
+  const lines = text.split("\n");
   const matches = text.matchAll(/^\| `([^`]+)` \|/gm);
   const paths = new Set<string>();
   for (const m of matches) paths.add(m[1]);
+  // Warn on rows that look like registry entries (start with `| `) but failed to parse.
+  const malformed = lines.filter((l) => /^\| /.test(l) && !/^\| `[^`]+` \|/.test(l) && !/^\|\s*-+\s*\|/.test(l));
+  for (const m of malformed) console.warn(`${LOG_PREFIX} WARN: registry row not parsed (skipped): ${m}`);
   if (paths.size === 0) {
     console.error(`${LOG_PREFIX} FATAL: registry parse produced 0 entries from ${REGISTRY_PATH}`);
     process.exit(2);
