@@ -460,3 +460,60 @@ Each is captured in `deferred-items.md` with Found during / Why deferred / Descr
 - A 6-item merge-completion checklist
 - 4 deferred ideas for Phase 10+
 - 3 known Pi-coupling residuals for Phase 9 follow-up
+
+---
+
+# Amendment (added 2026-06-22 by Phase 9: Upstream Manifest Architecture C Refactor)
+
+> **Purpose:** Record the post-Phase-8 architectural reversal of UPSTREAM-01-A/B/C, so future maintainers reading D-22 / D-23 / D-26 (Phase 8 decisions) understand why the manifest format changed.
+
+## What changed
+
+Phase 9 supersedes the following Phase 8 decisions (all per Architecture C + sub-option C2 + manual-trigger-only user choice):
+
+| Phase 8 decision | Phase 9 superseding decision | Reason |
+|---|---|---|
+| **D-22** — Manifest 5-column schema + diverged-only scope (209 rows, repo-root `UPSTREAM-CHANGES.md`) | **D-31** — Special-cases only manifest (~15-20 rows, `skills/upstream-merge/references/special-cases.md`); 4-column schema (Path / Status / Why special / Decision) | Rationale redundancy (80% rows share identical rationale) made the manifest a maintenance burden rather than a working reference |
+| **D-22** — `git diff upstream/main --name-status` + awk classifier, initial-fill-only (UPSTREAM-01-C) | **D-34** — `scripts/upstream-divergence.ts` (per-merge cross-check), 3-category output (registered / diverged-not-registered / stale), exit codes 0/1/2 | Initial-fill-only means manifest goes stale silently; per-merge cross-check surfaces drift immediately |
+| **D-23** — 12-category per-file default-resolution matrix, located in `references/pi-coupling-markers.md §"Per-category default"` | **D-35** — Same matrix (text byte-identical), relocated inline to `SKILL.md` §3.2; Phase 9 deletes the original `references/per-category-default.md` file | Phase 9 splits manifest into fast-path (category rules) + slow-path (special cases); both must be visible in one place for agent in-context decisions |
+| **UPSTREAM-01-D** — No CI hook, one-shot baseline | **D-33** — Manual-trigger only, sharpened: no pre-commit, no pre-merge, no CI; only `npm run upstream:check` (`scripts/upstream-divergence.ts`); user invokes explicitly | B (commit-time hook) duplicates A at noise cost (~5min/day) and violates "no CI hook" principle (commit hook = CI hook subset); A+B correctness = A wrapped as npm script |
+
+## What did NOT change
+
+- **D-24** — 13-marker Pi-coupling detection (HIGH/MEDIUM/DELETED classification) — §3.1 grep recipe preserved byte-identical
+- **D-25** — 5-step follow-up flow (merge first, refactor after) — preserved in §3.2
+- **D-26** — 4-section SKILL.md structure (When/Read/Decide/Check) — preserved; only §2 references updated (7 instances of `UPSTREAM-CHANGES.md` → `references/special-cases.md` + `npm run upstream:check`)
+- **D-27** — `\b` word boundaries + `types/pi-*.d.ts` exclusion — preserved in §3.1 grep
+- **D-28** — DELETED markers stay in references/ only — preserved (`pi-coupling-markers.md` unchanged)
+- **D-29** — Dry-run worktree isolation — preserved (Phase 8 verification pattern reusable for Phase 9)
+- **D-30** — 5 atomic commits + 1 finalize — preserved as Phase 9 commit style
+- **UPSTREAM-02 / UPSTREAM-03-B/C / UPSTREAM-04** — All preserved
+
+## New requirement
+
+**UPSTREAM-05 (new)** — Divergence check script (per D-34):
+
+- `scripts/upstream-divergence.ts` — runs `git diff upstream/main --name-status`, cross-checks against `skills/upstream-merge/references/special-cases.md`, emits 3-category classification
+- `package.json` scripts entry `"upstream:check": "tsx scripts/upstream-divergence.ts"` (manual invocation only)
+- Exit codes: `0` (clean) / `1` (stale entries — registry needs cleanup) / `2` (git fetch failure / upstream ref missing)
+- ANSI color output by default (GREEN / YELLOW / RED); `--no-color` flag for grep-friendly; auto-disabled in non-tty
+
+## Migration traceability
+
+Phase 8 manifest's special footnotes (4 entries) → Phase 9 special-cases registry (15-20 entries):
+
+| Phase 8 footnote | Phase 9 registry entry | Status |
+|---|---|---|
+| `mcp-panel.ts` (DECOUPLE-06 follow-up) | `mcp-panel.ts` (`decoupled-wrapper`) | Direct migration |
+| `mcp-setup-panel.ts` (DECOUPLE-06 follow-up) | `mcp-setup-panel.ts` (`decoupled-wrapper`) | Direct migration |
+| `index.ts` (D-04 backward-compat wrapper) | `index.ts` (`decoupled-wrapper`) | Direct migration |
+| `interfaces/agent-api.ts` (legal JSDoc) | `interfaces/agent-api.ts` (`decoupled-wrapper`) | Direct migration |
+| `panel-keys.ts` (deleted-in-fork per L-5) | `panel-keys.ts` (`deleted-in-fork`) | Direct migration |
+| (new in Phase 9) | 10 more entries | Coverage expansion (interfaces/agent-paths.ts, interfaces/sampling.ts, package.json, vitest.config.ts, tsconfig.json, README.md, MAPPING.md, CHANGELOG.md, OAUTH.md, types/pi-*.d.ts × 3) |
+
+**Why expansion:** Phase 8 manifest used category rules to handle most files uniformly; Phase 9's smaller special-cases registry surfaces the "actually different" cases explicitly, so a maintainer can scan them in 30 seconds rather than inferring from 209 rows.
+
+## Compatibility note
+
+If any reader of Phase 8 LEARNINGS is wondering "why is the manifest format different from what D-22 described?": this Amendment is the answer. The new format (special-cases only, D-31) is a strict refinement of D-22, not a contradiction. D-22's *spirit* (capture fork-specific divergence) is preserved; D-22's *form* (5 columns, 209 rows, repo root) is retired as oversized.
+

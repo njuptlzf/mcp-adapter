@@ -2,30 +2,30 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: verifying
+status: Phase 9 launching (Architecture C refactor of UPSTREAM-CHANGES.md)
 stopped_at: Phase 8 complete + learnings extracted (9D/5L/7P/4S, 462 lines). Milestone v2.0 100% done.
-last_updated: "2026-06-18T05:49:03.287Z"
-last_activity: 2026-06-18 -- Phase 8 Plan 2 complete (skills/upstream-merge/SKILL.md + 2 dry-run logs + deferred-items.md)
+last_updated: "2026-06-22T09:03:46.702Z"
+last_activity: "2026-06-22 -- Phase 9 launched; Architecture C decision captured (special-cases only; sub-option C2: sink into skills/upstream-merge/references/special-cases.md; manual trigger only via npx tsx scripts/upstream-divergence.ts)"
 progress:
-  total_phases: 8
+  total_phases: 9
   completed_phases: 8
   total_plans: 24
   completed_plans: 24
-  percent: 100
+  percent: 89
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-18T11:55:00+08:00
-**Status:** Phase 8 complete — ready for verification
+**Last updated:** 2026-06-22
+**Status:** Phase 9 launching (Architecture C refactor of UPSTREAM-CHANGES.md)
 
 ## Current Position
 
-Phase: 8 — COMPLETE
-Plan: 2 of 2 complete (UPSTREAM-01..04 all satisfied: manifest + SKILL.md + 2 dry-runs + deferred-items)
-Status: Phase complete — ready for verification
-Last activity: 2026-06-18 -- Phase 8 Plan 2 complete (skills/upstream-merge/SKILL.md + 2 dry-run logs + deferred-items.md)
+Phase: 9 — STARTING (CONTEXT pending)
+Plan: 0 of N (CONTEXT to be drafted; 09-CONTEXT.md captures Architecture C + C2 + manual-trigger-only decision)
+Status: Phase 9 in discuss-phase
+Last activity: 2026-06-22 -- Phase 9 launched; Architecture C decision captured (special-cases only; sub-option C2: sink into skills/upstream-merge/references/special-cases.md; manual trigger only via npx tsx scripts/upstream-divergence.ts)
 
 ## Recent Progress
 
@@ -47,7 +47,26 @@ Last activity: 2026-06-18 -- Phase 8 Plan 2 complete (skills/upstream-merge/SKIL
 
 ## Next Actions
 
-**Phase 5 — Type Decoupling & Entry Point Refactor:** Execution complete. Next, run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to perform UAT/phase verification, or advance to Phase 6 planning.
+**Phase 9 — Upstream Manifest Architecture C:**
+
+Phase 9 refactors Phase 8's `UPSTREAM-CHANGES.md` (51KB / 209-row full-divergence manifest at repo root) into a leaner Architecture C:
+
+- Manifest becomes a **special-cases registry only** (~15-20 hand-curated entries), not the full diverged file list
+- Manifest moves from `UPSTREAM-CHANGES.md` (repo root) → `skills/upstream-merge/references/special-cases.md` (skill-local, sub-option C2)
+- New `scripts/upstream-divergence.ts` runs `git diff upstream/main --name-status`, cross-checks against the registry, and emits:
+  - `in-diff-but-not-in-table` → treat as `assess` by default
+  - `in-table-but-not-in-diff` → stale entry, suggest removal
+- Trigger: **manual only** (skill §2 explicit invocation), no pre-commit / pre-merge hook (per UPSTREAM-01-D "no CI hook" principle)
+
+Phase 9 flow: update ROADMAP → 09-CONTEXT.md draft → user review → gsd-plan-phase 09 → 09-PLAN.md → execute + verify.
+
+---
+
+**Phase 8 (frozen as completed):** Verifier passed all 4 must-haves on 2026-06-18. All UPSTREAM-01..04 deliverables (manifest + SKILL.md + 2 dry-runs + deferred-items) accepted. 08-VERIFICATION.md `status: passed, score: 4/4, gaps: []`. **Not re-opened** — Phase 9 will retire the current manifest as part of its scope.
+
+---
+
+**Phase 5 (historical, complete):**
 
 Requirements satisfied: DECOUPLE-01, DECOUPLE-03, DECOUPLE-04, DECOUPLE-06, DECOUPLE-07, ENTRY-01, ENTRY-02, ENTRY-03
 Affected files: index.ts, adapters/pi-adapter.ts, adapters/entry.ts, adapters/pi-renderer.ts, adapters/pi-sampling-provider.ts, interfaces/sampling.ts, types.ts, tool-registrar.ts, proxy-modes.ts, direct-tools.ts, agent-dir.ts, sampling-handler.ts, elicitation-handler.ts, tool-result-renderer.ts, init.ts, and related tests.

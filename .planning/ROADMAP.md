@@ -229,3 +229,37 @@ Plans:
 
 - [x] 08-01-PLAN.md — `UPSTREAM-CHANGES.md` initial-fill (5-column manifest + Decision Anchors + static alignment check)
 - [x] 08-02-PLAN.md — `skills/upstream-merge/SKILL.md` 4-section skill + 2 dry-run scenarios (worktree-isolated) + follow-up issue template
+
+---
+
+### Phase 9: Upstream Manifest Architecture C Refactor
+
+Refactor Phase 8's full-divergence manifest into a leaner Architecture C: a special-cases registry that lives inside `skills/upstream-merge/` instead of the repo root, with a divergence-check script that replaces manual manifest regeneration.
+
+**Goals:**
+
+- Retire the repo-root `UPSTREAM-CHANGES.md` (51KB / 209 rows / 8 implicit categories) and replace it with a hand-curated special-cases registry (~15-20 entries) co-located with `skills/upstream-merge/SKILL.md`
+- Encode the Phase 8 fast-path rules (D-23: 12-category per-file default-resolution matrix) into `SKILL.md` itself, so any non-special-case file is resolved by category rules without needing to look up the registry
+- Add `scripts/upstream-divergence.ts` that runs `git diff upstream/main --name-status` and cross-checks against the registry, surfacing (a) diverged files not in the registry → treat as `assess`, (b) registry entries no longer diverged → suggest removal
+- Trigger the divergence check **manually only** (per Phase 8 UPSTREAM-01-D "no CI hook" principle), surfaced as an `npm run upstream:check` script and as step 1 of `SKILL.md` §2
+- Preserve every Phase 8 invariant: 4-section skill structure, Pi-coupling marker grep (§3.1 corrected with `\b` + `types/pi-*.d.ts` exclusion), 5-step follow-up flow (§3.2), 6-item merge checklist (§4), `upstream-merge:` commit prefix
+
+**Requirements:** UPSTREAM-01 (revised: special-cases-only scope), UPSTREAM-02 (skill §2 reference updated), UPSTREAM-03 (unchanged — rules stay the same), UPSTREAM-04 (unchanged — adapter pattern preservation), UPSTREAM-05 (NEW: divergence check script with manual-only trigger)
+
+**Deliverables:**
+
+- **Retired:** `UPSTREAM-CHANGES.md` (removed from repo root)
+- **New:** `skills/upstream-merge/references/special-cases.md` — special-cases registry, schema `| Path | Status | Why special | Decision |`, 15-20 hand-curated entries (covers: `index.ts` D-04 backward-compat, `mcp-panel.ts` + `mcp-setup-panel.ts` DECOUPLE-06 follow-up, `panel-keys.ts` deleted-in-fork, `interfaces/agent-api.ts` legal JSDoc, `interfaces/agent-paths.ts` + `interfaces/sampling.ts`, `package.json` + `vitest.config.ts` + `tsconfig.json`, `README.md` + `MAPPING.md` + `CHANGELOG.md` + `OAUTH.md`, `types/pi-*.d.ts` × 3, any new special cases surfaced during Phase 9 execution)
+- **New:** `scripts/upstream-divergence.ts` — TypeScript script; outputs (1) diverged-not-registered list, (2) stale-entries list, (3) summary stats; exits non-zero on stale entries, zero on diverged-not-registered (warning only)
+- **Modified:** `skills/upstream-merge/SKILL.md` §2 — replace "Read `UPSTREAM-CHANGES.md` at the repo root" with "Read `references/special-cases.md` AND run `npm run upstream:check`"; rewire §4(e) to invoke the script instead of comparing manifest rows
+- **New:** `package.json` scripts entry `"upstream:check": "tsx scripts/upstream-divergence.ts"` (manual invocation only; no pre-commit / pre-merge wiring)
+- **Documentation:** update `skills/upstream-merge/SKILL.md` §2 freshness-check snippet to call the script
+
+**Plans:** 0 plans (CONTEXT pending; expected 1 plan covering file retirement + 2 new files + 2 modified files)
+
+**Cross-cutting constraints:**
+
+- Phase 8 verifier passed all 4 must-haves on 2026-06-18; Phase 9 does **not** retro-edit any Phase 8 deliverable, only supersedes `UPSTREAM-CHANGES.md`
+- The 12-category matrix in D-23 must be inlined into `SKILL.md` (not duplicated in `special-cases.md`) — single source of truth for the fast-path
+- `scripts/upstream-divergence.ts` must handle the GnuTLS workaround documented in Phase 8 (`GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream`) — copy the snippet, don't re-derive
+- Phase 9 accepts a small gap between the new registry and upstream: the 15-20 hand-curated entries are a snapshot, and the script's job is to surface drift, not eliminate it
