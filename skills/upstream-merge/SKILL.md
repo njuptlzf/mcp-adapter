@@ -79,10 +79,11 @@ Walk these steps in order, branching on the manifest row for each changed file.
 **Fast-path summary by Category** (covers `ours` / `theirs` rows without grep):
 
 - `adapters/<agent>/*`, `adapters/entry.ts`, `skills/*`, `.planning/*`, `AGENTS.md`, `CLAUDE.md`, `.claude/*` → **always `ours`** (fork-only or agent-specific).
-- `interfaces/agent-api.ts`, `interfaces/agent-paths.ts`, `interfaces/sampling.ts` → **`ours` + manual review** (fork-generic; upstream remains Pi-specific).
+- `interfaces/*` (agent-api.ts, agent-paths.ts, sampling.ts, etc.) → **`manual`** (line-by-line; upstream remains Pi-specific per D-01..D-03).
 - `package.json`, `vitest.config.ts`, `tsconfig.json`, `.gitignore`, `.npmignore` → **`manual`** (line-by-line, prefer fork's structural choices).
 - `__tests__/*`, `tests/*`, `examples/*`, `types.ts`, `utils.ts`, `errors.ts`, `logger.ts` → **`assess`** (run §3.1 grep).
 - Core MCP source (`init.ts`, `mcp-*.ts`, `lifecycle.ts`, `proxy-modes.ts`, `direct-tools.ts`, `commands.ts`, `state.ts`, `oauth-handler.ts`, `elicitation-handler.ts`, `sampling-handler.ts`, `tool-result-renderer.ts`) → **`assess`** (run §3.1 grep).
+- `types/pi-*.d.ts` → **`ours`** (fork-side type declarations for Pi per D-21; declarations ≠ coupling).
 - `README.md`, `MAPPING.md`, `CHANGELOG.md`, `OAUTH.md` → **`assess` via intent alignment** (preserve "Universal MCP Adapter" framing per D-18/D-19/D-20).
 
 **Step 3 — Special cases:**
@@ -137,12 +138,13 @@ The 12-category per-file default-resolution matrix (sourced from D-23; inlined h
 | `adapters/entry.ts` | `ours` | Frozen signature per D-07 | D-07 |
 | `skills/*` | `ours` | Fork-only skill additions | D-21 |
 | `interfaces/*` | `manual` | Fork-generic; upstream remains Pi-specific | D-01..D-03 |
-| `package.json` / `vitest.config.ts` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
+| `package.json` / `vitest.config.ts` / `tsconfig.json` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
+| `.gitignore` / `.npmignore` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
 | `__tests__/*` / `tests/*` | `assess` | Run §3.1 grep; mostly legal but watch for new test fixtures | D-24 |
 | Core MCP source (`init.ts`, `mcp-*.ts`, ...) | `assess` | Always run §3.1 grep; check D-04 wrapper boundaries | D-24, D-04 |
 | `types.ts` / `utils.ts` / `errors.ts` / `logger.ts` | `assess` | Universal utility files; Pi-coupling unlikely but check | D-24 |
 | `README.md` / `MAPPING.md` / `CHANGELOG.md` / `OAUTH.md` | `assess` (intent) | Preserve "Universal MCP Adapter" framing | D-18..D-20 |
-| `AGENTS.md` / `CLAUDE.md` | `ours` | Fork-specific | D-21 |
+| `AGENTS.md` / `CLAUDE.md` / `.claude/*` | `ours` | Fork-specific | D-21 |
 | `.planning/*` | `ours` | Planning artifacts are fork-specific | D-21 |
 | `types/pi-*.d.ts` | `ours` | Fork-side type declarations for Pi (declarations ≠ coupling) | D-21 |
 
