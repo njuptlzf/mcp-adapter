@@ -255,7 +255,8 @@ Refactor Phase 8's full-divergence manifest into a leaner Architecture C: a spec
 - **New:** `package.json` scripts entry `"upstream:check": "tsx scripts/upstream-divergence.ts"` (manual invocation only; no pre-commit / pre-merge wiring)
 - **Documentation:** update `skills/upstream-merge/SKILL.md` §2 freshness-check snippet to call the script
 
-**Plans:** 0 plans (CONTEXT pending; expected 1 plan covering file retirement + 2 new files + 2 modified files)
+**Plans:**
+- [x] 09-01-PLAN.md — Architecture C refactor: retired `UPSTREAM-CHANGES.md`, created `skills/upstream-merge/references/special-cases.md` (17 entries) + `scripts/upstream-divergence.ts` (D-34 contract), inlined 12-category matrix into SKILL.md §3.2a (D-35), rewired §1/§2/§4(e), added `npm run upstream:check` (D-33 manual-only). **1/1 plans complete.**
 
 **Cross-cutting constraints:**
 

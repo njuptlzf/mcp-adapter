@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: Phase 9 launching (Architecture C refactor of UPSTREAM-CHANGES.md)
-stopped_at: Phase 8 complete + learnings extracted (9D/5L/7P/4S, 462 lines). Milestone v2.0 100% done.
-last_updated: "2026-06-22T09:03:46.702Z"
-last_activity: "2026-06-22 -- Phase 9 launched; Architecture C decision captured (special-cases only; sub-option C2: sink into skills/upstream-merge/references/special-cases.md; manual trigger only via npx tsx scripts/upstream-divergence.ts)"
+status: Phase 9 complete (Architecture C refactor of UPSTREAM-CHANGES.md; UPSTREAM-01..05 satisfied)
+stopped_at: Phase 9 Plan 01 complete + SUMMARY.md written (7 commits, 5 file modifications). Milestone v2.0 100% done (9/9 phases, 25/25 plans).
+last_updated: "2026-06-22T09:36:00.000Z"
+last_activity: "2026-06-22 -- Phase 9 Plan 01 complete: retired UPSTREAM-CHANGES.md, created special-cases.md (17 entries) + scripts/upstream-divergence.ts (D-34 contract), inlined 12-category matrix into SKILL.md §3.2a, added upstream:check npm script"
 progress:
   total_phases: 9
-  completed_phases: 8
-  total_plans: 24
-  completed_plans: 24
-  percent: 89
+  completed_phases: 9
+  total_plans: 25
+  completed_plans: 25
+  percent: 100
 ---
 
 # Project State
@@ -22,10 +22,10 @@ progress:
 
 ## Current Position
 
-Phase: 9 — STARTING (CONTEXT pending)
-Plan: 0 of N (CONTEXT to be drafted; 09-CONTEXT.md captures Architecture C + C2 + manual-trigger-only decision)
-Status: Phase 9 in discuss-phase
-Last activity: 2026-06-22 -- Phase 9 launched; Architecture C decision captured (special-cases only; sub-option C2: sink into skills/upstream-merge/references/special-cases.md; manual trigger only via npx tsx scripts/upstream-divergence.ts)
+Phase: 9 — COMPLETE (Plan 01 of 1 done)
+Plan: 1 of 1 done (09-01-PLAN.md executed: special-cases.md + scripts/upstream-divergence.ts + SKILL.md §1/§2/§3.2a/§4(e) + npm script + retired UPSTREAM-CHANGES.md)
+Status: Phase 9 complete; Milestone v2.0 100% done (9/9 phases, 25/25 plans)
+Last activity: 2026-06-22 -- Phase 9 Plan 01 executed (7 commits: b3d51e8..89339ad); UPSTREAM-01..05 all satisfied
 
 ## Recent Progress
 
@@ -35,6 +35,13 @@ Last activity: 2026-06-22 -- Phase 9 launched; Architecture C decision captured 
 - Phase 2: Dependency Restructuring — AgentPathResolver, config.ts rewired
 - Phase 3: Core Logic Abstraction — init.ts/commands.ts migrated to AgentAPI
 - Phase 4: Testing & Verification — mock adapter + contract tests + coverage
+
+### Phase 9 — Upstream Manifest Architecture C (COMPLETE)
+
+- **09-01**: Architecture C refactor of Phase 8 `UPSTREAM-CHANGES.md` — retired repo-root manifest (51KB / 209 rows); created `skills/upstream-merge/references/special-cases.md` (37 lines, 17 anchored entries); added `scripts/upstream-divergence.ts` (D-34 contract: 3-category output, ANSI GREEN/YELLOW/RED, exit codes 0/1/2, GnuTLS workaround verbatim from 08-LEARNINGS.md L-4); inlined 12-category per-file default-resolution matrix (D-35) into SKILL.md §3.2a; rewired §1/§2/§4(e) from manifest → registry + script; added `npm run upstream:check` script (D-33 manual-only); deleted `UPSTREAM-CHANGES.md`; verified `per-category-default.md` was never created (D-35 + Q4).
+- Final verification: `npm run upstream:check --no-color` exit 0; 222 diverged / 17 registered / 205 default-resolved / 0 stale.
+- 7 atomic commits: b3d51e8 (registry) / 89810e8 (script) / 6350e94 (SKILL.md) / 72ae020 (npm script) / b22fdca (delete manifest) / 27d067d (no-op verify) / 89339ad (SUMMARY.md).
+- UPSTREAM-01..05 all satisfied; 1 deviation documented (Rule 1 bug fix in SKILL.md §1 line 26 stale UPSTREAM-CHANGES.md reference).
 
 ### Phase 5 — Type Decoupling & Entry Point Refactor
 
@@ -47,18 +54,9 @@ Last activity: 2026-06-22 -- Phase 9 launched; Architecture C decision captured 
 
 ## Next Actions
 
-**Phase 9 — Upstream Manifest Architecture C:**
+**Milestone v2.0 — 100% COMPLETE (9/9 phases, 25/25 plans)**
 
-Phase 9 refactors Phase 8's `UPSTREAM-CHANGES.md` (51KB / 209-row full-divergence manifest at repo root) into a leaner Architecture C:
-
-- Manifest becomes a **special-cases registry only** (~15-20 hand-curated entries), not the full diverged file list
-- Manifest moves from `UPSTREAM-CHANGES.md` (repo root) → `skills/upstream-merge/references/special-cases.md` (skill-local, sub-option C2)
-- New `scripts/upstream-divergence.ts` runs `git diff upstream/main --name-status`, cross-checks against the registry, and emits:
-  - `in-diff-but-not-in-table` → treat as `assess` by default
-  - `in-table-but-not-in-diff` → stale entry, suggest removal
-- Trigger: **manual only** (skill §2 explicit invocation), no pre-commit / pre-merge hook (per UPSTREAM-01-D "no CI hook" principle)
-
-Phase 9 flow: update ROADMAP → 09-CONTEXT.md draft → user review → gsd-plan-phase 09 → 09-PLAN.md → execute + verify.
+All UPSTREAM-01..05 requirements satisfied. No outstanding work.
 
 ---
 
@@ -149,8 +147,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-18T05:49:03.275Z
-**Stopped at:** Phase 8 complete + learnings extracted (9D/5L/7P/4S, 462 lines). Milestone v2.0 100% done.
+**Last session:** 2026-06-22T09:36:00.000Z
+**Stopped at:** Phase 9 Plan 01 complete + SUMMARY.md written (7 commits, 5 file modifications). Milestone v2.0 100% done (9/9 phases, 25/25 plans).
 
 ## Performance Metrics
 
@@ -162,6 +160,7 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 06 LEARN | ~8min | 1 file | 06-LEARNINGS.md (255 lines; 31 items extracted from 5 SUMMARY + CONTEXT + UAT + report) |
 | Phase 8 P1 | ~18min | 3 tasks | 1 file (UPSTREAM-CHANGES.md, 247 lines, 209 data rows; D-21 + DECOUPLE-01/02/06/07 cited; static alignment \|RAW-MANIFEST\|=0) |
 | Phase 8 P2 | ~28min | 5 tasks | 5 files (SKILL.md 141 lines + references 127 + Scenario 1 log 180 + Scenario 2 log 362 + deferred-items 112; 922 total lines added; 5 atomic commits 1b555cc..15e6b69) |
+| Phase 9 P1 | ~22min | 3 tasks | 5 files (special-cases.md 37 lines + scripts/upstream-divergence.ts 117 lines + SKILL.md 142→176 lines + package.json +1 script + UPSTREAM-CHANGES.md deleted); 7 atomic commits b3d51e8..89339ad; 222 diverged / 17 registered / 205 default-resolved / 0 stale |
 
 ## Decisions
 
@@ -172,3 +171,10 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 8 P2]: T-08-02-4 (checkpoint:human-verify) replaced with SELF-VERIFY for autonomous mode; §4 Checklist items marked PASS / DEFERRED with reasoning; user re-verification invited for (c)/(d) in real-merge context
 - [Phase 8 P2]: 8 pi.<method> false-positive patterns catalogued in references §"DELETED markers" with rationale (agentapi.X substring collision) — NOT in SKILL.md §3.1 runnable position
 - [Phase 8 P2]: §3.1 grep template uses RESEARCH Dimension 3 corrected version (\b word boundaries, types/pi-*.d.ts exclusion) — 0 false-positive hits in dry-runs
+- [Phase 9]: Architecture C chosen over A/B — manifest becomes special-cases registry only (~15-20 entries), cross-checked by `scripts/upstream-divergence.ts` (D-31)
+- [Phase 9]: Sub-option C2 — manifest sinks into `skills/upstream-merge/references/special-cases.md` (skill-local, not repo-root) (D-32)
+- [Phase 9]: Manual trigger only — `npm run upstream:check` runs `tsx scripts/upstream-divergence.ts`; NO pre-commit / pre-merge / CI hook added anywhere (D-33)
+- [Phase 9]: 12-category per-file default-resolution matrix inlined into SKILL.md §3.2a (NOT duplicated into special-cases.md or per-category-default.md) (D-35 + Q4)
+- [Phase 9]: script exit-code contract: 0 = clean, 1 = stale entries (in-table-not-in-diff), 2 = diverged-not-registered warning; ANSI GREEN/YELLOW/RED; tty auto-detect via `process.stdout.isTTY` (D-34)
+- [Phase 9]: 7 atomic commits — one per task/sub-action, not combined (b3d51e8 / 89810e8 / 6350e94 / 72ae020 / b22fdca / 27d067d / 89339ad)
+- [Phase 9]: Phase 8 GnuTLS workaround copied verbatim from 08-LEARNINGS.md L-4 into `scripts/upstream-divergence.ts` `fetchUpstream()` (single source of truth for upstream fetch protocol)
