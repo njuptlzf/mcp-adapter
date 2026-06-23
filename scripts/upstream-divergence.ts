@@ -9,7 +9,8 @@
  *   4. Exit codes: 0 = clean (no stale entries), 1 = stale entries present, 2 = fatal (fetch / parse failure)
  *
  * Color: GREEN (registered), YELLOW (diverged-but-not-registered), RED (stale / fatal).
- *   Auto-disabled in non-tty. Flags: `--no-color`, `--color` force on/off.
+ *   Auto-disabled in non-tty. Flags: `--no-color`, `--color` force on/off, `--base <ref>` overrides
+ *   the comparison ref (default `upstream/main`).
  *
  * GnuTLS workaround: copied verbatim from 08-LEARNINGS.md L-4 (do NOT re-derive):
  *   `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags`
@@ -24,9 +25,13 @@ const REGISTRY_PATH = resolve(
   dirname(new URL(import.meta.url).pathname),
   "../skills/upstream-merge/references/special-cases.md",
 );
-const DIFF_ARGS = ["diff", "upstream/main", "--name-status", "--", "*.ts", "*.md", "*.json"];
-
 const argv = process.argv.slice(2);
+// IF-02: --base <ref> overrides the comparison ref (default: upstream/main).
+const baseIdx = argv.indexOf("--base");
+const baseRef = baseIdx > -1 && argv[baseIdx + 1] && !argv[baseIdx + 1].startsWith("--")
+  ? argv[baseIdx + 1]
+  : "upstream/main";
+const DIFF_ARGS = ["diff", baseRef, "--name-status", "--", "*.ts", "*.md", "*.json"];
 const useColor =
   !argv.includes("--no-color") &&
   (argv.includes("--color") || process.stdout.isTTY === true);
@@ -45,12 +50,15 @@ function fetchUpstream(): void {
   try {
     runGit(["fetch", "upstream"]);
   } catch (err) {
+    // IF-03: log the first fetch error before attempting the GnuTLS workaround,
+    // so the original error context is preserved if the workaround also fails.
+    console.error(`${LOG_PREFIX} plain 'git fetch upstream' failed: ${(err as Error).message}; trying GnuTLS workaround (08-LEARNINGS.md L-4)`);
     // GnuTLS workaround from 08-LEARNINGS.md L-4 (verbatim):
     //   GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags
     try {
       runGit(["-c", "http.sslVerify=false", "fetch", "upstream", "--tags"], { GIT_SSL_NO_VERIFY: "1" });
     } catch (err2) {
-      console.error(`${LOG_PREFIX} FATAL: git fetch upstream failed (and GnuTLS workaround also failed): ${(err2 as Error).message}`);
+      console.error(`${LOG_PREFIX} FATAL: GnuTLS workaround also failed: ${(err2 as Error).message}`);
       process.exit(2);
     }
   }
