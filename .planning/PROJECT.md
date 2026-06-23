@@ -1,5 +1,28 @@
 # Universal MCP Adapter
 
+## Current State (v2.0 — shipped 2026-06-23)
+
+**Milestone:** v2.0 Multi-Agent Adapter Completion — SHIPPED 2026-06-23 (9 phases, 25 plans, 17 tasks).
+
+**Shipped capabilities:**
+- Universal `AgentAPI` / `UISystem` interfaces in `interfaces/agent-api.ts` (REQ-01, REQ-02)
+- Pi adapter (`adapters/pi-adapter.ts`) as a first-class `AgentAPI` implementation, not a legacy mode (REQ-03, REQ-04)
+- Qoder adapter (`adapters/qoder-adapter.ts`) + Qoder sampling provider + QoderAgentPathResolver (ADAPTER-01, ADAPTER-02, ADAPTER-03)
+- Agent-agnostic entry point `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; `index.ts` is a thin Pi wrapper (ENTRY-01, ENTRY-02, ENTRY-03)
+- Decoupled all 6 source files from Pi type imports (DECOUPLE-01..07)
+- Agent-agnostic `skills/mcp-adapter-test/` skill with per-agent reference files and Capability Gate (TEST-01..05)
+- README rewrites leading with "Pi-compatible + every agent" + Verification/Compatibility section (DOC-01..03)
+- `scripts/upstream-divergence.ts` + `skills/upstream-merge/references/special-cases.md` (Architecture C) + `npm run upstream:check` (UPSTREAM-01..05)
+- Test suite 350/352 passing at v2.0 close; 2 pre-existing `__tests__/interactive-visualizer-server.test.ts` failures (missing dist/ artifacts) confirmed unrelated and deferred
+
+**Public surface preserved:** `mcpAdapter` (Pi), `piMcpAdapter` alias, `createMcpAdapter` (universal), `createPiAdapter` / `createQoderAdapter` factories, `resolveAgentGlobalConfigPath` / `getAgentDir`, all agent types.
+
+**Archive:** `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`.
+
+**Next milestone:** Awaiting kickoff (see `.planning/STATE.md` Operator Next Steps).
+
+---
+
 ## Vision
 
 Refactor the Pi-specific MCP adapter into a universal, agent-agnostic adapter that can work with multiple coding agents while maintaining backward compatibility with Pi.
@@ -70,6 +93,6 @@ This document evolves at phase transitions and milestone boundaries.
 2. Core Value check
 3. Audit Out of Scope
 4. Update Context with current state
-
 ---
-Last updated: 2026-06-15
+
+*Last updated: 2026-06-23 after v2.0 Multi-Agent Adapter Completion milestone*

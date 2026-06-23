@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: milestone
-status: Phase 9 complete (Architecture C refactor of UPSTREAM-CHANGES.md; UPSTREAM-01..05 satisfied)
+status: completed
 stopped_at: Phase 9 Plan 01 complete + SUMMARY.md written (7 commits, 5 file modifications). Milestone v2.0 100% done (9/9 phases, 25/25 plans).
-last_updated: "2026-06-22T09:36:00.000Z"
-last_activity: "2026-06-22 -- Phase 9 Plan 01 complete: retired UPSTREAM-CHANGES.md, created special-cases.md (17 entries) + scripts/upstream-divergence.ts (D-34 contract), inlined 12-category matrix into SKILL.md §3.2a, added upstream:check npm script"
+last_updated: "2026-06-23T01:53:00.070Z"
+last_activity: 2026-06-23 — Milestone v2.0 completed and archived
 progress:
   total_phases: 9
   completed_phases: 9
@@ -18,14 +18,14 @@ progress:
 
 **Created:** 2026-06-10T13:45:00+08:00
 **Last updated:** 2026-06-22
-**Status:** Phase 9 launching (Architecture C refactor of UPSTREAM-CHANGES.md)
+**Status:** v2.0 milestone complete
 
 ## Current Position
 
-Phase: 9 — COMPLETE (Plan 01 of 1 done)
-Plan: 1 of 1 done (09-01-PLAN.md executed: special-cases.md + scripts/upstream-divergence.ts + SKILL.md §1/§2/§3.2a/§4(e) + npm script + retired UPSTREAM-CHANGES.md)
-Status: Phase 9 complete; Milestone v2.0 100% done (9/9 phases, 25/25 plans)
-Last activity: 2026-06-22 -- Phase 9 Plan 01 executed (7 commits: b3d51e8..89339ad); UPSTREAM-01..05 all satisfied
+Phase: Milestone v2.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-23 — Milestone v2.0 completed and archived
 
 ## Recent Progress
 
@@ -178,3 +178,7 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 9]: script exit-code contract: 0 = clean, 1 = stale entries (in-table-not-in-diff), 2 = diverged-not-registered warning; ANSI GREEN/YELLOW/RED; tty auto-detect via `process.stdout.isTTY` (D-34)
 - [Phase 9]: 7 atomic commits — one per task/sub-action, not combined (b3d51e8 / 89810e8 / 6350e94 / 72ae020 / b22fdca / 27d067d / 89339ad)
 - [Phase 9]: Phase 8 GnuTLS workaround copied verbatim from 08-LEARNINGS.md L-4 into `scripts/upstream-divergence.ts` `fetchUpstream()` (single source of truth for upstream fetch protocol)
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
