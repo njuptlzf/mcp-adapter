@@ -28,6 +28,8 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 
 **Decision values** (4): `ours` (always keep fork version on conflict) / `manual` (line-by-line review) / `assess` (run §3.1 grep + intent alignment) / `wraps-theirs` (accept upstream, wrap behind generic interface in a follow-up commit).
 
+> `wraps-theirs` is reserved for entries where the §3.2b follow-up flow (accept-upstream + wrap) is committed up-front in the registry row itself, rather than invoked at merge time. As of Phase 9 no entries use it — all current entries commit to one of the merge-time decisions above. If a future conflict pattern matches the §3.2b flow exactly, prefer invoking §3.2b at merge time over pre-committing `wraps-theirs` to the registry, since the §3.2b follow-up commits are easier to audit alongside the merge commit than as separate registry annotations.
+
 ## How to add an entry
 
 Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`. After adding, run `npm run upstream:check --no-color` and visually verify the new path appears in the `✓ registered` section (not in `⚠ diverged-but-not-registered`, which would indicate the registry did not recognise the row). Note: the script only exits 2 when the parsed set is **completely empty** (e.g., the file is unreadable or has no parseable rows). A single malformed row is now logged as a `WARN: registry row not parsed (skipped)` line, but does not change the exit code — so the visual verification step above is required to catch typos.
