@@ -1,5 +1,30 @@
 # Universal MCP Adapter
 
+## Current State (v2.0 — released as git tag v2.0.0-universal on 2026-06-23)
+
+**Milestone:** v2.0 Multi-Agent Adapter Completion — SHIPPED 2026-06-23 (9 phases, 25 plans, 17 tasks).
+
+**Release tag:** `v2.0.0-universal` (annotated, SHA `84bf7e5` → commit `1f493b1`). SemVer pre-release derivative of upstream `v2.0.0` (`5e1be49`). Tag name uses SemVer pre-release identifier `-universal` to mark the fork derivative; see `.planning/STATE.md` → `## Naming Decisions` for the full rationale (collision with upstream `v2.0.0` namespace, migration to `vX.Y.Z-{fork-identifier}` pattern).
+
+**Shipped capabilities:**
+- Universal `AgentAPI` / `UISystem` interfaces in `interfaces/agent-api.ts` (REQ-01, REQ-02)
+- Pi adapter (`adapters/pi-adapter.ts`) as a first-class `AgentAPI` implementation, not a legacy mode (REQ-03, REQ-04)
+- Qoder adapter (`adapters/qoder-adapter.ts`) + Qoder sampling provider + QoderAgentPathResolver (ADAPTER-01, ADAPTER-02, ADAPTER-03)
+- Agent-agnostic entry point `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; `index.ts` is a thin Pi wrapper (ENTRY-01, ENTRY-02, ENTRY-03)
+- Decoupled all 6 source files from Pi type imports (DECOUPLE-01..07)
+- Agent-agnostic `skills/mcp-adapter-test/` skill with per-agent reference files and Capability Gate (TEST-01..05)
+- README rewrites leading with "Pi-compatible + every agent" + Verification/Compatibility section (DOC-01..03)
+- `scripts/upstream-divergence.ts` + `skills/upstream-merge/references/special-cases.md` (Architecture C) + `npm run upstream:check` (UPSTREAM-01..05)
+- Test suite 350/352 passing at v2.0 close; 2 pre-existing `__tests__/interactive-visualizer-server.test.ts` failures (missing dist/ artifacts) confirmed unrelated and deferred
+
+**Public surface preserved:** `mcpAdapter` (Pi), `piMcpAdapter` alias, `createMcpAdapter` (universal), `createPiAdapter` / `createQoderAdapter` factories, `resolveAgentGlobalConfigPath` / `getAgentDir`, all agent types.
+
+**Archive:** `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`.
+
+**Next milestone:** Awaiting kickoff (see `.planning/STATE.md` Operator Next Steps).
+
+---
+
 ## Vision
 
 Refactor the Pi-specific MCP adapter into a universal, agent-agnostic adapter that can work with multiple coding agents while maintaining backward compatibility with Pi.
@@ -26,6 +51,8 @@ Create a universal adapter architecture:
 - **Gradual migration**: Existing code works as-is, new features use generic interfaces
 
 ## Current Milestone: v2.0 — Multi-Agent Adapter Completion
+
+> **Status (2026-06-23):** SHIPPED. Released as git tag `v2.0.0-universal` (SemVer pre-release; see STATE.md Naming Decisions for naming rationale). The historical "Current Milestone" goal text below describes the v2.0 plan that was executed; v2.0 is now archived in `.planning/milestones/v2.0-*` and the next milestone is awaiting kickoff (see STATE.md Operator Next Steps).
 
 **Goal:** Complete "for every agent" transformation — decouple all remaining Pi type bindings, add at least one non-Pi agent adapter, rebuild integration test as agent-agnostic, and update `README.md` to clearly communicate that the project remains fully Pi-compatible while supporting every agent.
 
@@ -70,6 +97,6 @@ This document evolves at phase transitions and milestone boundaries.
 2. Core Value check
 3. Audit Out of Scope
 4. Update Context with current state
-
 ---
-Last updated: 2026-06-15
+
+*Last updated: 2026-06-23 after v2.0 Multi-Agent Adapter Completion milestone (released as git tag `v2.0.0-universal`)*

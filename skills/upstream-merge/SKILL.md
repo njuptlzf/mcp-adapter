@@ -2,11 +2,12 @@
 name: upstream-merge
 description: >
   Fork-maintainer workflow for syncing https://github.com/nicobailon/pi-mcp-adapter
-  into njuptlzf/mcp-adapter. Reads UPSTREAM-CHANGES.md for per-file Default
-  Resolution, runs the Pi-coupling marker grep (corrected, with \b word
-  boundaries) on changed files, then applies ours/theirs/manual decisions per
-  a 4-section decision tree. Triggers the 5-step follow-up issue flow when
-  Pi-coupling is re-introduced.
+  into njuptlzf/mcp-adapter. Reads `skills/upstream-merge/references/special-cases.md`
+  for hand-curated special cases AND runs `scripts/upstream-divergence.ts` for live
+  cross-check against `git diff upstream/main --name-status`; falls back to the
+  12-category per-file default-resolution matrix (inlined in §3.2) for files not in
+  the registry. Applies ours/theirs/manual decisions per a 4-section decision tree.
+  Triggers the 5-step follow-up issue flow when Pi-coupling is re-introduced.
   Use when user says "merge upstream", "sync fork", "upstream conflict",
   "resolve upstream merge", or "/upstream-merge".
 ---
@@ -22,32 +23,43 @@ apply the decision → verify.
 
 Invoke this skill at any of the three points in the fork-maintainer workflow:
 
-- **(a) Pre-flight, after `git fetch upstream` and before `git merge upstream/main`.** This is the primary entry point — the manifest at `UPSTREAM-CHANGES.md` is already populated, and the skill walks the per-file decision tree before any conflict appears.
+- **(a) Pre-flight, after `git fetch upstream` and before `git merge upstream/main`.** This is the primary entry point — run `npm run upstream:check` (§2) to surface live divergence, then walk the per-file decision tree before any conflict appears.
 - **(b) In-flight, after `git pull upstream main` produces a merge conflict.** Open the skill, look up each conflicting file's `Default Resolution` in the manifest, and apply the decision (run the §3.1 grep for `assess` rows first).
 - **(c) Targeted cherry-pick, before `git cherry-pick <upstream-sha>`.** Same flow as (b), scoped to the files touched by the cherry-picked commit.
 
-> **GnuTLS workaround:** If `git fetch upstream` fails with GnuTLS / SSL errors in this environment, use `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream` (this is the only network-config quirk in this fork's environment).
+> **GnuTLS workaround:** If `git fetch upstream` fails with GnuTLS / SSL errors in this environment, use `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags` (this is the only network-config quirk in this fork's environment — verbatim from `08-LEARNINGS.md` L-4).
 
-## 2. Read UPSTREAM-CHANGES.md first
+## 2. Read the special-cases registry and run the divergence check
 
-Always read `UPSTREAM-CHANGES.md` at the repo root **before touching any file**. The 5-column manifest (Path / Status / Category / Default Resolution / Rationale) gives you a fast path for `ours` / `theirs` rows and a "must-assess" flag for `assess` rows.
+Two inputs are required before any merge decision: (1) read `references/special-cases.md` for the 15-17 hand-curated cases (Phase 8 manifest footnotes + expansion), and (2) run `npm run upstream:check` to see live divergence against `upstream/main`. The script replaces the Phase 8 "manifest freshness" check: instead of comparing manifest row counts to `git diff` output, it classifies each diverged file as `registered` / `diverged-but-not-registered` / `stale` against the registry.
 
-**How to look up a file:**
+**How to look up a file in the registry:**
 
 ```bash
 # By file path (quote the path with backticks to match the table cell)
-grep -F '`init.ts`' UPSTREAM-CHANGES.md
+grep -F '`init.ts`' skills/upstream-merge/references/special-cases.md
 
-# By category (returns all rows in that bucket)
-grep -E '^\| (adapter|source|interface|skill|test|docs|config|planning|agents_meta|other) ' UPSTREAM-CHANGES.md
-
-# Verify manifest freshness (gap ≤ 10 files is acceptable)
-git diff upstream/main --name-status | wc -l
-grep -cE '^\| `' UPSTREAM-CHANGES.md
-
-# If a file is missing from the manifest: treat as Default Resolution = assess
-# (newly diverged) and run the full grep in §3.1 before deciding ours/theirs.
+# By status (returns all rows in that bucket)
+grep -E '^\| `.*` \| (fork-only|decoupled-wrapper|deleted-in-fork|sibling-config|framing-divergence)' skills/upstream-merge/references/special-cases.md
 ```
+
+**Run the divergence check** (script replaces the Phase 8 `git diff ... | wc -l` + `grep -cE '^\| `'` sanity check):
+
+```bash
+# Default: ANSI color when stdout is a tty
+npm run upstream:check
+
+# Grep-friendly output (no escape sequences, suitable for piping / CI logs)
+npx tsx scripts/upstream-divergence.ts --no-color
+```
+
+**Interpreting the script output:**
+
+- **Exit 0** — no stale entries. The `diverged-but-not-registered` count is a warning (per D-34: treated as `assess` by the 12-category matrix in §3.2); proceed with the merge.
+- **Exit 1** — stale entries present (registry lists a file that is no longer in `git diff upstream/main --name-status`). STOP and clean stale registry entries before merging.
+- **Exit 2** — fatal: `git fetch upstream` failed AND the GnuTLS workaround also failed, OR the registry parse produced 0 entries. Investigate before proceeding (the GnuTLS workaround per L-4 is `GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags`; the script retries with it automatically).
+
+Files NOT in the registry are resolved by the 12-category per-file default-resolution matrix inlined in §3.2 below — no need to add them to the registry.
 
 ## 3. Decision tree
 
@@ -67,10 +79,11 @@ Walk these steps in order, branching on the manifest row for each changed file.
 **Fast-path summary by Category** (covers `ours` / `theirs` rows without grep):
 
 - `adapters/<agent>/*`, `adapters/entry.ts`, `skills/*`, `.planning/*`, `AGENTS.md`, `CLAUDE.md`, `.claude/*` → **always `ours`** (fork-only or agent-specific).
-- `interfaces/agent-api.ts`, `interfaces/agent-paths.ts`, `interfaces/sampling.ts` → **`ours` + manual review** (fork-generic; upstream remains Pi-specific).
+- `interfaces/*` (agent-api.ts, agent-paths.ts, sampling.ts, etc.) → **`manual`** (line-by-line; upstream remains Pi-specific per D-01..D-03).
 - `package.json`, `vitest.config.ts`, `tsconfig.json`, `.gitignore`, `.npmignore` → **`manual`** (line-by-line, prefer fork's structural choices).
 - `__tests__/*`, `tests/*`, `examples/*`, `types.ts`, `utils.ts`, `errors.ts`, `logger.ts` → **`assess`** (run §3.1 grep).
 - Core MCP source (`init.ts`, `mcp-*.ts`, `lifecycle.ts`, `proxy-modes.ts`, `direct-tools.ts`, `commands.ts`, `state.ts`, `oauth-handler.ts`, `elicitation-handler.ts`, `sampling-handler.ts`, `tool-result-renderer.ts`) → **`assess`** (run §3.1 grep).
+- `types/pi-*.d.ts` → **`ours`** (fork-side type declarations for Pi per D-21; declarations ≠ coupling).
 - `README.md`, `MAPPING.md`, `CHANGELOG.md`, `OAUTH.md` → **`assess` via intent alignment** (preserve "Universal MCP Adapter" framing per D-18/D-19/D-20).
 
 **Step 3 — Special cases:**
@@ -113,7 +126,31 @@ git diff upstream/main --name-only -- '*.ts' | xargs grep -nE \
 
 > **Note:** The 8 `pi.<method>` call patterns from the original CONTEXT-03-B draft (8 entries enumerated in `references/pi-coupling-markers.md` §"DELETED markers") are **DELETED** — they produce systematic false positives on `agentapi.X` generic adapter calls. They are catalogued only in `references/pi-coupling-markers.md` §"DELETED markers" so future maintainers can see why they are absent. Do NOT reintroduce them in the §3.1 template without re-verifying against the latest codebase.
 
-### 3.2 5-step follow-up flow (Pi-coupling re-introduction)
+### 3.2 Per-file default resolution (12-category matrix) and 5-step follow-up flow
+
+#### 3.2a Per-category default resolution
+
+The 12-category per-file default-resolution matrix (sourced from D-23; inlined here per **D-35** so the fast-path and the slow-path special-cases registry are visible in one place). Every diverged file not in `references/special-cases.md` defaults to the action in this table; the special-cases registry overrides only when a file genuinely cannot be resolved by category rules.
+
+| Category | Default | Rationale | Source |
+|---|---|---|---|
+| `adapters/<agent>/*` | `ours` | Fork-only; upstream doesn't add adapters | D-21 |
+| `adapters/entry.ts` | `ours` | Frozen signature per D-07 | D-07 |
+| `skills/*` | `ours` | Fork-only skill additions | D-21 |
+| `interfaces/*` | `manual` | Fork-generic; upstream remains Pi-specific | D-01..D-03 |
+| `package.json` / `vitest.config.ts` / `tsconfig.json` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
+| `.gitignore` / `.npmignore` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
+| `__tests__/*` / `tests/*` | `assess` | Run §3.1 grep; mostly legal but watch for new test fixtures | D-24 |
+| Core MCP source (`init.ts`, `mcp-*.ts`, ...) | `assess` | Always run §3.1 grep; check D-04 wrapper boundaries | D-24, D-04 |
+| `types.ts` / `utils.ts` / `errors.ts` / `logger.ts` | `assess` | Universal utility files; Pi-coupling unlikely but check | D-24 |
+| `README.md` / `MAPPING.md` / `CHANGELOG.md` / `OAUTH.md` | `assess` (intent) | Preserve "Universal MCP Adapter" framing | D-18..D-20 |
+| `AGENTS.md` / `CLAUDE.md` / `.claude/*` | `ours` | Fork-specific | D-21 |
+| `.planning/*` | `ours` | Planning artifacts are fork-specific | D-21 |
+| `types/pi-*.d.ts` | `ours` | Fork-side type declarations for Pi (declarations ≠ coupling) | D-21 |
+
+This matrix covers ~70% of files; the remaining ~10% are the special cases in `references/special-cases.md`. The §3.1 grep runs on `assess` rows before any `--theirs` decision.
+
+#### 3.2b 5-step follow-up flow (Pi-coupling re-introduction)
 
 When the §3.1 grep returns ≥1 hit (in sub-commands 1-3, 5; or hits 4 with non-`ctx.ui` Pi-coupling source), the merge is **not** blocked. The follow-up flow extracts the Pi-coupling in a separate commit and tracks it with a labelled issue:
 
@@ -135,7 +172,7 @@ Run all 6 checks before committing the merge. Each is a single command the agent
 - **(b) Pi-coupling markers = 0 in merged core code** — re-run the 5 sub-commands from §3.1 against the post-merge working tree; the only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones). For Scenario-2-style Pi-coupling re-introductions, this passes only **after** the §3.2 follow-up commit lands, not after the merge commit alone.
 - **(c) TypeScript compiles** — `npx tsc --noEmit` exits 0.
 - **(d) Tests are green** — `npm test` (which runs `test:prebuild` then the full vitest suite) exits 0. The quick alternative is `npx vitest run __tests__/adapter-contract.test.ts` for the parametric adapter contract.
-- **(e) Manifest still aligned with reality** — `git diff upstream/main --stat` matches the manifest's `Path` column after re-running `git diff upstream/main --name-status -- '*.ts' '*.md' '*.json'`; gap ≤ 10 files (vendor / generated files may legitimately drift).
+- **(e) Divergence check passes — `npm run upstream:check` exits 0** (no stale registry entries; `diverged-but-not-registered` warnings are acceptable, see §3.2a category defaults). The cross-check script replaces the Phase 8 manifest-gap ≤ 10 check; per D-34, exit 1 means stale entries require registry cleanup before the merge commit.
 - **(f) Commit message prefix is `upstream-merge:`** — e.g., `upstream-merge: sync v2.10.0 (N files, M conflicts resolved)`. The body should list `ours` / `theirs` / `assess` row counts and any `Refs #N` follow-up issue links.
 
 When all 6 items PASS, push the merge branch and open a PR per the standard fork workflow (see `references/pi-coupling-markers.md` §"PR template" for the body).
