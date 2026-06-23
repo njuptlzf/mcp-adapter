@@ -179,6 +179,48 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 9]: 7 atomic commits — one per task/sub-action, not combined (b3d51e8 / 89810e8 / 6350e94 / 72ae020 / b22fdca / 27d067d / 89339ad)
 - [Phase 9]: Phase 8 GnuTLS workaround copied verbatim from 08-LEARNINGS.md L-4 into `scripts/upstream-divergence.ts` `fetchUpstream()` (single source of truth for upstream fetch protocol)
 
+## Naming Decisions
+
+Cross-document decisions made at v2.0 milestone close. Resolves the tag-naming collision with upstream `v2.0.0`.
+
+### What changed
+
+- **Git tag renamed:** `v2.0` (created by `gsd-tools.cjs milestone complete v2.0`) → `v2.0.0-universal` (created manually after the push collision was detected).
+  - **Old tag:** `v2.0` (`215c52e` → `1f493b1`), created 2026-06-23 09:56 +08:00, pushed to origin 2026-06-23 09:58 +08:00, deleted (local + remote) 2026-06-23 10:00 +08:00.
+  - **New tag:** `v2.0.0-universal` (`84bf7e5` → `1f493b1`), created + pushed 2026-06-23 10:05 +08:00. Annotated, tag message documents the SemVer pre-release rationale and the 5 fork-derivative commits on top of upstream `v2.0.0`.
+
+### What did NOT change
+
+- **Milestone internal ID remains `v2.0`** — `STATE.md` frontmatter `milestone: v2.0`, `MILESTONES.md` heading "v2.0 Multi-Agent Adapter Completion", `ROADMAP.md` Milestones section, `PROJECT.md` Current State — all keep the `v2.0` namespace. The milestone is a project-internal concept; the tag is the external release artifact.
+- **Archive directory naming remains `v2.0-*`** — `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md` keep their `v2.0-` prefix. Archive paths reference the milestone ID, not the release tag.
+- **Prose in PROJECT.md / MILESTONES.md / ROADMAP.md** — all "v2.0 Multi-Agent Adapter Completion" references stay verbatim; the new tag name is added as an explicit `Release tag:` annotation alongside (not replacing) the milestone name.
+- **CHANGELOG.md** — the only `v2.0.0` reference is `https://semver.org/spec/v2.0.0.html` (the upstream SemVer spec URL, unrelated to project tags).
+
+### New requirement
+
+- **Tag naming convention for fork derivative releases:** `vX.Y.Z-{fork-identifier}` where `X.Y.Z` matches the upstream version the fork is derived from, and `{fork-identifier}` is a SemVer pre-release identifier (current value: `universal`).
+  - Fork hotfixes: `vX.Y.Z-universal.N` (e.g. `v2.0.0-universal.1` for the first fork hotfix on top of upstream `v2.0.0`).
+  - Fork pre-releases: `vX.Y.Z-universal-rc.N` (e.g. `v2.1.0-universal-rc.1`).
+  - Upstream sync snapshots (pure upstream drop, no fork changes): `upstream-vX.Y.Z` (no pre-release identifier, marks a clean sync).
+- **Why SemVer pre-release identifier:** Per SemVer §11, a pre-release identifier ranks below the release it derives from (`v2.0.0-universal < v2.0.0`). This makes the fork tag visually distinct from upstream while preserving the upstream version anchor in the name. Compatible with git tag filters, npm `--tag` flag, Go modules (with `+incompatible`-style workarounds for pre-release handling), and most CI/CD tag-prefix matchers.
+- **Filter patterns:** use `git tag -l 'v*-universal*'` to list all fork releases, `git tag -l 'v[0-9]*'` for all SemVer-shaped tags (both upstream and fork), and `git tag -l 'upstream-v*'` for pure upstream sync snapshots.
+
+### Migration traceability
+
+- **Documents changed in this Amendment:**
+  - `.planning/PROJECT.md` — Line 3 (title), Line 6 (new `Release tag:` line), Line 52 (new status note in Current Milestone section), Line 99 (footer).
+  - `.planning/MILESTONES.md` — Line 3 (title), Line 5 (new `Release tag:` line).
+  - `.planning/STATE.md` — this `## Naming Decisions` section (new).
+- **Documents intentionally NOT changed:**
+  - `.planning/ROADMAP.md` — milestone name + archive-path references stay as `v2.0`.
+  - `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md` — historical archive, frozen at 2026-06-23 09:53 +08:00 (pre-tag-rename); archive content references the milestone name, not the tag.
+  - `CHANGELOG.md` — only `v2.0.0` reference is the upstream SemVer spec URL.
+- **Tag operations log (executed):**
+  - `git tag -d v2.0` (local delete)
+  - `git push origin :refs/tags/v2.0` (remote delete, returned `[deleted] v2.0`)
+  - `git tag -a v2.0.0-universal 1f493b1 -m "..."` (annotated create)
+  - `git push origin v2.0.0-universal` (remote push, returned `[new tag] v2.0.0-universal -> v2.0.0-universal`)
+
 ## Operator Next Steps
 
 - Start the next milestone with /gsd-new-milestone

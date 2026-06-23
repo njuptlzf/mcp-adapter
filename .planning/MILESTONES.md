@@ -1,6 +1,8 @@
 # Milestones
 
-## v2.0 Multi-Agent Adapter Completion (Shipped: 2026-06-23)
+## v2.0 Multi-Agent Adapter Completion (Shipped: 2026-06-23, released as git tag `v2.0.0-universal`)
+
+**Release tag:** `v2.0.0-universal` (annotated, SHA `84bf7e5` → commit `1f493b1`). SemVer pre-release derivative of upstream `v2.0.0` (`5e1be49`). Naming rationale: see `.planning/STATE.md` → `## Naming Decisions` (collision with upstream `v2.0.0` namespace resolved by switching to `vX.Y.Z-{fork-identifier}` pattern).
 
 **Phases completed:** 9 phases, 25 plans, 17 tasks
 
