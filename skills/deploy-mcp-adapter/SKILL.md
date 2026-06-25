@@ -269,7 +269,7 @@ Fill in for your adapter:
 - **Path A verification**: How to confirm the `mcp` proxy tool is registered and working
 - **Path B verification**: How to confirm directTools mode is active (tool naming prefix, individual calls)
 - **Path C fallback**: Any agent-specific notes for SDK_DIRECT mode
-- **Agent-specific notes**: Default config path, UI capabilities (`notify`/`form`/`setStatus`/`theme`), env vars that activate this adapter, companion methods (e.g. `attachQuery`, `attachSendMessage`)
+- **Agent-specific notes**: Default config path, UI capabilities (`notify`/`form`/`setStatus`/`theme`), env vars that activate this adapter, companion methods (e.g. `attachChannel` / `detachChannel`; legacy aliases: `attachQuery`, `attachSendMessage`)
 
 See existing examples: [pi.md](../../mcp-adapter-test/references/agent-paths/pi.md), [qoder.md](../../mcp-adapter-test/references/agent-paths/qoder.md).
 

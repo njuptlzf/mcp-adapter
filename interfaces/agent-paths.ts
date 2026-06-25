@@ -64,6 +64,31 @@ export function createQoderResolver(): AgentPathResolver {
   };
 }
 
+/**
+ * Kilo resolver. Default global config directory is `~/.kilo/`
+ * (overridable via `MCP_AGENT_DIR` env var). Kilo reads `.mcp.json`
+ * at the project root.
+ */
+export function createKiloResolver(): AgentPathResolver {
+  return {
+    agentId: "kilo",
+    globalConfigPath: () => {
+      const configured = process.env.MCP_AGENT_DIR?.trim();
+      if (!configured) {
+        return join(homedir(), ".kilo");
+      }
+      if (configured === "~") {
+        return homedir();
+      }
+      if (configured.startsWith("~/")) {
+        return resolve(homedir(), configured.slice(2));
+      }
+      return resolve(configured);
+    },
+    projectConfigName: () => ".mcp.json",
+  };
+}
+
 export const DEFAULT_AGENT_RESOLVER: AgentPathResolver = createPiResolver();
 
 /**

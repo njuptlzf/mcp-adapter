@@ -13,7 +13,7 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; legal JSDoc mentions of Pi types (not import coupling) | `manual` |
 | `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; generic contract, Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |
-| `package.json` | `sibling-config` | Adds `@qoder-ai/qoder-agent-sdk` peer dep + Pi as optional peer (D-01) | `manual` |
+| `package.json` | `sibling-config` | Adds `@qoder-ai/qoder-agent-sdk` peer dep + Pi as optional peer (D-01) + `kilo-mcp-server`/`qoder-mcp-bridge` bin entries | `manual` |
 | `vitest.config.ts` | `sibling-config` | Adds coverage reporter per D-17 (MatrixReporter) | `manual` |
 | `tsconfig.json` | `sibling-config` | Path aliases for `adapters/*` and `interfaces/*` (Phase 5) | `manual` |
 | `README.md` | `framing-divergence` | Preserve 'Universal MCP Adapter' framing per D-18 | `assess` |
@@ -23,6 +23,9 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `types/pi-coding-agent.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21); declarations ≠ coupling | `ours` |
 | `types/pi-ai.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |
 | `types/pi-tui.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |
+| `interfaces/agent-channel.ts` | `fork-only` | Universal bidirectional AgentChannel interface; no upstream equivalent | `ours` |
+| `bin/kilo-mcp-server.ts` | `fork-only` | Kilo MCP stdio server bin entry; upstream has no `bin/` directory | `ours` |
+| `bin/qoder-mcp-bridge.ts` | `fork-only` | Qoder SDK bridge bin entry; upstream has no `bin/` directory | `ours` |
 
 **Status taxonomy** (5 values): `fork-only` (file exists only in fork, never in upstream) / `decoupled-wrapper` (fork wraps a Pi-specific concern behind a generic interface) / `deleted-in-fork` (file is in upstream, the fork removed it) / `sibling-config` (config file with both upstream and fork structural choices) / `framing-divergence` (doc file where fork framing differs from upstream).
 
@@ -36,4 +39,4 @@ Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`
 
 ## When this registry was last curated
 
-2026-06-22 (Phase 9 Architecture C; 17 anchored entries from Phase 8 manifest footnotes + expansion). Update this footer on Phase 9+ amendments.
+2026-06-25 (Phase 9 Architecture C; 20 anchored entries — added `interfaces/agent-channel.ts` + `bin/` entries). Update this footer on Phase 9+ amendments.

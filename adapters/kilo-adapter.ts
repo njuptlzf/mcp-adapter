@@ -1,31 +1,17 @@
 /**
- * Qoder-specific adapter that implements the generic `AgentAPI` /
- * `AgentContext` / `UISystem` interfaces on top of the Qoder SDK
- * (`@qoder-ai/qoder-agent-sdk`).
+ * Kilo-specific adapter that implements the generic `AgentAPI` /
+ * `AgentContext` / `UISystem` interfaces for the Kilo coding agent.
  *
- * Strategy (D-02, D-07, D-08, D-09, T-06-02, T-06-04): in-memory store +
- * companion methods. Qoder has no synchronous programmatic registration API
- * equivalent to Pi's `ExtensionAPI.registerTool`, so tools, commands, and
- * flags are kept in the adapter's private maps. The host later bridges
- * `adapter.tools.values()` into `createSdkMcpServer({ tools: [...] })` when
- * the live SDK session is constructed.
+ * Strategy: in-memory store + companion methods, mirroring the QoderAdapter
+ * pattern. Kilo has no synchronous programmatic registration API equivalent
+ * to Pi's `ExtensionAPI.registerTool`, so tools, commands, and flags are
+ * kept in the adapter's private maps. The host later bridges
+ * `adapter.tools.values()` into Kilo's runtime when the session is
+ * constructed (e.g. via hook injection).
  *
- * The optional UI surface is intentionally minimal (D-07): only `notify`.
+ * The optional UI surface is intentionally minimal: only `notify`.
  * `form`, `setStatus`, `custom`, and `theme` are explicitly `undefined` so
  * callers can assert their absence.
- *
- * **Threat-model notes**
- *   - T-06-02 (Information Disclosure): no raw logger calls outside of the
- *     explicitly-allowed channels. Handler errors are logged with the event
- *     name + handler count only — never the args, which may carry tokens.
- *     `ui.notify` only emits the `[mcp-adapter/qoder]` prefix + caller-
- *     supplied message (the caller already opted in by calling notify).
- *   - T-06-04 (Elevation of Privilege): `exec` uses `node:child_process.spawn`
- *     with stdio piped. It must only be invoked from trusted host code
- *     (auth-flow, setup) — never from MCP tool result content. The adapter
- *     exposes no method that lets MCP tool results reach `exec`.
- *   - T-06-SC (Tampering): no Pi-Coding-Agent imports. The Pi adapter and
- *     Qoder adapter are isolated.
  */
 
 import type {
@@ -41,17 +27,16 @@ import type {
 } from "../interfaces/agent-api.ts";
 import type { SamplingProvider } from "../interfaces/sampling.ts";
 import type { AgentChannel } from "../interfaces/agent-channel.ts";
-import type { Query } from "@qoder-ai/qoder-agent-sdk";
 
-/** Maximum number of messages buffered when no Query is attached (test-friendly). */
+/** Maximum number of messages buffered when no send mechanism is available (test-friendly). */
 const SEND_BUFFER_LIMIT = 32;
 
 /**
- * Shape of the runtime input that `adaptQoderContext` accepts. Intentionally
- * loose — Qoder's session object is far larger, and we only project the
+ * Shape of the runtime input that `adaptKiloContext` accepts. Intentionally
+ * loose — Kilo's session object is far larger, and we only project the
  * fields `AgentContext` cares about.
  */
-export interface QoderRuntimeInput {
+export interface KiloRuntimeInput {
 	cwd: string;
 	hasUI: boolean;
 	model?: unknown;
@@ -61,11 +46,11 @@ export interface QoderRuntimeInput {
 	samplingProvider?: SamplingProvider;
 }
 
-/** Adapter implementing `AgentAPI` for Qoder. */
-export class QoderAdapter implements AgentAPI {
-	/** Registered tools by name. The host later bridges these into `createSdkMcpServer`. */
+/** Adapter implementing `AgentAPI` for Kilo. */
+export class KiloAdapter implements AgentAPI {
+	/** Registered tools by name. The host later bridges these into Kilo's runtime. */
 	readonly tools = new Map<string, ToolRegistration>();
-	/** Registered commands by name. Surfaced via Qoder's `/` slash-command system. */
+	/** Registered commands by name. */
 	readonly commands = new Map<string, CommandConfig>();
 	/** Registered flags by name. Value is mutable so `getFlag` reflects later updates. */
 	readonly flags = new Map<string, FlagConfig & { value?: string }>();
@@ -75,53 +60,55 @@ export class QoderAdapter implements AgentAPI {
 		Set<(...args: unknown[]) => unknown>
 	>();
 
-	/** Live SDK query handle, set via `attachQuery`. */
-	private queryRef: Query | undefined;
-	/** Universal channel, set via `attachChannel`. Takes priority over `queryRef`. */
+	/** Callback for sending messages, set via `attachSendMessage`. */
+	private sendMessageFn: ((message: unknown, options?: unknown) => void) | undefined;
+	/** Universal channel, set via `attachChannel`. Takes priority over `sendMessageFn`. */
 	private channel: AgentChannel | undefined;
-	/** Buffered messages captured when no Query is attached (max 32). */
+	/** Buffered messages captured when no send function is attached (max 32). */
 	private readonly bufferedMessages: unknown[] = [];
 
-	/** Minimal UISystem per D-07: only `notify`. */
+	/** Minimal UISystem: notify + setStatus + no-op theme. */
 	readonly ui: UISystem = {
 		notify: (message: string, level: "info" | "warning" | "error"): void => {
 			const consoleMethod: "info" | "warn" | "error" =
 				level === "error" ? "error" : level === "warning" ? "warn" : "info";
-			// T-06-02: caller explicitly opted into console via notify — message
-			// content is intentional. No token / secret scanning here.
-			console[consoleMethod](`[mcp-adapter/qoder] ${message}`);
+			console[consoleMethod](`[mcp-adapter/kilo] ${message}`);
 		},
-		setStatus: undefined,
+		setStatus: (_key: string, _value: string | undefined): void => {
+			// Kilo doesn't expose a status bar; silently ignore.
+		},
 		form: undefined,
 		custom: undefined,
-		theme: undefined,
+		theme: {
+			fg: (_color: string, text: string): string => text,
+		},
 	};
 
-	// ----- Companion methods (NOT part of AgentAPI; host-driven per D-09) -----
+	// ----- Companion methods (NOT part of AgentAPI; host-driven) -----
 
 	/**
-	 * Attach a live Qoder SDK `Query` so subsequent `sendMessage` calls route
-	 * into the active session via `Query.streamInput`. Called by the host
-	 * after `query()` returns successfully.
+	 * Attach a send-message callback so subsequent `sendMessage` calls route
+	 * into the active Kilo session. Called by the host after hook injection.
 	 *
 	 * Legacy companion method — prefer `attachChannel` for new host code.
 	 */
-	attachQuery(q: Query): void {
-		this.queryRef = q;
+	attachSendMessage(
+		fn: (message: unknown, options?: unknown) => void,
+	): void {
+		this.sendMessageFn = fn;
 	}
 
 	/**
-	 * Detach the live Query and clear the buffered-message queue.
-	 * Per T-06-04: nothing leaks across sessions.
+	 * Detach the send-message callback and clear the buffered-message queue.
 	 */
-	detachQuery(): void {
-		this.queryRef = undefined;
+	detachSendMessage(): void {
+		this.sendMessageFn = undefined;
 		this.bufferedMessages.length = 0;
 	}
 
 	/**
 	 * Attach a universal `AgentChannel` for bidirectional communication.
-	 * Takes priority over `attachQuery` — when a channel is attached,
+	 * Takes priority over `attachSendMessage` — when a channel is attached,
 	 * `sendMessage` routes through `channel.send`.
 	 */
 	attachChannel(channel: AgentChannel): void {
@@ -135,10 +122,10 @@ export class QoderAdapter implements AgentAPI {
 	detachChannel(): void {
 		this.channel?.close?.();
 		this.channel = undefined;
-		this.detachQuery();
+		this.detachSendMessage();
 	}
 
-	// ----- 8 AgentAPI methods (D-02 full parity) -----
+	// ----- 8 AgentAPI methods -----
 
 	registerTool(tool: ToolRegistration): void {
 		this.tools.set(tool.name, tool);
@@ -149,8 +136,6 @@ export class QoderAdapter implements AgentAPI {
 	}
 
 	registerFlag(name: string, config: FlagConfig): void {
-		// Spread so the `value` field can be mutated later without touching
-		// the caller's object reference.
 		this.flags.set(name, { ...config });
 	}
 
@@ -163,14 +148,10 @@ export class QoderAdapter implements AgentAPI {
 			set = new Set();
 			this.handlers.set(event, set);
 		}
-		// Set.add is idempotent — registering the same handler twice is a no-op.
 		set.add(handler as (...args: unknown[]) => unknown);
 	}
 
 	getAllTools(): ToolInfo[] {
-		// Only reflect tools registered through the adapter. Qoder-native
-		// tools are merged by Qoder's session on its own; the adapter does
-		// not need to enumerate them.
 		return [...this.tools.values()].map((t) => ({ name: t.name }));
 	}
 
@@ -179,32 +160,19 @@ export class QoderAdapter implements AgentAPI {
 		return entry ? entry.value : undefined;
 	}
 
-	sendMessage(message: unknown, _options?: unknown): void {
+	sendMessage(message: unknown, options?: unknown): void {
 		if (this.channel) {
-			void this.channel.send(message, _options);
+			void this.channel.send(message, options);
 			return;
 		}
-		if (this.queryRef) {
-			const q = this.queryRef as unknown as {
-				streamInput?: (
-					stream: AsyncIterable<unknown>,
-				) => Promise<void>;
-			};
-			if (typeof q.streamInput === "function") {
-				// Wrap the single message in an async iterable so the SDK can consume it.
-				void q.streamInput(
-					(async function* () {
-						yield message;
-					})(),
-				);
-				return;
-			}
+		if (this.sendMessageFn) {
+			this.sendMessageFn(message, options);
+			return;
 		}
-		// No Query attached or no streamInput — buffer (test-friendly).
+		// No channel or send function attached — buffer (test-friendly).
 		if (this.bufferedMessages.length < SEND_BUFFER_LIMIT) {
 			this.bufferedMessages.push(message);
 		} else {
-			// Drop oldest, keep newest.
 			this.bufferedMessages.shift();
 			this.bufferedMessages.push(message);
 		}
@@ -214,13 +182,9 @@ export class QoderAdapter implements AgentAPI {
 	 * Spawn a child process via `node:child_process.spawn`. Returns
 	 * `{ code, stdout, stderr }` once the process exits.
 	 *
-	 * **T-06-04**: this method MUST only be invoked from trusted host code
+	 * **Security**: this method MUST only be invoked from trusted host code
 	 * (auth-flow, setup, lifecycle). It must NEVER be reachable from MCP
-	 * tool result content. The adapter exposes no path that lets MCP tool
-	 * results reach this method.
-	 *
-	 * `node:child_process` is imported dynamically so the module stays
-	 * tree-shakable when `exec` is unused.
+	 * tool result content.
 	 */
 	async exec(command: string, args: string[]): Promise<unknown> {
 		const cp = (await import("node:child_process")) as typeof import("node:child_process");
@@ -247,7 +211,7 @@ export class QoderAdapter implements AgentAPI {
 		});
 	}
 
-	// ----- Public event simulators (D-09) -----
+	// ----- Public event simulators -----
 
 	/** Drive a simulated `session_start` event with the supplied runtime context. */
 	async fireSessionStart(runtimeCtx: AgentContext): Promise<void> {
@@ -268,10 +232,8 @@ export class QoderAdapter implements AgentAPI {
 
 	/**
 	 * Invoke every handler registered for `event` with the supplied args.
-	 *
-	 * T-06-02: handler errors are caught and logged via `console.error` with
-	 * the event name + handler count only — never the args themselves, which
-	 * may carry tokens, message content, or secrets.
+	 * Handler errors are caught and logged with the event name + handler
+	 * count only — never the args themselves.
 	 */
 	private async fire(event: string, ...args: unknown[]): Promise<void> {
 		const set = this.handlers.get(event);
@@ -283,7 +245,7 @@ export class QoderAdapter implements AgentAPI {
 					await Promise.resolve(h(...args));
 				} catch (err) {
 					console.error(
-						`[mcp-adapter/qoder] handler error for event '${event}' (${set.size} handlers): ${(err as Error).message}`,
+						`[mcp-adapter/kilo] handler error for event '${event}' (${set.size} handlers): ${(err as Error).message}`,
 					);
 				}
 			}),
@@ -296,27 +258,18 @@ export class QoderAdapter implements AgentAPI {
 	getBufferedMessages(): readonly unknown[] {
 		return this.bufferedMessages;
 	}
-
-	/** Read-only view of the live query reference (for tests; undefined if detached). */
-	getQueryRef(): Query | undefined {
-		return this.queryRef;
-	}
 }
 
 /**
- * Convert a Qoder runtime input into a generic `AgentContext`.
- *
- * Per D-08 and T-06-03: does NOT construct a `QoderSamplingProvider` here.
- * The host passes one in via `input.samplingProvider` (Plan 02 will ship
- * the sampling provider; this adapter stays decoupled from auth surfaces).
+ * Convert a Kilo runtime input into a generic `AgentContext`.
  *
  * When `input.hasUI` is true, the adapter's minimal `UISystem` is attached.
  * When `input.hasUI` is false, `ui` is left undefined so callers can detect
  * headless mode.
  */
-export function adaptQoderContext(
-	input: QoderRuntimeInput,
-	adapter?: QoderAdapter,
+export function adaptKiloContext(
+	input: KiloRuntimeInput,
+	adapter?: KiloAdapter,
 ): AgentContext {
 	const ctx: AgentContext = {
 		cwd: input.cwd,
@@ -337,10 +290,8 @@ export function adaptQoderContext(
  * Convenience accessor: returns the adapter's UISystem so callers can grab
  * it without instantiating a second copy.
  */
-export function adaptQoderUI(adapter: QoderAdapter): UISystem {
+export function adaptKiloUI(adapter: KiloAdapter): UISystem {
 	return adapter.ui;
 }
 
-// Keep unused-import errors away for ambient FormConfig/FormResult consumers
-// in downstream files (these are re-exported via the adapter's public API).
 export type { FormConfig, FormResult };

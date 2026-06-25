@@ -13,6 +13,7 @@ import { QoderAdapter, adaptQoderContext } from "pi-mcp-adapter/adapters/qoder-a
 import { createQoderResolver } from "pi-mcp-adapter/interfaces/agent-paths.ts";
 import { loadMcpConfig } from "pi-mcp-adapter/config.ts";
 import { loadMetadataCache } from "pi-mcp-adapter/metadata-cache.ts";
+import type { AgentChannel } from "pi-mcp-adapter/interfaces/agent-channel.ts";
 import { createSdkMcpServer, query } from "@qoder-ai/qoder-agent-sdk";
 
 // 1. Create adapter instance + context
@@ -40,7 +41,19 @@ const q = query({
     allowedTools: tools.map(t => `mcp__mcp-adapter-tools__${t.name}`),
   },
 });
-adapter.attachQuery(q);
+
+// 4b. Wrap the Query handle into a universal AgentChannel
+// The channel normalizes the adapter → session communication path.
+// sendMessage routes through q.streamInput(); close delegates to q.close().
+const channel: AgentChannel = {
+  send: (message: unknown) => {
+    void q.streamInput(
+      (async function* () { yield message; })(),
+    );
+  },
+  close: () => { void q.close(); },
+};
+adapter.attachChannel(channel);
 
 // 5. Fire session_start → triggers lazy server connections
 await adapter.fireSessionStart(ctx);
@@ -229,6 +242,35 @@ console.log("Registered tools:", tools.map(t => t.name));
 | Version | `2.9.0` |
 | License | MIT |
 | Universal entry | `createMcpAdapter(adapter, ctx, config, cache)` from `adapters/entry.ts` |
-| Bin | `pi-mcp-adapter` (CLI for `init` command — detects host configs) |
+| Universal channel | `AgentChannel` from `interfaces/agent-channel.ts` — `attachChannel()` / `detachChannel()` |
+| Bin: `pi-mcp-adapter` | CLI for `init` command — detects host configs |
+| Bin: `kilo-mcp-server` | Kilo MCP stdio server — register in `.mcp.json` |
+| Bin: `qoder-mcp-bridge` | Qoder SDK bridge — register in `~/.qoder/settings.json` SessionStart hook |
 
 **No hard agent dependencies** — Pi SDK is optional peer dep, Qoder SDK is regular dep but only loaded when `QoderAdapter` is imported.
+
+### AgentChannel pattern
+
+All adapters provide `attachChannel(channel)` / `detachChannel()` as companion methods for bidirectional communication. The host wraps SDK-specific session handles into a universal `AgentChannel`:
+
+```typescript
+import type { AgentChannel } from "pi-mcp-adapter/interfaces/agent-channel.ts";
+
+// Qoder: wrap Query handle
+const channel: AgentChannel = {
+  send: (msg) => q.streamInput((async function*() { yield msg; })()),
+  close: () => q.close(),
+};
+adapter.attachChannel(channel);
+
+// Kilo (stdio): route to stderr for diagnostics
+const channel: AgentChannel = {
+  send: (msg) => console.error(`[adapter] ${JSON.stringify(msg)}`),
+};
+adapter.attachChannel(channel);
+
+// Pi: no-op (native ExtensionAPI channel already works)
+// attachChannel is optional for Pi
+```
+
+Legacy companion methods (`attachQuery`, `attachSendMessage`) remain for backward compatibility.
