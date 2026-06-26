@@ -12,10 +12,18 @@ Use MCP servers without burning your context window, from Pi today and from any 
 
 Pi is a first-class supported adapter (not legacy). New agents plug in through `AGENT_ADAPTERS` in `interfaces/agent-api.ts` — adding a new adapter = one descriptor push, no other code changes.
 
+The **single source of truth** for supported adapters is the `AGENT_ADAPTERS` array in [`interfaces/agent-api.ts`](interfaces/agent-api.ts). The table below is a human-readable snapshot; when in doubt, read the registry directly:
+
+```bash
+# Show all currently registered adapters
+grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabilities:)" | head -40
+```
+
 | Agent | Status | Default config path | Path resolver | Sampling | Renderer | Verified at |
 |-------|--------|---------------------|---------------|----------|----------|-------------|
-| Pi    | ✅ First-class | `~/.pi/agent/mcp.json` | `createPiResolver()` | ✅ | ✅ | [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) |
+| Pi | ✅ First-class | `~/.pi/agent/mcp.json` | `createPiResolver()` | ✅ | ✅ | [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) |
 | Qoder | ✅ First-class | `~/.qoder/agent/mcp.json` | `createQoderResolver()` | ✅ | ❌ (notify-only) | [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) |
+| Kilo | ✅ MCP stdio server | `~/.kilo/mcp.json` | `createKiloResolver()` | ❌ | ❌ | `bin/kilo-mcp-server.ts` |
 | Claude, Cursor, others | 🟡 Adapter pattern supported — bring your own `AgentAPI` implementation | TBD | TBD | TBD | TBD | TBD |
 
 See [Verification](#verification) below for the latest matrix results.
