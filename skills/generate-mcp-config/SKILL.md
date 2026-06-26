@@ -16,19 +16,24 @@ Generate correct `mcp.json` files for any mcp-adapter compatible agent.
 
 ## Agent Path Map
 
-Each agent has a global config path and a project config filename. The `MCP_AGENT_DIR` env var overrides the global path for any agent.
+Each registered adapter provides an `AgentPathResolver` factory in `AGENT_ADAPTERS`.
+The resolver returns the global config path and project config filename for that
+agent. `MCP_AGENT_DIR` overrides the global path for any agent.
 
-| Agent | Global Config Path | Project Config | Resolver Factory |
-|-------|-------------------|----------------|-----------------|
-| Pi | `~/.pi/agent/mcp.json` | `.pi/mcp.json` | `createPiResolver()` |
-| Qoder | `~/.qoder/agent/mcp.json` | `.mcp.json` | `createQoderResolver()` |
-| Claude | `~/.claude/mcp.json` | `.mcp.json` | custom `AgentPathResolver` |
-| Cursor | `~/.cursor/mcp.json` | `.mcp.json` | custom `AgentPathResolver` |
-| Generic | `~/.config/mcp/mcp.json` | `.mcp.json` | `DEFAULT_AGENT_RESOLVER` (Pi) |
+To discover the current set of adapters and their resolvers:
+
+```bash
+echo "=== Discovered adapters ==="
+grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|resolverFactory:)" | head -40
+```
+
+Concrete defaults for each adapter are documented in
+`skills/mcp-adapter-test/references/agent-paths/<id>.md`. Do **not** hardcode
+paths in this skill — use the resolver from the registry.
 
 **Precedence** (highest to lowest):
 1. `~/.config/mcp/mcp.json` — shared global
-2. `<agent dir>/mcp.json` — agent global override
+2. `<agent dir>/mcp.json` — agent global override (resolved via `AGENT_ADAPTERS[i].resolverFactory()`)
 3. `.mcp.json` — shared project
 4. `.<agent>/mcp.json` — agent project override (Pi only: `.pi/mcp.json`)
 
@@ -168,13 +173,24 @@ For common server templates, see [references/server-templates.md](references/ser
 
 ## Agent Adapter Registry
 
-The project's `AGENT_ADAPTERS` in `interfaces/agent-api.ts` is the source of truth for supported adapters:
+The project's `AGENT_ADAPTERS` in `interfaces/agent-api.ts` is the source of truth for supported adapters. Read it dynamically instead of maintaining a duplicate table:
 
-| Adapter | UI | Sampling | Renderer | Status |
-|---------|-----|----------|----------|--------|
-| Pi | Full (notify, setStatus, form, theme) | Yes | Yes | First-class |
-| Qoder | Minimal (notify only) | Yes | No | First-class |
-| Others | Bring your own `AgentAPI` | TBD | TBD | Adapter pattern supported |
+```bash
+echo "=== Current adapter capabilities ==="
+grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabilities:)" | head -40
+```
+
+For each registered adapter, the following are defined:
+
+| Field | Meaning |
+|-------|---------|
+| `id` | Stable adapter identifier |
+| `displayName` | Human-readable name |
+| `factory()` | Builds a fresh `AgentAPI` instance |
+| `resolverFactory()` | Returns the `AgentPathResolver` for config paths |
+| `capabilities.ui` | Whether the adapter exposes `UISystem` methods |
+| `capabilities.sampling` | Whether the adapter supports sampling provider hooks |
+| `capabilities.renderer` | Whether the adapter supports custom tool call/renderers |
 
 Adding a new adapter = implement `AgentAPI` interface (8 methods) + provide `AgentPathResolver` + push one descriptor to `AGENT_ADAPTERS`.
 

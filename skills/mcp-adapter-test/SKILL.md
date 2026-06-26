@@ -13,20 +13,21 @@ description: >
 
 # mcp-adapter Integration Test (universal)
 
-Executes the test plan (`docs/mcp-adapter-test-plan.md`) end-to-end for any
-registered `AgentAPI` adapter (Pi / Qoder / future).
+Executes the test plan (`docs/mcp-adapter-test-plan.md`) end-to-end for every
+registered `AgentAPI` adapter in [`interfaces/agent-api.ts`](../../interfaces/agent-api.ts).
 
 ## Agent-agnostic parametric structure
 
-This main file describes WHAT each phase does. Adapter-specific HOW lives in:
+This main file describes WHAT each phase does. Adapter-specific HOW lives in
+`references/agent-paths/<id>.md` — one file per adapter registered in
+`AGENT_ADAPTERS`. Run this command to see the current set:
 
-| Adapter | Reference file |
-|---------|----------------|
-| Pi      | [references/agent-paths/pi.md](references/agent-paths/pi.md) |
-| Qoder   | [references/agent-paths/qoder.md](references/agent-paths/qoder.md) |
-| New     | [references/agent-paths/_template.md](references/agent-paths/_template.md) (copy + fill in) |
+```bash
+echo "=== Adapter reference files ==="
+ls skills/mcp-adapter-test/references/agent-paths/*.md | xargs -n1 basename
+```
 
-Adding a new adapter = copy `_template.md` → `<your-id>.md`, fill in Path A/B/C.
+To add a new adapter: copy [`references/agent-paths/_template.md`](references/agent-paths/_template.md) → `references/agent-paths/<your-id>.md` and fill in Path A/B/C.
 **This main file is not modified** (Phase 8 UPSTREAM-04 compatibility).
 
 ## Quick Start
@@ -164,12 +165,15 @@ registry — no hardcoding needed.
 #### Step 5b — User selects adapters to test
 
 Use `AskUserQuestion` to present the discovered adapters with multi-select.
-Each `id` from `AGENT_ADAPTERS` becomes one option. Example:
+Each `id` from `AGENT_ADAPTERS` becomes one option. Derive the display text
+from `displayName` and the coverage notes from the adapter's `capabilities`
+(e.g. `ui`, `sampling`, `renderer`).
 
-| Adapter | id | Factory | Integration coverage |
-|---------|----|---------|---------------------|
-| Pi | `pi` | `PiAdapter` wrapper | AgentAPI contract (parametric) |
-| Qoder | `qoder` | `QoderAdapter` | AgentAPI contract + full stack (createMcpAdapter + initializeMcp) |
+Example option shape (for the current registry, do **not** hardcode this table):
+
+| Adapter | id | Coverage note |
+|---------|----|---------------|
+| `<displayName>` | `<id>` | `AgentAPI` contract + full stack when available |
 
 Structure the question with `multiSelect: true`. RECOMMENDATION: select all
 adapters for complete coverage (Completeness: 10/10).
@@ -184,14 +188,15 @@ npx vitest run __tests__/adapter-contract.test.ts --reporter=verbose
 ```
 
 For each adapter that has a dedicated full-stack integration test, also run
-that adapter's test file:
+that adapter's test file. The current registry may include files such as:
 
-| Adapter | Integration test | Command |
-|---------|-----------------|---------|
-| Qoder | Full createMcpAdapter + initializeMcp | `npx vitest run __tests__/qoder-adapter-integration.test.ts --reporter=verbose` |
-| Pi | (no dedicated integration test; AgentAPI contract covers it) | — |
+| Adapter pattern | Typical integration test | Command |
+|-----------------|--------------------------|---------|
+| SDK-bridge adapters (e.g. Qoder) | Full `createMcpAdapter` + `initializeMcp` | `npx vitest run __tests__/<id>-adapter-integration.test.ts --reporter=verbose` |
+| Native-extension adapters (e.g. Pi) | (covered by parametric AgentAPI contract) | — |
 
-Record per-adapter results in the master report under a new section.
+Always verify the actual test file exists before running. Record per-adapter
+results in the master report under a new section.
 
 **Pass criteria**:
 - AgentAPI contract: all contract tests pass for every selected adapter
