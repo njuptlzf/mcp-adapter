@@ -13,31 +13,27 @@ export interface AgentPathResolver {
 }
 
 /**
+ * Resolve an agent directory from an env var, with tilde expansion.
+ * Returns `defaultDir` when the env var is unset or empty-after-trim.
+ */
+function resolveEnvAgentDir(envVar: string, defaultDir: string): string {
+  const configured = process.env[envVar]?.trim();
+  if (!configured) return defaultDir;
+  if (configured === "~") return homedir();
+  if (configured.startsWith("~/")) return resolve(homedir(), configured.slice(2));
+  return resolve(configured);
+}
+
+/**
  * Resolve the global MCP config directory for Qoder, honoring
  * `process.env.MCP_AGENT_DIR` (D-03 + T-06-01).
  *
- * Precedence (mirrors `agent-dir.ts` lines 7-18):
- *   1. `MCP_AGENT_DIR` env var, trimmed.
- *      - "~"            → `homedir()`
- *      - "~/<rest>"     → `resolve(homedir(), envVar.slice(2))`  (anchored —
- *                         prevents traversal via `~/../../etc`)
- *      - other          → `resolve(envVar)` (must be absolute)
- *   2. default         → `<homedir>/.qoder/agent`
- *
- * Empty-after-trim is treated as unset (returns default).
+ * Precedence:
+ *   1. `MCP_AGENT_DIR` env var, trimmed (tilde-expanded via resolveEnvAgentDir).
+ *   2. default → `<homedir>/.qoder/agent`
  */
 export function resolveQoderGlobalConfigPath(): string {
-  const configured = process.env.MCP_AGENT_DIR?.trim();
-  if (!configured) {
-    return join(homedir(), ".qoder", "agent");
-  }
-  if (configured === "~") {
-    return homedir();
-  }
-  if (configured.startsWith("~/")) {
-    return resolve(homedir(), configured.slice(2));
-  }
-  return resolve(configured);
+  return resolveEnvAgentDir("MCP_AGENT_DIR", join(homedir(), ".qoder", "agent"));
 }
 
 export function createPiResolver(): AgentPathResolver {
@@ -72,19 +68,7 @@ export function createQoderResolver(): AgentPathResolver {
 export function createKiloResolver(): AgentPathResolver {
   return {
     agentId: "kilo",
-    globalConfigPath: () => {
-      const configured = process.env.MCP_AGENT_DIR?.trim();
-      if (!configured) {
-        return join(homedir(), ".kilo");
-      }
-      if (configured === "~") {
-        return homedir();
-      }
-      if (configured.startsWith("~/")) {
-        return resolve(homedir(), configured.slice(2));
-      }
-      return resolve(configured);
-    },
+    globalConfigPath: () => resolveEnvAgentDir("MCP_AGENT_DIR", join(homedir(), ".kilo")),
     projectConfigName: () => ".mcp.json",
   };
 }
