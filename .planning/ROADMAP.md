@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- 🔄 **v3.0 Protocol-Category Simplification** — Phase 10+ (active 2026-06-26) — Simplify "for every MCP-compatible agent" by merging per-agent adapters into protocol-category shared adapters, with agent self-reporting config paths.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
 
 ## Phases
@@ -273,6 +274,38 @@ Refactor Phase 8's full-divergence manifest into a leaner Architecture C: a spec
 - Phase 9 accepts a small gap between the new registry and upstream: the 15-20 hand-curated entries are a snapshot, and the script's job is to surface drift, not eliminate it
 
 </details>
+
+### Phase 10: StoreAdapter Base Class & Agent Self-Reporting Paths
+
+Extract shared StoreAgentAdapter base class from QoderAdapter + KiloAdapter (90% code overlap), add agent self-reporting config path to AgentContext, and update upstream-merge skill for the new file layout.
+
+**Goals:**
+
+- Merge QoderAdapter(346行) + KiloAdapter(298行) into shared StoreAgentAdapter(~100行) + thin agent wrappers(~50行 each)
+- Add `mcpConfigPath?: string` to AgentContext for agent self-reporting config paths
+- Eliminate hardcoded default paths per agent; agents self-report `.mcp.json` location
+- Update `skills/upstream-merge/references/special-cases.md` with new fork-only files
+- Verify parametric adapter contract tests pass for all 3 agents
+
+**Requirements:** STORE-01 through STORE-05, PATH-01 through PATH-03
+
+**Deliverables:**
+
+- `adapters/store-adapter.ts` — Shared StoreAgentAdapter base class
+- Refactored `adapters/qoder-adapter.ts` → thin wrapper delegating to StoreAgentAdapter
+- Refactored `adapters/kilo-adapter.ts` → thin wrapper delegating to StoreAgentAdapter
+- Updated `interfaces/agent-api.ts` — AGENT_ADAPTERS registry + AgentContext.mcpConfigPath
+- Updated `skills/upstream-merge/references/special-cases.md` — +3 entries for new files
+- Updated `__tests__/adapter-contract.test.ts` — parametric test for StoreAdapter
+
+**Plans:** 3 plans, 2 waves (Wave 1: StoreAdapter + Paths, Wave 2: Tests + Upstream Registry)
+
+Plans:
+- [x] 10-01-PLAN.md — StoreAgentAdapter base class extraction + QoderAdapter/KiloAdapter thin-wrapper refactor (STORE-01 through STORE-03, STORE-05)
+- [x] 10-02-PLAN.md — Agent self-reporting paths: mcpConfigPath on AgentContext + config.ts wiring + optional agent-paths dedup (PATH-01 through PATH-03)
+- [x] 10-03-PLAN.md — Tests + upstream-merge registry update + full verification suite (STORE-04, UP-01, UP-02)
+
+**Status:** ✅ Complete (3 plans, 9 commits, 590/600 tests pass)
 
 ---
 

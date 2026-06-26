@@ -1,31 +1,31 @@
 ---
 gsd_state_version: 1.0
-milestone: v2.0
-milestone_name: milestone
-status: completed
-stopped_at: Phase 9 Plan 01 complete + SUMMARY.md written (7 commits, 5 file modifications). Milestone v2.0 100% done (9/9 phases, 25/25 plans).
-last_updated: "2026-06-23T01:53:00.070Z"
-last_activity: 2026-06-23 — Milestone v2.0 completed and archived
+milestone: v3.0
+milestone_name: Protocol-Category Simplification
+status: in_progress
+stopped_at: Phase 10 complete — StoreAdapter extracted, self-reporting paths wired, upstream-merge updated
+last_updated: "2026-06-26T00:00:00.000Z"
+last_activity: 2026-06-26 — Phase 10 executed (3 plans, 9 commits, 590/600 tests pass)
 progress:
-  total_phases: 9
-  completed_phases: 9
-  total_plans: 25
-  completed_plans: 25
+  total_phases: 10
+  completed_phases: 10
+  total_plans: 28
+  completed_plans: 28
   percent: 100
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-22
-**Status:** v2.0 milestone complete
+**Last updated:** 2026-06-26
+**Status:** v3.0 milestone — Phase 10 planning
 
 ## Current Position
 
-Phase: Milestone v2.0 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-23 — Milestone v2.0 completed and archived
+Phase: 10 — StoreAdapter Base Class & Agent Self-Reporting Paths ✅
+Plan: 10-01/10-02/10-03 all complete (9 commits)
+Status: Complete — StoreAgentAdapter(284行) extracted, QoderAdapter(157行)/KiloAdapter(132行) thin wrappers, self-reporting paths wired
+Last activity: 2026-06-26 — Phase 10 executed: 3 plans, 590/600 tests pass, upstream:check exits 0
 
 ## Recent Progress
 

@@ -23,6 +23,10 @@ import { AGENT_ADAPTERS } from "../interfaces/agent-api.ts";
 import { MockAgentAPI } from "./fixtures/mock-agent-api.ts";
 import { loadMcpConfig } from "../config.ts";
 
+// StoreAgentAdapter (adapters/store-adapter.ts) is tested indirectly through
+// QoderAdapter and KiloAdapter, both of which extend it. The AgentAPI contract
+// methods exercised here are implemented in StoreAgentAdapter.
+
 describe.each(
 	AGENT_ADAPTERS.map((a) => [a.id, a.factory] as const),
 )("AgentAPI contract — adapter: %s", (_id, factory) => {
