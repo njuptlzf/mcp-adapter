@@ -11,6 +11,10 @@ description: >
   "验证 mcp-adapter", "测试 mcp-adapter", or "/mcp-adapter-test".
 ---
 
+> ⚠️ **DEPRECATED** — 此 skill 已被 [`/mcp-adapter`](../mcp-adapter/SKILL.md) 统一入口取代。
+> 功能已完整迁移至 `skills/mcp-adapter/SKILL.md`（Phase 3: Verify Deployment）。
+> 保留此文件仅用于向后兼容，新用户请使用 `/mcp-adapter`。
+
 # mcp-adapter Integration Test (universal)
 
 Executes the test plan (`docs/mcp-adapter-test-plan.md`) end-to-end for every

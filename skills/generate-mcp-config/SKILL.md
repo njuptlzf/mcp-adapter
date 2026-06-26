@@ -3,6 +3,10 @@ name: generate-mcp-config
 description: Generate mcp.json configuration files for any mcp-adapter compatible agent (Pi, Qoder, Claude, Cursor, etc.). Creates global or project-level MCP server configs with correct paths, server entries, settings, and imports. Use when user says "生成mcp配置", "创建mcp.json", "配置MCP服务器", "generate mcp config", "create mcp.json", "configure MCP servers", or when setting up a new agent with mcp-adapter.
 ---
 
+> ⚠️ **DEPRECATED** — 此 skill 已被 [`/mcp-adapter`](../mcp-adapter/SKILL.md) 统一入口取代。
+> 功能已完整迁移至 `skills/mcp-adapter/SKILL.md`（Phase 1: Generate Config）。
+> 保留此文件仅用于向后兼容，新用户请使用 `/mcp-adapter`。
+
 # Generate MCP Config
 
 Generate correct `mcp.json` files for any mcp-adapter compatible agent.

@@ -29,6 +29,13 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `bin/kilo-mcp-server.ts` | `fork-only` | Kilo MCP stdio server bin entry; upstream has no `bin/` directory | `ours` |
 | `bin/qoder-mcp-bridge.ts` | `fork-only` | Qoder SDK bridge bin entry; upstream has no `bin/` directory | `ours` |
 | `adapters/store-adapter.ts` | `fork-only` | Shared StoreAgentAdapter base class extracted from qoder/kilo adapters; zero Pi imports — zero conflict risk with upstream | `ours` |
+| `skills/mcp-adapter/SKILL.md` | `fork-only` | Phase 11: unified mcp-adapter skill replaces deploy/generate/test; upstream has no skills/ dir | `ours` |
+| `skills/mcp-adapter/references/generate.md` | `fork-only` | Phase 11: migrated config generation from deprecated generate-mcp-config | `ours` |
+| `skills/mcp-adapter/references/deploy.md` | `fork-only` | Phase 11: migrated deployment workflow from deprecated deploy-mcp-adapter | `ours` |
+| `skills/mcp-adapter/references/verify.md` | `fork-only` | Phase 11: migrated verification workflow from deprecated mcp-adapter-test | `ours` |
+| `skills/mcp-adapter/references/resolver.md` | `fork-only` | Phase 11: unified path resolution replaces agent-paths/<id>.md static files | `ours` |
+| `skills/mcp-adapter/references/deploy-examples.md` | `fork-only` | Phase 11: deployment code templates migrated from deploy-mcp-adapter; upstream has no skills/ dir | `ours` |
+| `skills/mcp-adapter-test/references/agent-paths/README.md` | `fork-only` | Phase 11: deprecation notice for legacy agent-paths directory | `ours` |
 
 **Status taxonomy** (5 values): `fork-only` (file exists only in fork, never in upstream) / `decoupled-wrapper` (fork wraps a Pi-specific concern behind a generic interface) / `deleted-in-fork` (file is in upstream, the fork removed it) / `sibling-config` (config file with both upstream and fork structural choices) / `framing-divergence` (doc file where fork framing differs from upstream).
 
@@ -42,4 +49,4 @@ Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`
 
 ## When this registry was last curated
 
-2026-06-26 (Phase 10 StoreAdapter refactor + agent self-reporting paths; 23 anchored entries — added `adapters/store-adapter.ts` + `adapters/qoder-adapter.ts` + `adapters/kilo-adapter.ts`). Update this footer on Phase 10+ amendments.
+2026-06-26 (Phase 11 skill unification + post-Phase-10 fixes; 29 anchored entries — added `skills/mcp-adapter/` + 5 references files including deploy-examples.md). Update this footer on Phase 11+ amendments.

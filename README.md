@@ -26,6 +26,12 @@ grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabili
 | Kilo | ✅ MCP stdio server | `~/.kilo/mcp.json` | `createKiloResolver()` | ❌ | ❌ | `bin/kilo-mcp-server.ts` |
 | Claude, Cursor, others | 🟡 Adapter pattern supported — bring your own `AgentAPI` implementation | TBD | TBD | TBD | TBD | TBD |
 
+> **Kilo note**: Kilo's `❌❌` (sampling/renderer) is an architectural constraint, not missing implementation.
+> Kilo integrates via MCP stdio server — it has no public TypeScript SDK, so it cannot support
+> reverse calls (server→client) that sampling and custom renderers require. The core `mcp` proxy
+> tool and all MCP server proxying features are fully functional. Qoder's `❌` (renderer) is by
+> design — its `UISystem` surface is intentionally notify-only.
+
 See [Verification](#verification) below for the latest matrix results.
 
 https://github.com/user-attachments/assets/4b7c66ff-e27e-4639-b195-22c3db406a5a

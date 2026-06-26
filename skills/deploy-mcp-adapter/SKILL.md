@@ -3,6 +3,10 @@ name: deploy-mcp-adapter
 description: Deploy mcp-adapter into a TARGET coding agent (not the current agent). Identifies the target agent by reading the `AGENT_ADAPTERS` registry in `interfaces/agent-api.ts` (single source of truth), then executes the appropriate deployment branch — per-adapter entry point (Pi native install, Kilo MCP stdio, Qoder SDK bridge, etc.) or a Custom Agent implementation flow. Result is a persistent integration where the target agent gets 1 `mcp` proxy tool (~250 tokens) instead of hundreds of tool definitions. Use when user says "部署mcp-adapter", "安装mcp-adapter", "deploy mcp-adapter", "install mcp-adapter", "接入新agent", "给X安装mcp-adapter", or when integrating mcp-adapter into any agent.
 ---
 
+> ⚠️ **DEPRECATED** — 此 skill 已被 [`/mcp-adapter`](../mcp-adapter/SKILL.md) 统一入口取代。
+> 功能已完整迁移至 `skills/mcp-adapter/SKILL.md`（Phase 2: Deploy Adapter）。
+> 保留此文件仅用于向后兼容，新用户请使用 `/mcp-adapter`。
+
 # Deploy MCP Adapter
 
 Deploy mcp-adapter into a **target agent** so that agent gets a single `mcp` proxy tool (~250 tokens) instead of hundreds of MCP tool definitions. The current agent (you) is the deployer; the target agent is the recipient.

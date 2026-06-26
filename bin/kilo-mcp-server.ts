@@ -29,6 +29,7 @@ import { KiloAdapter, adaptKiloContext } from "../adapters/kilo-adapter.ts";
 import { createMcpAdapter } from "../adapters/entry.ts";
 import { loadMcpConfig } from "../config.ts";
 import { loadMetadataCache } from "../metadata-cache.ts";
+import { createKiloResolver } from "../interfaces/agent-paths.ts";
 import type { AgentContext } from "../interfaces/agent-api.ts";
 import type { AgentChannel } from "../interfaces/agent-channel.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -111,8 +112,9 @@ async function main(): Promise<void> {
 		return;
 	}
 
-	// 1. Load config (auto-discovery if no explicit path)
-	const config = loadMcpConfig(args.configPath);
+	// 1. Load config with Kilo resolver (DEC-04: was using DEFAULT_AGENT_RESOLVER = Pi)
+	const kiloResolver = createKiloResolver();
+	const config = loadMcpConfig(args.configPath, process.cwd(), kiloResolver.globalConfigPath());
 	const serverCount = Object.keys(config.mcpServers || {}).length;
 	console.error(`[kilo-mcp-server] Config loaded: ${serverCount} server(s) configured`);
 
