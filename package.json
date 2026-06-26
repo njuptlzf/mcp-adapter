@@ -16,7 +16,8 @@
     "test:coverage": "npm run test:prebuild && vitest run --coverage",
     "test:prebuild": "cd examples/interactive-visualizer && npm run build",
     "test:oauth-provider": "node --import tsx --test mcp-oauth-provider.test.ts",
-    "upstream:check": "tsx scripts/upstream-divergence.ts"
+    "upstream:check": "tsx scripts/upstream-divergence.ts",
+    "verify:deploy": "tsx scripts/deploy-verify.ts"
   },
   "repository": {
     "type": "git",
