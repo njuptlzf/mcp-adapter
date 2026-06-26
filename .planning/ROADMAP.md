@@ -309,4 +309,34 @@ Plans:
 
 ---
 
+### Phase 11: Skill Unification & Post-Phase-10 Fixes
+
+Fix kilo-mcp-server resolver bug, unify three fragmented skills into single mcp-adapter skill, eliminate agent-paths hardcoding, add capability-gate checks.
+
+**Goals:**
+
+- Fix `bin/kilo-mcp-server.ts` to use `createKiloResolver()` instead of `DEFAULT_AGENT_RESOLVER` (Pi)
+- Unify `deploy-mcp-adapter` + `generate-mcp-config` + `mcp-adapter-test` into single `skills/mcp-adapter/SKILL.md`
+- Eliminate `agent-paths/<id>.md` hardcoding — replace with dynamic `AGENT_ADAPTERS[i].resolverFactory()` resolution
+- Add capability-gate checks to all agent-facing skill phases
+- Update upstream-merge special-cases registry with new fork-only files
+
+**Deliverables:**
+
+- `skills/mcp-adapter/SKILL.md` — unified entry point (Phase 0-3)
+- `skills/mcp-adapter/references/{resolver,generate,deploy,verify,deploy-examples}.md` — migrated content
+- `bin/kilo-mcp-server.ts` — resolver fix
+- Deprecated banners on 3 old skills
+- `skills/upstream-merge/references/special-cases.md` — +7 entries (including deploy-examples.md)
+- `README.md` — Kilo/Qoder capability explanation
+
+**Plans:** 1 plan, 1 wave (Wave 1, autonomous)
+
+Plans:
+- [x] 11-01-PLAN.md — Gap closure: migrate deploy-examples.md, fix broken anchors, update registry, full verification + commit (DEC-01 through DEC-05)
+
+**Status:** ✅ Complete (1 plan, 1 commit `aa9ae4b`, 13 files, 590/600 tests pass, upstream:check exit 0)
+
+---
+
 _For milestone history, see `.planning/MILESTONES.md`. For archived roadmap + requirements, see `.planning/milestones/v2.0-*.md`._

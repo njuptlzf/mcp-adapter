@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Protocol-Category Simplification
 status: in_progress
-stopped_at: Phase 10 complete — StoreAdapter extracted, self-reporting paths wired, upstream-merge updated
-last_updated: "2026-06-26T00:00:00.000Z"
-last_activity: 2026-06-26 — Phase 10 executed (3 plans, 9 commits, 590/600 tests pass)
+stopped_at: Phase 11 complete — skill unification, deploy-examples gap closed, fork-only registry complete (7 entries), upstream:check exit 0
+last_updated: "2026-06-26T10:11:26.000Z"
+last_activity: 2026-06-26 — Phase 11 executed (1 plan, 1 commit aa9ae4b, 590/600 tests pass, upstream:check exit 0)
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 28
-  completed_plans: 28
+  total_phases: 11
+  completed_phases: 11
+  total_plans: 29
+  completed_plans: 29
   percent: 100
 ---
 
@@ -18,16 +18,23 @@ progress:
 
 **Created:** 2026-06-10T13:45:00+08:00
 **Last updated:** 2026-06-26
-**Status:** v3.0 milestone — Phase 10 planning
+**Status:** v3.0 milestone — Phase 11 complete
 
 ## Current Position
 
-Phase: 10 — StoreAdapter Base Class & Agent Self-Reporting Paths ✅
-Plan: 10-01/10-02/10-03 all complete (9 commits)
-Status: Complete — StoreAgentAdapter(284行) extracted, QoderAdapter(157行)/KiloAdapter(132行) thin wrappers, self-reporting paths wired
-Last activity: 2026-06-26 — Phase 10 executed: 3 plans, 590/600 tests pass, upstream:check exits 0
+Phase: 11 — Skill Unification & Post-Phase-10 Fixes ✅
+Plan: 11-01 complete (1 commit aa9ae4b)
+Status: Complete — unified mcp-adapter skill (SKILL.md + 5 reference files), kilo resolver fix, deploy-examples.md migrated, broken anchors fixed, 7 fork-only registry entries, 3 deprecation banners
+Last activity: 2026-06-26 — Phase 11 executed: 1 plan, 590/600 tests pass, upstream:check exit 0
 
 ## Recent Progress
+
+### Phase 11 — Skill Unification & Post-Phase-10 Fixes (COMPLETE)
+
+- **11-01**: Closed 3 researcher-identified gaps in the unified mcp-adapter skill: migrated `deploy-examples.md` (402 lines, verbatim) from `deploy-mcp-adapter/references/` to `skills/mcp-adapter/references/`; fixed 2 broken anchor links in `deploy.md` (`#custom-agent-integration` → `#branch-c-custom-agent` on lines 105 & 113); added `deploy-examples.md` to `special-cases.md` fork-only registry (entry 29/29, footer 28→29). Committed all prior Phase 11 work (DEC-01 unified skill, DEC-02 dynamic resolver, DEC-03 capability-gate, DEC-04 kilo resolver fix, DEC-05 7 registry entries, 3 deprecation banners, README) in a single `feat(11):` commit.
+- Final verification: tsc exit 0; 590 passed / 10 skipped (55 files); `npm run verify:deploy -- --agent kilo` ✅; `npm run upstream:check` exit 0 (0 stale, 30 registered).
+- 1 commit: aa9ae4b (feat) — 13 files (+1213/-3).
+- DEC-01..DEC-05 all satisfied.
 
 ### Milestone v1.0 — Complete (4 phases, 7 plans)
 
@@ -147,8 +154,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-22T09:36:00.000Z
-**Stopped at:** Phase 9 Plan 01 complete + SUMMARY.md written (7 commits, 5 file modifications). Milestone v2.0 100% done (9/9 phases, 25/25 plans).
+**Last session:** 2026-06-26T10:11:26.000Z
+**Stopped at:** Phase 11 Plan 01 complete + SUMMARY.md written (1 commit aa9ae4b, 13 files). v3.0 milestone progress: 11/11 phases, 29/29 plans.
 
 ## Performance Metrics
 
@@ -161,6 +168,7 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 8 P1 | ~18min | 3 tasks | 1 file (UPSTREAM-CHANGES.md, 247 lines, 209 data rows; D-21 + DECOUPLE-01/02/06/07 cited; static alignment \|RAW-MANIFEST\|=0) |
 | Phase 8 P2 | ~28min | 5 tasks | 5 files (SKILL.md 141 lines + references 127 + Scenario 1 log 180 + Scenario 2 log 362 + deferred-items 112; 922 total lines added; 5 atomic commits 1b555cc..15e6b69) |
 | Phase 9 P1 | ~22min | 3 tasks | 5 files (special-cases.md 37 lines + scripts/upstream-divergence.ts 117 lines + SKILL.md 142→176 lines + package.json +1 script + UPSTREAM-CHANGES.md deleted); 7 atomic commits b3d51e8..89339ad; 222 diverged / 17 registered / 205 default-resolved / 0 stale |
+| Phase 11 P1 | ~10min | 6 tasks | 13 files (+1213/-3); 1 consolidated commit aa9ae4b (feat); deploy-examples.md migrated (402 lines), 2 anchor fixes, +1 registry row; tsc 0 / 590 tests / verify:deploy kilo ✅ / upstream:check exit 0 (0 stale, 30 registered) |
 
 ## Decisions
 
@@ -178,6 +186,10 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 9]: script exit-code contract: 0 = clean, 1 = stale entries (in-table-not-in-diff), 2 = diverged-not-registered warning; ANSI GREEN/YELLOW/RED; tty auto-detect via `process.stdout.isTTY` (D-34)
 - [Phase 9]: 7 atomic commits — one per task/sub-action, not combined (b3d51e8 / 89810e8 / 6350e94 / 72ae020 / b22fdca / 27d067d / 89339ad)
 - [Phase 9]: Phase 8 GnuTLS workaround copied verbatim from 08-LEARNINGS.md L-4 into `scripts/upstream-divergence.ts` `fetchUpstream()` (single source of truth for upstream fetch protocol)
+- [Phase 11]: Single consolidated commit (Task 6) for all Phase 11 changes — `upstream:check` only exits 0 after all 7 fork-only files tracked in git HEAD together; per-task commits deferred by plan design
+- [Phase 11]: deploy-examples.md migrated verbatim via `cp` (byte-for-byte identical) to preserve published `pi-mcp-adapter` import paths
+- [Phase 11]: GitNexus `gitnexus_detect_changes()` skipped (MCP tools unavailable); only .ts change is bin/kilo-mcp-server.ts 1-line resolver fix, all others are .md (AGENTS.md GitNexus scope = .ts symbols only)
+- [Phase 11]: Plan's automated grep `=1` for deploy-examples.md over-constrained vs. its own footer text; correct intent = 1 registry ROW (verified via `^|` prefix grep)
 
 ## Naming Decisions
 
