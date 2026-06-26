@@ -10,6 +10,8 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `mcp-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; still imports `@earendil-works/pi-tui` (matchesKey/truncateToWidth/visibleWidth) | `assess` |
 | `mcp-setup-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; same `pi-tui` import residual as mcp-panel.ts | `assess` |
 | `panel-keys.ts` | `deleted-in-fork` | Present in upstream; fork removed it (legacy; unreferenced after D-04 Phase 3); do NOT `git checkout --theirs` | `ours` |
+| `adapters/qoder-adapter.ts` | `decoupled-wrapper` | Phase 10: refactored to thin wrapper extending StoreAgentAdapter; Qoder-specific Query.streamInput routing preserved | `ours` |
+| `adapters/kilo-adapter.ts` | `decoupled-wrapper` | Phase 10: refactored to thin wrapper extending StoreAgentAdapter; Kilo-specific sendMessageFn callback preserved | `ours` |
 | `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; legal JSDoc mentions of Pi types (not import coupling) | `manual` |
 | `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; generic contract, Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |
@@ -26,6 +28,7 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `interfaces/agent-channel.ts` | `fork-only` | Universal bidirectional AgentChannel interface; no upstream equivalent | `ours` |
 | `bin/kilo-mcp-server.ts` | `fork-only` | Kilo MCP stdio server bin entry; upstream has no `bin/` directory | `ours` |
 | `bin/qoder-mcp-bridge.ts` | `fork-only` | Qoder SDK bridge bin entry; upstream has no `bin/` directory | `ours` |
+| `adapters/store-adapter.ts` | `fork-only` | Shared StoreAgentAdapter base class extracted from qoder/kilo adapters; zero Pi imports — zero conflict risk with upstream | `ours` |
 
 **Status taxonomy** (5 values): `fork-only` (file exists only in fork, never in upstream) / `decoupled-wrapper` (fork wraps a Pi-specific concern behind a generic interface) / `deleted-in-fork` (file is in upstream, the fork removed it) / `sibling-config` (config file with both upstream and fork structural choices) / `framing-divergence` (doc file where fork framing differs from upstream).
 
@@ -39,4 +42,4 @@ Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`
 
 ## When this registry was last curated
 
-2026-06-25 (Phase 9 Architecture C; 20 anchored entries — added `interfaces/agent-channel.ts` + `bin/` entries). Update this footer on Phase 9+ amendments.
+2026-06-26 (Phase 10 StoreAdapter refactor + agent self-reporting paths; 23 anchored entries — added `adapters/store-adapter.ts` + `adapters/qoder-adapter.ts` + `adapters/kilo-adapter.ts`). Update this footer on Phase 10+ amendments.
