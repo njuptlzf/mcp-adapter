@@ -1,6 +1,6 @@
 ---
 name: deploy-mcp-adapter
-description: Deploy mcp-adapter into a TARGET coding agent (not the current agent). Identifies the target agent first, then executes the appropriate deployment branch — Pi one-command install, Qoder SDK bridge, or custom AgentAPI implementation. Result is a persistent integration where the target agent gets 1 `mcp` proxy tool (~250 tokens) instead of hundreds of tool definitions. Use when user says "部署mcp-adapter", "安装mcp-adapter", "deploy mcp-adapter", "install mcp-adapter", "接入新agent", "给X安装mcp-adapter", or when integrating mcp-adapter into any agent.
+description: Deploy mcp-adapter into a TARGET coding agent (not the current agent). Identifies the target agent by reading the `AGENT_ADAPTERS` registry in `interfaces/agent-api.ts` (single source of truth), then executes the appropriate deployment branch — per-adapter entry point (Pi native install, Kilo MCP stdio, Qoder SDK bridge, etc.) or a Custom Agent implementation flow. Result is a persistent integration where the target agent gets 1 `mcp` proxy tool (~250 tokens) instead of hundreds of tool definitions. Use when user says "部署mcp-adapter", "安装mcp-adapter", "deploy mcp-adapter", "install mcp-adapter", "接入新agent", "给X安装mcp-adapter", or when integrating mcp-adapter into any agent.
 ---
 
 # Deploy MCP Adapter
@@ -28,17 +28,52 @@ Deployment Progress:
 
 **MUST complete before any other step.** Ask the user which agent to deploy mcp-adapter to.
 
-Use AskUserQuestion (or ask conversationally) with these options:
+**Single source of truth:** the `AGENT_ADAPTERS` array in [`interfaces/agent-api.ts`](../../interfaces/agent-api.ts). Every adapter registered there is already implemented and ready to deploy — do **not** hardcode an agent list here, do **not** trust older docs, the registry is the truth. The same pattern is reused by `mcp-adapter-test` (see its Step 5a).
 
-| Option | Agent ID | In AGENT_ADAPTERS? | Deployment Method |
-|--------|----------|-------------------|-------------------|
-| Pi | `pi` | Yes | One-command: `pi install npm:pi-mcp-adapter` |
-| Qoder | `qoder` | Yes | SDK bridge + host integration |
-| Custom Agent | — | No | Implement `AgentAPI` interface (8 methods) |
+### Step 0.1: Read the registry
 
-**Record the answer.** All subsequent phases branch on this decision.
+```bash
+# Show all currently registered adapters (one row per id+displayName)
+grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:)" | head -20
+```
 
-If the user says something like "给 qodercli 安装" or "deploy to Pi", map it to the corresponding agent ID.
+Or read `interfaces/agent-api.ts` directly and locate `export const AGENT_ADAPTERS: AgentAdapterDescriptor[]`. For each `descriptor` capture:
+
+- `id` — stable identifier (e.g. `pi`, `kilo`, `qoder`)
+- `displayName` — human-readable name
+- `factory()` — confirms the adapter is implemented
+- `resolverFactory` — which `AgentPathResolver` to use for path discovery
+- `envHints` — env vars / files that indicate the adapter is loaded
+- `capabilities.{ui, sampling, renderer}` — runtime surface
+
+### Step 0.2: Map each adapter to a deployment branch
+
+Inspect `package.json` (`bin` and `pi.extensions`) and the `bin/` directory to find the adapter's entry point:
+
+| Entry point pattern                                                                 | Branch                  | Description                                                                          |
+| ----------------------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------ |
+| `package.json` has `pi.extensions: ["./index.ts"]`                                  | Branch A (Pi native)    | `pi install npm:pi-mcp-adapter`                                                      |
+| `package.json` has `bin["<id>-mcp-server"]` (e.g. `kilo-mcp-server`)                | Branch C / Strategy A   | MCP stdio server — register in target agent's `mcpServers` config                    |
+| `package.json` has `bin["<id>-mcp-bridge"]` (e.g. `qoder-mcp-bridge`)                | Branch B (SDK bridge)   | SDK bridge + `SessionStart` hook injection                                            |
+| Other / unknown                                                                     | Fallback to Branch C    | Inspect `bin/` for the adapter-specific entry; otherwise treat as Custom Agent        |
+
+For per-adapter path / verification details, see `skills/mcp-adapter-test/references/agent-paths/<id>.md` (every registered adapter has one).
+
+### Step 0.3: Build the option list
+
+For each descriptor in `AGENT_ADAPTERS`, add an option to AskUserQuestion:
+
+- **Label:** `displayName` (e.g. `Kilo`, `Pi`, `Qoder`)
+- **Value:** `id` (e.g. `kilo`, `pi`, `qoder`)
+- **Description:** short summary derived from Step 0.2's branch mapping
+
+Always append the final option:
+
+- **Label:** `Custom Agent`
+- **Value:** `__custom__`
+- **Description:** `Not in AGENT_ADAPTERS — requires implementing AgentAPI (8 methods) first`
+
+**Record the answer.** All subsequent phases branch on this decision. If the user names an agent literally (e.g. "给 qodercli 安装", "deploy to Pi"), look up the matching `id` in `AGENT_ADAPTERS` to map it.
 
 ---
 
@@ -46,25 +81,27 @@ If the user says something like "给 qodercli 安装" or "deploy to Pi", map it 
 
 ### 1.1 Check mcp.json exists
 
-The target agent needs an mcp.json config file. Check these paths (in priority order):
+The target agent needs an mcp.json config file. Discover the path dynamically — do **not** hardcode paths per agent. For the chosen `id` from Phase 0, resolve via its `resolverFactory` and check these paths in priority order:
 
-| Scope | Path | Agent |
-|-------|------|-------|
-| Agent global | `~/.pi/agent/mcp.json` | Pi |
-| Agent global | `~/.qoder/agent/mcp.json` | Qoder |
-| Shared global | `~/.config/mcp/mcp.json` | All agents |
-| Project | `.mcp.json` (cwd) | All agents |
+| Scope        | How to resolve                                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent global | Call `AGENT_ADAPTERS.find(d => d.id === <id>).resolverFactory().globalConfigPath()` and read `<that path>/mcp.json`                                              |
+| Shared global | `~/.config/mcp/mcp.json` (works for any agent)                                                                                                                   |
+| Project      | `.mcp.json` in cwd (works for any agent)                                                                                                                          |
+| Override     | `MCP_AGENT_DIR=/custom/path` env var                                                                                                                              |
 
-Override: `MCP_AGENT_DIR=/custom/path`
+Reference: per-adapter `globalConfigPath` defaults are documented in `skills/mcp-adapter-test/references/agent-paths/<id>.md`.
 
 - If NO mcp.json found → **Stop**. Tell the user to run the `generate-mcp-config` skill first, then return here.
 - If mcp.json found → Record the path and server count, continue.
 
 ### 1.2 Check target agent availability
 
-- **Pi**: Check `pi` command exists on PATH
-- **Qoder**: Check `qodercli` is available or `@qoder-ai/qoder-agent-sdk` is installed
-- **Custom**: Check the target agent's runtime/binary is available
+For the chosen `id`, derive the readiness check from the adapter's `envHints` (read from `AGENT_ADAPTERS` in Phase 0.1) and the `bin/` entry point pattern (Phase 0.2):
+
+- **Native CLI command**: if the agent ships a CLI (e.g. `pi`, `kilo`, `qodercli`), check that command exists on `PATH` (`command -v <cli>` or `which <cli>`).
+- **SDK package**: if deployment requires an SDK (e.g. `@qoder-ai/qoder-agent-sdk` for Qoder), check it is installed in the target project (`ls node_modules/<sdk-package>` or `npm ls <sdk-package>`).
+- **Custom Agent**: check the target agent's runtime / binary is available — ask the user if unclear.
 
 If the target agent is not available → **Stop**. Tell the user the target agent must be installed first.
 
@@ -201,24 +238,33 @@ After injection: Go to Phase 3.
 
 ## Phase 3: Verify Persistent Deployment
 
-Verification must confirm the target agent (not the current agent) has the `mcp` proxy tool.
+Verification must confirm the target agent (not the current agent) has the `mcp` proxy tool. Use a single universal check that works for every adapter registered in `AGENT_ADAPTERS`:
 
-### For Pi
-- Restart Pi
-- Run `/mcp` in a new Pi session
-- Confirm: status panel shows configured servers
+```typescript
+// Universal verification — works for any adapter that exposes AgentAPI
+import { AGENT_ADAPTERS } from "../../interfaces/agent-api.ts";
+import { createMcpAdapter } from "../../adapters/entry.ts";
+import { loadMcpConfig } from "../../config.ts";
 
-### For Qoder
-- Start a new Qoder session
-- Check the integration entry point loaded without errors
-- Call the `mcp` proxy tool with `{}` to get server status
-- Confirm: `mcp` tool is in the tool list
+const descriptor = AGENT_ADAPTERS.find(d => d.id === <chosenId>);
+const adapter = descriptor.factory();
+const ctx = { cwd: process.cwd(), hasUI: descriptor.capabilities?.ui ?? false };
+const config = loadMcpConfig();
+createMcpAdapter(adapter, ctx, config, null);
 
-### For Custom Agents
-- Start a new session of the target agent
-- Verify `adapter.getAllTools()` includes `"mcp"`
-- Call the proxy tool's execute with `{}` to get status
-- Confirm: servers are configured (lazy — they connect on first call)
+// Universal signal: the `mcp` proxy tool must be registered.
+const tools = adapter.getAllTools();
+console.assert(tools.some(t => t.name === "mcp"), "mcp proxy tool not registered");
+```
+
+### Per-adapter verification steps
+
+The above universal check passes for every registered adapter. For **runtime** confirmation in the target agent, follow the per-adapter recipe in `skills/mcp-adapter-test/references/agent-paths/<id>.md`. The general pattern:
+
+1. **Restart / spawn a new session** of the target agent so the entry point re-runs.
+2. **List registered tools** and confirm `mcp` is present (the agent-specific UI / CLI command varies; see `agent-paths/<id>.md`).
+3. **Call `mcp({})`** to get the server status panel — proves the tool is wired end-to-end.
+4. **Check `/mcp` slash command** (for agents with a CLI; not all agents expose this).
 
 ### Verification Checklist
 - [ ] Target agent starts without errors

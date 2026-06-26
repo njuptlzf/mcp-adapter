@@ -2,7 +2,40 @@
 
 Complete code templates for Phase 2 deployment branches. These are referenced by SKILL.md and read only when needed.
 
-## Qoder Integration Entry Point
+> **How this file is routed from Phase 0**
+>
+> SKILL.md Phase 0.2 maps each registered adapter (`AGENT_ADAPTERS`) to a deployment branch by inspecting `package.json` (`bin`, `pi.extensions`) and `bin/`. This file is organized by entry-point pattern — pick the section that matches the Phase 0.2 verdict for the chosen agent:
+>
+> | Section | Entry-point pattern | Example agent |
+> | ------- | ------------------- | ------------- |
+> | [Branch A: Pi native install](#branch-a-pi-native-install) | `pi.extensions: ["./index.ts"]` | Pi |
+> | [Branch B: SDK bridge + SessionStart hook](#branch-b-sdk-bridge--sessionstart-hook) | `bin["<id>-mcp-bridge"]` | Qoder |
+> | [Branch C / Strategy A: MCP stdio server](#branch-c--strategy-a-mcp-stdio-server) | `bin["<id>-mcp-server"]` | Kilo |
+> | [Branch C: Custom Agent](#branch-c-custom-agent) | Not in `AGENT_ADAPTERS` | (any new agent) |
+>
+> When a new adapter is registered, this file does **not** need to be edited — the new section lives in `bin/<id>-mcp-<role>.ts` and `AGENT_ADAPTERS` is the index.
+
+---
+
+## Branch A: Pi native install
+
+Pi ships a native extension API. The `pi-mcp-adapter` package itself is the install target — no separate entry script needed. After `pi install npm:pi-mcp-adapter`, Pi loads `index.ts` (the `pi.extensions` entry in `package.json`) on every session.
+
+```bash
+pi install npm:pi-mcp-adapter
+# Restart Pi — the `mcp` proxy tool, `/mcp` command, and `/mcp-auth` command are now available.
+```
+
+No per-agent code template is needed for Branch A; the entry point lives in [`index.ts`](../../index.ts) of this repo.
+
+---
+
+## Branch B: SDK bridge + SessionStart hook
+
+> **Routed here when** `package.json` has `bin["<id>-mcp-bridge"]` (e.g. `qoder-mcp-bridge`).
+> The Qoder template below is the reference example; copy and adapt for any new SDK-bridge adapter.
+
+### Qoder Integration Entry Point
 
 Full integration code for deploying mcp-adapter into Qoder. This file should be created at a path that the Qoder host loads at session start (e.g. a plugin entry or startup hook).
 
@@ -111,7 +144,100 @@ This is the Qoder equivalent of Pi's `ExtensionAPI` lifecycle: it guarantees cod
 
 ---
 
-## Custom Agent Integration
+## Branch C / Strategy A: MCP stdio server
+
+> **Routed here when** `package.json` has `bin["<id>-mcp-server"]` (e.g. `kilo-mcp-server`).
+> The Kilo template below is the reference example; copy and adapt for any new agent that natively speaks MCP.
+
+For agents that have a native MCP client but no extension/hook system, the most portable strategy is to expose mcp-adapter as an MCP stdio server. The target agent's `mcpServers` config picks it up automatically.
+
+### Kilo Integration (reference template)
+
+The `kilo-mcp-server` bin lives at [`bin/kilo-mcp-server.ts`](../../bin/kilo-mcp-server.ts) in this repo — it is the canonical Branch C / Strategy A implementation. To deploy:
+
+**Step 1:** Install the package.
+
+```bash
+npm install pi-mcp-adapter
+# or globally: npm install -g pi-mcp-adapter
+```
+
+**Step 2:** Register the server in Kilo's MCP config (`kilo.json` or `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "kilo-mcp-server"
+    }
+  }
+}
+```
+
+**Step 3:** Restart Kilo. The MCP client auto-discovers the server via stdio. The `mcp` proxy tool, `/mcp` command, and `/mcp-auth` command are now available in every session.
+
+**How it works internally** (from [`bin/kilo-mcp-server.ts`](../../bin/kilo-mcp-server.ts)):
+
+```typescript
+// 1. Load mcp.json config
+const config = loadMcpConfig(); // auto-discovers .mcp.json or ~/.config/mcp/mcp.json
+
+// 2. Create the universal adapter (Kilo is a generic AgentAPI implementation)
+const adapter = new KiloAdapter();
+const ctx: AgentContext = adaptKiloContext({ cwd: process.cwd(), hasUI: false });
+const cache = loadMetadataCache();
+
+// 3. Register everything via the universal entry point
+createMcpAdapter(adapter, ctx, config, cache);
+
+// 4. Attach an AgentChannel — routes adapter sendMessage to stderr
+const channel: AgentChannel = {
+  send: (msg) => console.error(`[kilo-mcp-server] ${JSON.stringify(msg)}`),
+};
+adapter.attachChannel(channel);
+
+// 5. Fire session_start → triggers lazy server connections
+await adapter.fireSessionStart(ctx);
+
+// 6. Expose registered tools to MCP via stdio
+const mcpTools = [...adapter.tools.entries()].map(([name, tool]) => ({
+  name,
+  description: tool.description,
+  inputSchema: tool.parameters,
+}));
+
+const server = new Server(
+  { name: "mcp-adapter-kilo", version: "2.9.0" },
+  { capabilities: { tools: {} } },
+);
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: mcpTools }));
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const tool = adapter.tools.get(request.params.name);
+  if (!tool) throw new Error(`Unknown tool: ${request.params.name}`);
+  const result = await tool.execute(`call-${Date.now()}`, request.params.arguments || {}, undefined, undefined, ctx);
+  return { content: [{ type: "text" as const, text: typeof result === "string" ? result : JSON.stringify(result) }] };
+});
+
+// 7. Connect via stdio
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+### Kilo Config Path Resolution
+
+| Scope | Path | Notes |
+|-------|------|-------|
+| Agent global | `~/.kilo/mcp.json` | Kilo-specific global config |
+| Shared global | `~/.config/mcp/mcp.json` | Works across all agents |
+| Shared project | `.mcp.json` | Current project root |
+
+Override: `MCP_AGENT_DIR=/custom/path`
+
+---
+
+## Branch C: Custom Agent
+
+> **Routed here when** the chosen agent is **not** in `AGENT_ADAPTERS`. This is the only branch that requires writing new code (the AgentAPI implementation) before deployment.
 
 Template for agents not yet in `AGENT_ADAPTERS` (Claude, Cursor, Windsurf, etc.).
 
