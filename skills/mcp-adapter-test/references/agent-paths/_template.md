@@ -26,4 +26,4 @@ See `tests/smoke/e2e-all-servers.test.ts` — covered by Phase 4 Step 4 of the m
 - Default config path: `<describe your adapter's default config path>`
 - Optional UISystem surface: `notify` is required; `form`/`setStatus`/`theme` are optional
 - Env vars that activate this adapter: `process.env.<YOUR_AGENT_ENV_VAR>`
-- Companion methods (if any): `attachQuery` / `detachQuery` for live testing
+- Companion methods (if any): `attachChannel` / `detachChannel` are preferred for bidirectional communication; legacy adapter-specific methods (`attachQuery`, `attachSendMessage`) remain for backward compatibility

@@ -6,7 +6,9 @@
   "license": "MIT",
   "author": "Nico Bailon",
   "bin": {
-    "pi-mcp-adapter": "cli.js"
+    "pi-mcp-adapter": "cli.js",
+    "kilo-mcp-server": "bin/kilo-mcp-server.ts",
+    "qoder-mcp-bridge": "bin/qoder-mcp-bridge.ts"
   },
   "scripts": {
     "test": "npm run test:prebuild && vitest run",
@@ -76,6 +78,7 @@
     "mcp-panel.ts",
     "logger.ts",
     "errors.ts",
+    "bin",
     "interfaces",
     "adapters",
     "app-bridge.bundle.js",
@@ -88,8 +91,9 @@
   "dependencies": {
     "@modelcontextprotocol/ext-apps": "^1.2.2",
     "@modelcontextprotocol/sdk": "^1.25.1",
-    "@qoder-ai/qoder-agent-sdk": "^1.0.3",
+    "@qoder-ai/qoder-agent-sdk": "^1.0.7",
     "open": "^10.2.0",
+    "pi-mcp-adapter": "^2.10.0",
     "recheck": "^4.5.0",
     "typebox": "^1.1.24",
     "zod": "^3.25.0 || ^4.0.0"

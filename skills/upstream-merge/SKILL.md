@@ -142,6 +142,7 @@ The 12-category per-file default-resolution matrix (sourced from D-23; inlined h
 | `.gitignore` / `.npmignore` | `manual` | Line-by-line; prefer fork structural choices | D-21 |
 | `__tests__/*` / `tests/*` | `assess` | Run §3.1 grep; mostly legal but watch for new test fixtures | D-24 |
 | Core MCP source (`init.ts`, `mcp-*.ts`, ...) | `assess` | Always run §3.1 grep; check D-04 wrapper boundaries | D-24, D-04 |
+| `bin/*` | `ours` | Fork-only bin entries; upstream has no `bin/` directory | D-21 |
 | `types.ts` / `utils.ts` / `errors.ts` / `logger.ts` | `assess` | Universal utility files; Pi-coupling unlikely but check | D-24 |
 | `README.md` / `MAPPING.md` / `CHANGELOG.md` / `OAUTH.md` | `assess` (intent) | Preserve "Universal MCP Adapter" framing | D-18..D-20 |
 | `AGENTS.md` / `CLAUDE.md` / `.claude/*` | `ours` | Fork-specific | D-21 |

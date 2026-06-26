@@ -17,9 +17,10 @@
 
 import type { SamplingProvider } from "./sampling.ts";
 import type { AgentPathResolver } from "./agent-paths.ts";
-import { createPiResolver, createQoderResolver } from "./agent-paths.ts";
+import { createKiloResolver, createPiResolver, createQoderResolver } from "./agent-paths.ts";
 import { PiAdapter } from "../adapters/pi-adapter.ts";
 import { QoderAdapter } from "../adapters/qoder-adapter.ts";
+import { KiloAdapter } from "../adapters/kilo-adapter.ts";
 
 /** A registered tool's information, as exposed by `AgentAPI.getAllTools`. */
 export interface ToolInfo {
@@ -176,6 +177,14 @@ export interface AgentAdapterDescriptor {
  * Per D-07: new adapter = import + push one descriptor; nothing else changes.
  */
 export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
+	{
+		id: "kilo",
+		displayName: "Kilo",
+		factory: () => new KiloAdapter(),
+		resolverFactory: createKiloResolver,
+		envHints: [{ envVar: "MCP_AGENT_DIR" }],
+		capabilities: { ui: false, sampling: false, renderer: false },
+	},
 	{
 		id: "pi",
 		displayName: "Pi",

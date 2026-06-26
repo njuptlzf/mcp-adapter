@@ -48,6 +48,25 @@ mkdir -p tests/reports
 npm run test:prebuild  # FIX-01: build visualizer dist/ if missing
 ```
 
+### Agent-paths completeness check (NEW)
+
+Before running any test phase, verify every adapter in `AGENT_ADAPTERS` has a corresponding `references/agent-paths/<id>.md` file:
+
+```bash
+echo "=== AGENT_ADAPTERS entries ==="
+grep -oP "id:\s*['\"]([^'\"]+)['\"]" interfaces/agent-api.ts | cut -d'"' -f2 | while read id; do
+  if [ -f "skills/mcp-adapter-test/references/agent-paths/${id}.md" ]; then
+    echo "✅ ${id} — agent-paths/${id}.md found"
+  else
+    echo "❌ ${id} — MISSING: skills/mcp-adapter-test/references/agent-paths/${id}.md"
+    echo "   → cp references/agent-paths/_template.md references/agent-paths/${id}.md"
+  fi
+done
+```
+
+- If any adapter is MISSING → **STOP**. Tell the user to create the file first (copy `_template.md`). Without it, Phase 4 Step 1 cannot verify deployment-path correctness for that adapter.
+- If all adapters have files → continue.
+
 ---
 
 ## Phase 1: MockAgent Compatibility (Section 4)
@@ -207,6 +226,7 @@ Verdict: 🟢 ALL PASS
 | File | Content |
 |------|---------|
 | [references/agent-paths/pi.md](references/agent-paths/pi.md) | Pi-specific Path A/B/C verification |
+| [references/agent-paths/kilo.md](references/agent-paths/kilo.md) | Kilo-specific Path A/B/C verification |
 | [references/agent-paths/qoder.md](references/agent-paths/qoder.md) | Qoder-specific Path A/B/C verification |
 | [references/agent-paths/_template.md](references/agent-paths/_template.md) | Scaffold for new adapters |
 | [references/mcp-config.md](references/mcp-config.md) | `.mcp.json` config for all 10 demo servers |

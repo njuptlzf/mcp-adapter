@@ -26,6 +26,7 @@ import type {
 	ToolRegistration,
 	UISystem,
 } from "../interfaces/agent-api.ts";
+import type { AgentChannel } from "../interfaces/agent-channel.ts";
 import { PiSamplingProvider } from "./pi-sampling-provider.ts";
 import { piRenderWrapper } from "./pi-renderer.ts";
 
@@ -43,6 +44,9 @@ type PiUI = ExtensionUIContext & {
 /** Adapter wrapping a Pi `ExtensionAPI` so it conforms to `AgentAPI`. */
 export class PiAdapter implements AgentAPI {
 	constructor(private readonly pi: ExtensionAPI) {}
+
+	/** Universal channel, set via `attachChannel`. Optional — Pi has native messaging. */
+	private channel: AgentChannel | undefined;
 
 	registerTool(tool: ToolRegistration): void {
 		// Pi's registerTool has a strict generic; cast at the boundary so
@@ -145,12 +149,27 @@ export class PiAdapter implements AgentAPI {
 	}
 
 	sendMessage(message: unknown, options?: unknown): void {
+		if (this.channel) {
+			void this.channel.send(message, options);
+			return;
+		}
 		// Pi's sendMessage is heavily typed; the universal interface is
 		// intentionally permissive (`unknown` per D-01).
 		(this.pi.sendMessage as (message: unknown, options?: unknown) => unknown)(
 			message,
 			options,
 		);
+	}
+
+	/** Attach a universal `AgentChannel`. Optional for Pi — native messaging works without it. */
+	attachChannel(channel: AgentChannel): void {
+		this.channel = channel;
+	}
+
+	/** Detach the universal channel. */
+	detachChannel(): void {
+		this.channel?.close?.();
+		this.channel = undefined;
 	}
 
 	async exec(command: string, args: string[]): Promise<unknown> {
