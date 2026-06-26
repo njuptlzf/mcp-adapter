@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: Protocol-Category Simplification
 status: in_progress
-stopped_at: Phase 10 planning — StoreAdapter base class + agent self-reporting paths
+stopped_at: Phase 10 complete — StoreAdapter extracted, self-reporting paths wired, upstream-merge updated
 last_updated: "2026-06-26T00:00:00.000Z"
-last_activity: 2026-06-26 — Phase 10 CONTEXT.md created from codebase investigation
+last_activity: 2026-06-26 — Phase 10 executed (3 plans, 9 commits, 590/600 tests pass)
 progress:
   total_phases: 10
-  completed_phases: 9
-  total_plans: 25
-  completed_plans: 25
-  percent: 90
+  completed_phases: 10
+  total_plans: 28
+  completed_plans: 28
+  percent: 100
 ---
 
 # Project State
@@ -22,10 +22,10 @@ progress:
 
 ## Current Position
 
-Phase: 10 — StoreAdapter Base Class & Agent Self-Reporting Paths
-Plan: CONTEXT.md created (128 lines); PLAN.md pending
-Status: Planning — gsd-planner to be spawned
-Last activity: 2026-06-26 — Phase 10 CONTEXT.md created from gsd-map-codebase + gstack-openclaw-investigate findings
+Phase: 10 — StoreAdapter Base Class & Agent Self-Reporting Paths ✅
+Plan: 10-01/10-02/10-03 all complete (9 commits)
+Status: Complete — StoreAgentAdapter(284行) extracted, QoderAdapter(157行)/KiloAdapter(132行) thin wrappers, self-reporting paths wired
+Last activity: 2026-06-26 — Phase 10 executed: 3 plans, 590/600 tests pass, upstream:check exits 0
 
 ## Recent Progress
 

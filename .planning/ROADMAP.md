@@ -301,11 +301,11 @@ Extract shared StoreAgentAdapter base class from QoderAdapter + KiloAdapter (90%
 **Plans:** 3 plans, 2 waves (Wave 1: StoreAdapter + Paths, Wave 2: Tests + Upstream Registry)
 
 Plans:
-- [ ] 10-01-PLAN.md — StoreAgentAdapter base class extraction + QoderAdapter/KiloAdapter thin-wrapper refactor (STORE-01 through STORE-03, STORE-05)
-- [ ] 10-02-PLAN.md — Agent self-reporting paths: mcpConfigPath on AgentContext + config.ts wiring + optional agent-paths dedup (PATH-01 through PATH-03)
-- [ ] 10-03-PLAN.md — Tests + upstream-merge registry update + full verification suite (STORE-04, UP-01, UP-02)
+- [x] 10-01-PLAN.md — StoreAgentAdapter base class extraction + QoderAdapter/KiloAdapter thin-wrapper refactor (STORE-01 through STORE-03, STORE-05)
+- [x] 10-02-PLAN.md — Agent self-reporting paths: mcpConfigPath on AgentContext + config.ts wiring + optional agent-paths dedup (PATH-01 through PATH-03)
+- [x] 10-03-PLAN.md — Tests + upstream-merge registry update + full verification suite (STORE-04, UP-01, UP-02)
 
-**Status:** ✅ Planned (3 plans / 7 tasks / 0 checkpoints / all autonomous)
+**Status:** ✅ Complete (3 plans, 9 commits, 590/600 tests pass)
 
 ---
 
