@@ -20,7 +20,9 @@ import type { AgentPathResolver } from "./agent-paths.ts";
 import { createKiloResolver, createPiResolver, createQoderResolver } from "./agent-paths.ts";
 import { PiAdapter } from "../adapters/pi-adapter.ts";
 import { QoderAdapter } from "../adapters/qoder-adapter.ts";
+import { adaptQoderContext } from "../adapters/qoder-adapter.ts";
 import { KiloAdapter } from "../adapters/kilo-adapter.ts";
+import { adaptKiloContext } from "../adapters/kilo-adapter.ts";
 
 /** A registered tool's information, as exposed by `AgentAPI.getAllTools`. */
 export interface ToolInfo {
@@ -165,6 +167,18 @@ export interface AgentAdapterDescriptor {
 	envHints?: ReadonlyArray<{ envVar?: string; filePath?: string }>;
 	/** Capability flags for the README matrix column. */
 	capabilities?: { ui?: boolean; sampling?: boolean; renderer?: boolean };
+	/**
+	 * Optional verification context builder used by `scripts/deploy-verify.ts`.
+	 *
+	 * Agents that require a live native runtime (e.g. Pi's ExtensionAPI) can omit
+	 * this; the verification script will skip them. SDK-bridge and stdio-server
+	 * adapters should provide a minimal context so the universal deployment flow
+	 * can be exercised end-to-end without a live agent host.
+	 */
+	createVerificationContext?: (
+		input: { cwd: string; hasUI: boolean },
+		adapter: AgentAPI,
+	) => AgentContext;
 }
 
 /**
@@ -184,6 +198,8 @@ export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
 		resolverFactory: createKiloResolver,
 		envHints: [{ envVar: "MCP_AGENT_DIR" }],
 		capabilities: { ui: false, sampling: false, renderer: false },
+		createVerificationContext: (input, adapter) =>
+			adaptKiloContext(input, adapter as KiloAdapter),
 	},
 	{
 		id: "pi",
@@ -222,5 +238,7 @@ export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
 		resolverFactory: createQoderResolver,
 		envHints: [{ envVar: "MCP_AGENT_DIR" }],
 		capabilities: { ui: false, sampling: true, renderer: false },
+		createVerificationContext: (input, adapter) =>
+			adaptQoderContext(input, adapter as QoderAdapter),
 	},
 ];
