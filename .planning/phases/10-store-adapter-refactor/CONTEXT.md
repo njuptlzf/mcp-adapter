@@ -8,7 +8,7 @@
 
 ## Problem Statement
 
-The current "for every agent" architecture requires writing a dedicated adapter class (~250-370 lines) per agent type. QoderAdapter (346行) and KiloAdapter (298行) share ~90% identical code (7/8 AgentAPI methods, 4 Maps, event simulators, exec, bufferedMessages, fire()). Adding a new agent = ~5 new files (~900 lines cumulative for 3 agents).
+The current "for every MCP-compatible agent" architecture requires writing a dedicated adapter class (~250-370 lines) per agent type. QoderAdapter (346行) and KiloAdapter (298行) share ~90% identical code (7/8 AgentAPI methods, 4 Maps, event simulators, exec, bufferedMessages, fire()). Adding a new agent = ~5 new files (~900 lines cumulative for 3 agents).
 
 Additionally, `AgentPathResolver` requires hardcoded default paths per agent (`~/.pi/agent/`, `~/.qoder/agent/`, `~/.kilo/`). Agents cannot self-report their `.mcp.json` location at runtime.
 
