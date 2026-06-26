@@ -85,6 +85,9 @@ export interface UISystem {
 /**
  * Context handed to an MCP adapter during initialization. The `ui` field is
  * only populated when `hasUI` is true; callers must still guard it.
+ *
+ * When `mcpConfigPath` is set, it takes priority over AgentPathResolver
+ * for config discovery (per PATH-01). Leave undefined for resolver-based resolution.
  */
 export interface AgentContext {
 	cwd: string;
@@ -95,6 +98,7 @@ export interface AgentContext {
 	samplingProvider?: SamplingProvider;
 	signal?: AbortSignal;
 	reload?: () => Promise<void>;
+	mcpConfigPath?: string;
 }
 
 /** Registration shape for `AgentAPI.registerTool`. */

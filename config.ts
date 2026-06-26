@@ -112,8 +112,8 @@ export function getProjectPiConfigPath(cwd = process.cwd()): string {
   return resolve(cwd, PROJECT_PI_CONFIG_NAME);
 }
 
-export function getConfigDiscoveryPaths(overridePath?: string, cwd = process.cwd()): ConfigDiscoveryPath[] {
-  return getConfigSources(overridePath, cwd).map((source) => ({
+export function getConfigDiscoveryPaths(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): ConfigDiscoveryPath[] {
+  return getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath).map((source) => ({
     label: source.label,
     path: source.readPath,
     exists: existsSync(source.readPath),
@@ -133,8 +133,8 @@ export function findAvailableImportConfigs(cwd = process.cwd()): DiscoveredImpor
   return discovered;
 }
 
-export function getMcpDiscoverySummary(overridePath?: string, cwd = process.cwd()): McpDiscoverySummary {
-  const sources = getConfigSources(overridePath, cwd).map((source) => {
+export function getMcpDiscoverySummary(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): McpDiscoverySummary {
+  const sources = getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath).map((source) => {
     const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
     return {
       id: source.id,
@@ -187,10 +187,10 @@ export function getMcpDiscoverySummary(overridePath?: string, cwd = process.cwd(
   };
 }
 
-export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpConfig {
+export function loadMcpConfig(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): McpConfig {
   let config: McpConfig = { mcpServers: {} };
 
-  for (const source of getConfigSources(overridePath, cwd)) {
+  for (const source of getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath)) {
     const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
     if (!loaded) continue;
     config = mergeConfigs(config, expandImports(loaded, cwd));
@@ -199,8 +199,10 @@ export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpCo
   return config;
 }
 
-function getConfigSources(overridePath?: string, cwd = process.cwd(), resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER): ConfigSourceSpec[] {
-  const userPath = resolveAgentGlobalConfigPath(resolver, overridePath);
+function getConfigSources(overridePath?: string, cwd = process.cwd(), resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER, mcpConfigPath?: string): ConfigSourceSpec[] {
+  const userPath = mcpConfigPath
+    ? resolve(mcpConfigPath)
+    : resolveAgentGlobalConfigPath(resolver, overridePath);
   const projectPath = getProjectConfigPath(cwd);
   const projectPiConfigName = resolver.projectConfigName?.() ?? PROJECT_PI_CONFIG_NAME;
   const projectPiPath = resolve(cwd, projectPiConfigName);
@@ -599,11 +601,11 @@ export function writeSharedServerEntry(filePath: string, serverName: string, ent
   return filePath;
 }
 
-export function getServerProvenance(overridePath?: string, cwd = process.cwd()): Map<string, ServerProvenance> {
+export function getServerProvenance(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): Map<string, ServerProvenance> {
   const provenance = new Map<string, ServerProvenance>();
   const userPath = getPiGlobalConfigPath(overridePath);
 
-  for (const source of getConfigSources(overridePath, cwd)) {
+  for (const source of getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath)) {
     const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
     if (!loaded) continue;
 
