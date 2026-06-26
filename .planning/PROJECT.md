@@ -13,7 +13,7 @@
 - Agent-agnostic entry point `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; `index.ts` is a thin Pi wrapper (ENTRY-01, ENTRY-02, ENTRY-03)
 - Decoupled all 6 source files from Pi type imports (DECOUPLE-01..07)
 - Agent-agnostic `skills/mcp-adapter-test/` skill with per-agent reference files and Capability Gate (TEST-01..05)
-- README rewrites leading with "Pi-compatible + every agent" + Verification/Compatibility section (DOC-01..03)
+- README rewrites leading with "Pi-compatible + every MCP-compatible agent" + Verification/Compatibility section (DOC-01..03)
 - `scripts/upstream-divergence.ts` + `skills/upstream-merge/references/special-cases.md` (Architecture C) + `npm run upstream:check` (UPSTREAM-01..05)
 - Test suite 350/352 passing at v2.0 close; 2 pre-existing `__tests__/interactive-visualizer-server.test.ts` failures (missing dist/ artifacts) confirmed unrelated and deferred
 
@@ -54,7 +54,7 @@ Create a universal adapter architecture:
 
 > **Status (2026-06-23):** SHIPPED. Released as git tag `v2.0.0-universal` (SemVer pre-release; see STATE.md Naming Decisions for naming rationale). The historical "Current Milestone" goal text below describes the v2.0 plan that was executed; v2.0 is now archived in `.planning/milestones/v2.0-*` and the next milestone is awaiting kickoff (see STATE.md Operator Next Steps).
 
-**Goal:** Complete "for every agent" transformation — decouple all remaining Pi type bindings, add at least one non-Pi agent adapter, rebuild integration test as agent-agnostic, and update `README.md` to clearly communicate that the project remains fully Pi-compatible while supporting every agent.
+**Goal:** Complete "for every MCP-compatible agent" transformation — decouple all remaining Pi type bindings, add at least one non-Pi agent adapter, rebuild integration test as agent-agnostic, and update `README.md` to clearly communicate that the project remains fully Pi-compatible while supporting every MCP-compatible agent.
 
 **Target phases:**
 - Phase 5 — Type Decoupling & Entry Point Refactor: Replace Pi types in 6 source files, add agent-agnostic entry point

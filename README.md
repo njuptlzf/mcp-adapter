@@ -4,9 +4,9 @@
 
 # Universal MCP Adapter
 
-A universal MCP (Model Context Protocol) adapter with **Pi as a first-class supported adapter** (not legacy) — and every other coding agent is welcome via the same `AgentAPI` / `UISystem` interfaces.
+A universal MCP (Model Context Protocol) adapter with **Pi as a first-class supported adapter** (not legacy) — and every other MCP-compatible coding agent is welcome via the same `AgentAPI` / `UISystem` interfaces.
 
-Use MCP servers without burning your context window, from Pi today and from any other coding agent via the [Supported Agents](#supported-agents) matrix below.
+Use MCP servers without burning your context window, from Pi today and from any MCP-compatible coding agent via the [Supported Agents](#supported-agents) matrix below.
 
 ## Supported Agents
 

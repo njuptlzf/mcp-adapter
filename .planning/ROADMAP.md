@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🔄 **v3.0 Protocol-Category Simplification** — Phase 10+ (active 2026-06-26) — Simplify "for every agent" by merging per-agent adapters into protocol-category shared adapters, with agent self-reporting config paths.
+- 🔄 **v3.0 Protocol-Category Simplification** — Phase 10+ (active 2026-06-26) — Simplify "for every MCP-compatible agent" by merging per-agent adapters into protocol-category shared adapters, with agent self-reporting config paths.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
 
 ## Phases
