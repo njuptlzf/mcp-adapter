@@ -38,7 +38,7 @@ Runs the full mcp-adapter integration test plan: MockAgent compatibility + Token
 
 **Prompt**:
 
-execute: 1. Copy `skills/mcp-adapter-test` to your agent's global skills directory 2. Run Skill `/mcp-adapter-test` 3. Delete Skill `/mcp-adapter-test`
+execute: 1. Copy `skills/mcp-adapter-test` to your agent's global skills directory 2. Run Skill `/mcp-adapter-test` 3. Delete Skill `/mcp-adapter-test` from agent.
 
 **Coverage**:
 
