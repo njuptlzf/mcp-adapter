@@ -21,6 +21,9 @@ mcp-adapter skill.
 
 ## Quick Decision: Which Phase Do You Need?
 
+**The Entry Gate (Step E1) asks this question automatically.** This table is for
+reference when the user's intent is already clear from their message.
+
 | User intent | Phase to run | Skip others? |
 |-------------|-------------|--------------|
 | "I want to create an mcp.json config file" | Phase 1 only | Yes |
@@ -32,7 +35,8 @@ mcp-adapter skill.
 
 ```
 Progress:
-- [ ] Phase 0: Identify target agent + capability-gate
+- [ ] Entry Gate: Confirm user intent (deploy? config? verify? full pipeline?)
+- [ ] Phase 0: Identify target agent + capability-gate (deploy/integrate only)
 - [ ] Phase 1: Generate mcp.json config
 - [ ] Phase 2: Deploy adapter into target agent
 - [ ] Phase 3: Verify deployment
@@ -40,10 +44,30 @@ Progress:
 
 ---
 
+## Entry Gate (MANDATORY — runs before any phase)
+
+**Do NOT jump directly to Phase 0.** First, confirm the user's intent.
+
+### Step E1: Ask what the user wants to do
+
+Use `AskUserQuestion` with these options:
+
+- **"生成 mcp.json 配置文件"** → Jump to Phase 1 (ask agent in Phase 1 context)
+- **"安装 mcp-adapter 到某个 agent"** → Enter Phase 0 → 1 → 2
+- **"验证已有的 mcp-adapter 部署"** → Jump to Phase 3
+- **"完整集成某个 agent（全流程）"** → Enter Phase 0 → 1 → 2 → 3
+
+If the user's original message already states a clear intent (e.g. "部署到 Qoder",
+"生成 mcp 配置", "验证部署"), skip this question and route directly.
+
+Only after the user confirms they want to **deploy/integrate** should Phase 0 begin.
+
+---
+
 ## Phase 0: Identify Target Agent + Capability-Gate
 
-**Runs before any other phase.** Identifies which agent to integrate and checks what
-capabilities it supports.
+**Runs only when the user wants to deploy or fully integrate.** Identifies which agent
+to integrate and checks what capabilities it supports.
 
 ### Step 0.1: Read the registry
 
@@ -55,12 +79,23 @@ grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabili
 
 For each descriptor capture: `id`, `displayName`, `capabilities`.
 
-### Step 0.2: Ask the user which agent
+### Step 0.2: Show capability table, then ask which agent
 
-Use `AskUserQuestion` with options dynamically built from `AGENT_ADAPTERS`. Each option:
+**First**, present the full capability matrix as a readable table (derived from `AGENT_ADAPTERS`):
 
-- **Label**: `displayName` (e.g. Kilo, Pi, Qoder)
-- **Description**: capabilities summary derived from `descriptor.capabilities`
+```
+Available agents:
+| Agent  | MCP Proxy | UI Panel | Sampling | Renderer | Integration Mode       |
+|--------|-----------|----------|----------|----------|------------------------|
+| Kilo   | ✅        | ❌       | ❌       | ❌       | MCP stdio server       |
+| Pi     | ✅        | ✅       | ✅       | ✅       | Native ExtensionAPI    |
+| Qoder  | ✅        | ❌       | ✅       | ❌       | SDK bridge             |
+```
+
+**Then**, use `AskUserQuestion` to select the target agent. Each option:
+
+- **Label**: `displayName` only (e.g. "Kilo", "Pi", "Qoder")
+- **Description**: one-line integration mode (e.g. "MCP stdio server 模式"), **NOT** capability flags
 
 Always append: "Custom Agent (not in registry — requires implementing AgentAPI first)"
 
