@@ -3,7 +3,7 @@ name: mcp-adapter
 description: >
   Universal mcp-adapter skill — single entry point for integrating MCP into any coding agent.
   Handles config generation (Phase 1), adapter deployment (Phase 2), and verification (Phase 3).
-  Replaces the deprecated deploy-mcp-adapter, generate-mcp-config, and mcp-adapter-test skills.
+  Replaces the deleted deploy-mcp-adapter, generate-mcp-config, and mcp-adapter-test skills.
   Use when user says "对接agent", "部署mcp-adapter", "安装mcp-adapter", "接入新agent",
   "生成mcp配置", "创建mcp.json", "配置MCP服务器", "验证mcp-adapter", "测试mcp-adapter",
   "deploy mcp-adapter", "generate mcp config", "test mcp-adapter", or any phrase
@@ -16,8 +16,8 @@ Single entry point for all mcp-adapter workflows. What used to be three separate
 (`deploy-mcp-adapter`, `generate-mcp-config`, `mcp-adapter-test`) is now one unified
 skill with three phases. Each phase can run independently.
 
-**Deprecation notice**: The old skills still exist for backward compatibility
-but are marked deprecated. New users should use this skill only.
+The old skill directories have been physically removed (Phase 11). This is the only
+mcp-adapter skill.
 
 ## Quick Decision: Which Phase Do You Need?
 
