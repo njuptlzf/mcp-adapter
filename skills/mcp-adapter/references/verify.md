@@ -1,7 +1,7 @@
 # Phase 3 Reference: Verify Deployment
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 3
-> **Migrated from**: `skills/mcp-adapter-test/SKILL.md` (deprecated)
+> **Migrated from**: `skills/mcp-adapter-test/SKILL.md` (deleted in Phase 11)
 > **Path resolution**: See [resolver.md](resolver.md) — Host × Target matrix from `AGENT_ADAPTERS`
 
 Runs the full mcp-adapter integration test matrix against registered adapters.

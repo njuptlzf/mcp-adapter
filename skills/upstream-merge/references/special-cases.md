@@ -30,9 +30,9 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `bin/qoder-mcp-bridge.ts` | `fork-only` | Qoder SDK bridge bin entry; upstream has no `bin/` directory | `ours` |
 | `adapters/store-adapter.ts` | `fork-only` | Shared StoreAgentAdapter base class extracted from qoder/kilo adapters; zero Pi imports — zero conflict risk with upstream | `ours` |
 | `skills/mcp-adapter/SKILL.md` | `fork-only` | Phase 11: unified mcp-adapter skill replaces deploy/generate/test; upstream has no skills/ dir | `ours` |
-| `skills/mcp-adapter/references/generate.md` | `fork-only` | Phase 11: migrated config generation from deprecated generate-mcp-config | `ours` |
-| `skills/mcp-adapter/references/deploy.md` | `fork-only` | Phase 11: migrated deployment workflow from deprecated deploy-mcp-adapter | `ours` |
-| `skills/mcp-adapter/references/verify.md` | `fork-only` | Phase 11: migrated verification workflow from deprecated mcp-adapter-test | `ours` |
+| `skills/mcp-adapter/references/generate.md` | `fork-only` | Phase 11: migrated config generation from deleted generate-mcp-config | `ours` |
+| `skills/mcp-adapter/references/deploy.md` | `fork-only` | Phase 11: migrated deployment workflow from deleted deploy-mcp-adapter | `ours` |
+| `skills/mcp-adapter/references/verify.md` | `fork-only` | Phase 11: migrated verification workflow from deleted mcp-adapter-test | `ours` |
 | `skills/mcp-adapter/references/resolver.md` | `fork-only` | Phase 11: unified path resolution replaces agent-paths/<id>.md static files | `ours` |
 | `skills/mcp-adapter/references/deploy-examples.md` | `fork-only` | Phase 11: deployment code templates migrated from deploy-mcp-adapter; upstream has no skills/ dir | `ours` |
 

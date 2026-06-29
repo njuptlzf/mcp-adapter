@@ -1,7 +1,7 @@
 # Phase 1 Reference: Generate MCP Config
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 1
-> **Migrated from**: `skills/generate-mcp-config/SKILL.md` (deprecated)
+> **Migrated from**: `skills/generate-mcp-config/SKILL.md` (deleted in Phase 11)
 > **Path resolution**: See [resolver.md](resolver.md) — use `AGENT_ADAPTERS[i].resolverFactory()`
 
 Generates correct `mcp.json` files for any mcp-adapter compatible agent.

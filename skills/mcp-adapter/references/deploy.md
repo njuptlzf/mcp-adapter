@@ -1,7 +1,7 @@
 # Phase 2 Reference: Deploy Adapter
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 2
-> **Migrated from**: `skills/deploy-mcp-adapter/SKILL.md` (deprecated)
+> **Migrated from**: `skills/deploy-mcp-adapter/SKILL.md` (deleted in Phase 11)
 > **Path resolution**: See [resolver.md](resolver.md) — use `AGENT_ADAPTERS[i].resolverFactory()`
 
 Deploys mcp-adapter into the target agent's runtime. This skill runs INSIDE the deployer
