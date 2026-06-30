@@ -9,7 +9,7 @@
  *
  * Usage:
  *   npx tsx scripts/deploy-verify.ts                    # verify all harnessed adapters
- *   npx tsx scripts/deploy-verify.ts --agent qoder      # verify one adapter
+ *   npx tsx scripts/deploy-verify.ts --agent universal-mcp  # verify one adapter
  *   npx tsx scripts/deploy-verify.ts --config ./.mcp.json
  */
 

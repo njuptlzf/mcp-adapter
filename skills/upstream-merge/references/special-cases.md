@@ -10,13 +10,11 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `mcp-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; still imports `@earendil-works/pi-tui` (matchesKey/truncateToWidth/visibleWidth) | `assess` |
 | `mcp-setup-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; same `pi-tui` import residual as mcp-panel.ts | `assess` |
 | `panel-keys.ts` | `deleted-in-fork` | Present in upstream; fork removed it (legacy; unreferenced after D-04 Phase 3); do NOT `git checkout --theirs` | `ours` |
-| `adapters/qoder-adapter.ts` | `decoupled-wrapper` | Phase 10: refactored to thin wrapper extending StoreAgentAdapter; Qoder-specific Query.streamInput routing preserved | `ours` |
-| `adapters/kilo-adapter.ts` | `decoupled-wrapper` | Phase 10: refactored to thin wrapper extending StoreAgentAdapter; Kilo-specific sendMessageFn callback preserved | `ours` |
-| `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; legal JSDoc mentions of Pi types (not import coupling) | `manual` |
-| `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; generic contract, Pi-specific factory is separate | `manual` |
+| `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; AGENT_ADAPTERS simplified to `universal-mcp` + `pi` (Phase 12); legal JSDoc mentions of Pi types (not import coupling) | `manual` |
+| `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; removed createKiloResolver/createQoderResolver (Phase 12); createUniversalResolver added; Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |
-| `package.json` | `sibling-config` | Adds `@qoder-ai/qoder-agent-sdk` peer dep + Pi as optional peer (D-01) + `kilo-mcp-server`/`qoder-mcp-bridge` bin entries | `manual` |
-| `vitest.config.ts` | `sibling-config` | Adds coverage reporter per D-17 (MatrixReporter) | `manual` |
+| `package.json` | `sibling-config` | Pi as optional peer (D-01); bin reduced to `pi-mcp-adapter` + `mcp-server` (Phase 12 D-10: removed `kilo-mcp-server`/`qoder-mcp-bridge`) | `manual` |
+| `vitest.config.ts` | `sibling-config` | Adds coverage reporter per D-17 (MatrixReporter); Phase 12: removed coverage thresholds for deleted adapter files | `manual` |
 | `tsconfig.json` | `sibling-config` | Path aliases for `adapters/*` and `interfaces/*` (Phase 5) | `manual` |
 | `README.md` | `framing-divergence` | Preserve 'Universal MCP Adapter' framing per D-18 | `assess` |
 | `MAPPING.md` | `framing-divergence` | Phase 1 interface mapping doc; fork-owned | `assess` |
@@ -26,9 +24,9 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `types/pi-ai.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |
 | `types/pi-tui.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |
 | `interfaces/agent-channel.ts` | `fork-only` | Universal bidirectional AgentChannel interface; no upstream equivalent | `ours` |
-| `bin/kilo-mcp-server.ts` | `fork-only` | Kilo MCP stdio server bin entry; upstream has no `bin/` directory | `ours` |
-| `bin/qoder-mcp-bridge.ts` | `fork-only` | Qoder SDK bridge bin entry; upstream has no `bin/` directory | `ours` |
-| `adapters/store-adapter.ts` | `fork-only` | Shared StoreAgentAdapter base class extracted from qoder/kilo adapters; zero Pi imports — zero conflict risk with upstream | `ours` |
+| `bin/mcp-server.ts` | `fork-only` | Universal MCP stdio server; renamed from `kilo-mcp-server.ts` (Phase 12 D-05); upstream has no `bin/` directory | `ours` |
+| `adapters/protocol-sampling-forwarder.ts` | `fork-only` | Implements `SamplingProvider` via MCP Server→Client `sampling/createMessage` reverse call (D-06); upstream has no equivalent | `ours` |
+| `adapters/protocol-elicitation-forwarder.ts` | `fork-only` | Implements `UISystem.form` via MCP Server→Client `elicitation/create` reverse call (D-07); upstream has no equivalent | `ours` |
 | `skills/mcp-adapter/SKILL.md` | `fork-only` | Phase 11: unified mcp-adapter skill replaces deploy/generate/test; upstream has no skills/ dir | `ours` |
 | `skills/mcp-adapter/references/generate.md` | `fork-only` | Phase 11: migrated config generation from deleted generate-mcp-config | `ours` |
 | `skills/mcp-adapter/references/deploy.md` | `fork-only` | Phase 11: migrated deployment workflow from deleted deploy-mcp-adapter | `ours` |
@@ -48,4 +46,4 @@ Append a row using the exact schema `| `path` | `status` | `why` | `decision` |`
 
 ## When this registry was last curated
 
-2026-06-26 (Phase 11 skill unification + physical removal of 3 old skill directories; 28 anchored entries). Update this footer on Phase 11+ amendments.
+2026-06-30 (Phase 12 universal MCP stdio server: removed 5 deleted-file entries, added 3 new fork-only entries for protocol forwarders + bin/mcp-server.ts, updated 4 modified-file entries; 27 anchored entries). Update this footer on future amendments.
