@@ -301,6 +301,7 @@ Extract shared StoreAgentAdapter base class from QoderAdapter + KiloAdapter (90%
 **Plans:** 3 plans, 2 waves (Wave 1: StoreAdapter + Paths, Wave 2: Tests + Upstream Registry)
 
 Plans:
+
 - [x] 10-01-PLAN.md — StoreAgentAdapter base class extraction + QoderAdapter/KiloAdapter thin-wrapper refactor (STORE-01 through STORE-03, STORE-05)
 - [x] 10-02-PLAN.md — Agent self-reporting paths: mcpConfigPath on AgentContext + config.ts wiring + optional agent-paths dedup (PATH-01 through PATH-03)
 - [x] 10-03-PLAN.md — Tests + upstream-merge registry update + full verification suite (STORE-04, UP-01, UP-02)
@@ -333,9 +334,25 @@ Fix kilo-mcp-server resolver bug, unify three fragmented skills into single mcp-
 **Plans:** 1 plan, 1 wave (Wave 1, autonomous)
 
 Plans:
+
 - [x] 11-01-PLAN.md — Gap closure: migrate deploy-examples.md, fix broken anchors, update registry, full verification + commit (DEC-01 through DEC-05)
 
 **Status:** ✅ Complete (1 plan, 1 commit `aa9ae4b`, 13 files, 590/600 tests pass, upstream:check exit 0)
+
+### Phase 12: Universal MCP Stdio Server — Protocol-Category Simplification. Eliminate per-agent adapters (KiloAdapter, QoderAdapter, StoreAgentAdapter); all non-Pi MCP-compatible agents use a single universal MCP stdio server. Pi retains Branch A exclusively. Protocol forwarding (Sampling, Elicitation) via MCP Server-to-Client requests enables best-effort advanced features.
+
+**Goal:** Universal MCP stdio server — any MCP-compatible agent uses a single agent-agnostic server with runtime capability discovery and protocol forwarding
+**Requirements**: D-01 through D-13 (13 decisions from CONTEXT.md serving as requirements)
+**Depends on:** Phase 11
+**Plans:** 5 plans, 3 waves
+
+Plans:
+
+- [ ] 12-01-PLAN.md — ProtocolSamplingForwarder + ProtocolElicitationForwarder + Mock MCP Client fixture + unit tests (D-06, D-07, D-11)
+- [ ] 12-02-PLAN.md — AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver (D-01, D-02)
+- [ ] 12-03-PLAN.md — bin/mcp-server.ts universal server (reordered flow, inline AgentAPI, capability discovery, forwarder injection) + delete per-agent adapters/tests + update package.json/vitest.config.ts (D-04, D-05, D-09, D-10)
+- [ ] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13)
+- [ ] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
 
 ---
 
