@@ -348,8 +348,8 @@ Plans:
 
 Plans:
 
-- [ ] 12-01-PLAN.md — ProtocolSamplingForwarder + ProtocolElicitationForwarder + Mock MCP Client fixture + unit tests (D-06, D-07, D-11)
-- [ ] 12-02-PLAN.md — AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver (D-01, D-02)
+- [x] 12-01-PLAN.md — ProtocolSamplingForwarder + ProtocolElicitationForwarder + Mock MCP Client fixture + unit tests (D-06, D-07, D-11) ✅
+- [x] 12-02-PLAN.md — AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver (D-01, D-02) ✅
 - [ ] 12-03-PLAN.md — bin/mcp-server.ts universal server (reordered flow, inline AgentAPI, capability discovery, forwarder injection) + delete per-agent adapters/tests + update package.json/vitest.config.ts (D-04, D-05, D-09, D-10)
 - [ ] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13)
 - [ ] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)

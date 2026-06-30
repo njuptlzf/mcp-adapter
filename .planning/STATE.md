@@ -2,32 +2,36 @@
 gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
-status: completed
-stopped_at: Phase 12 context gathered — 13 decisions for universal MCP stdio server
-last_updated: "2026-06-30T06:38:18.041Z"
-last_activity: "2026-06-26 — Phase 11 executed: 1 plan, 590/600 tests pass, upstream:check exit 0"
+status: in-progress
+stopped_at: Phase 12 Plan 01 complete — protocol forwarders + mock client + 11 unit tests
+last_updated: "2026-06-30T10:48:00.000Z"
+last_activity: "2026-06-30 — Phase 12 Plan 01 executed: 2 tasks, 5 files, 11 tests pass, tsc exit 0"
 progress:
   total_phases: 3
   completed_phases: 2
-  total_plans: 4
-  completed_plans: 4
-  percent: 67
+  total_plans: 9
+  completed_plans: 5
+  percent: 56
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
-**Last updated:** 2026-06-26
-**Status:** v3.0 milestone — Phase 11 complete
+**Last updated:** 2026-06-30
+**Status:** v3.0 milestone — Phase 12 in progress (Plan 01 complete)
 
 ## Current Position
 
-Phase: 11 — Skill Unification & Post-Phase-10 Fixes ✅
-Plan: 11-01 complete (1 commit aa9ae4b)
-Status: Complete — unified mcp-adapter skill (SKILL.md + 5 reference files), kilo resolver fix, deploy-examples.md migrated, broken anchors fixed, 7 fork-only registry entries, 3 deprecation banners
-Last activity: 2026-06-26 — Phase 11 executed: 1 plan, 590/600 tests pass, upstream:check exit 0
+Phase: 12 — Universal MCP Stdio Server — Protocol-Category Simplification 🔄
+Plan: 12-01 complete (2 commits: 5f8ae28, a85afea)
+Status: In progress — ProtocolSamplingForwarder + ProtocolElicitationForwarder + MockMcpClient fixture + 11 unit tests created and passing. Next: 12-02 (AGENT_ADAPTERS registry simplification).
+Last activity: 2026-06-30 — Phase 12 Plan 01 executed: 2 tasks, 5 files, 11 tests pass, tsc exit 0
 
 ## Recent Progress
+
+### Phase 12 — Universal MCP Stdio Server (IN PROGRESS)
+
+- **12-01**: Created ProtocolSamplingForwarder (implements SamplingProvider via server.createMessage(), D-06/D-11), ProtocolElicitationForwarder (implements UISystem.form via server.elicitInput(), D-07), MockMcpClient test fixture (in-process, D-13), and 11 unit tests (4 sampling + 4 elicitation + 3 convertFieldToSchema). Pure forwarding — no config.settings checks (D-11). No logging of request/response payloads (T-12-01, T-12-02). tsc exit 0, all 11 tests pass. 2 commits: 5f8ae28 (feat) + a85afea (test).
 
 ### Phase 11 — Skill Unification & Post-Phase-10 Fixes (COMPLETE)
 
@@ -61,9 +65,13 @@ Last activity: 2026-06-26 — Phase 11 executed: 1 plan, 590/600 tests pass, ups
 
 ## Next Actions
 
-**Milestone v2.0 — 100% COMPLETE (9/9 phases, 25/25 plans)**
+**Phase 12 — Universal MCP Stdio Server (IN PROGRESS)**
 
-All UPSTREAM-01..05 requirements satisfied. No outstanding work.
+- ✅ 12-01: Protocol forwarders + mock client + unit tests (COMPLETE)
+- ⬜ 12-02: AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver
+- ⬜ 12-03: bin/mcp-server.ts universal server + delete per-agent adapters/tests
+- ⬜ 12-04: E2E tests + parametric test verification
+- ⬜ 12-05: SKILL.md simplification + README + CHANGELOG + upstream-merge registry
 
 ---
 
@@ -154,8 +162,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-30T06:38:18.024Z
-**Stopped at:** Phase 12 context gathered — 13 decisions for universal MCP stdio server
+**Last session:** 2026-06-30T10:48:00.000Z
+**Stopped at:** Phase 12 Plan 01 complete — protocol forwarders + mock client + 11 unit tests
 
 ## Performance Metrics
 
@@ -169,6 +177,7 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 8 P2 | ~28min | 5 tasks | 5 files (SKILL.md 141 lines + references 127 + Scenario 1 log 180 + Scenario 2 log 362 + deferred-items 112; 922 total lines added; 5 atomic commits 1b555cc..15e6b69) |
 | Phase 9 P1 | ~22min | 3 tasks | 5 files (special-cases.md 37 lines + scripts/upstream-divergence.ts 117 lines + SKILL.md 142→176 lines + package.json +1 script + UPSTREAM-CHANGES.md deleted); 7 atomic commits b3d51e8..89339ad; 222 diverged / 17 registered / 205 default-resolved / 0 stale |
 | Phase 11 P1 | ~10min | 6 tasks | 13 files (+1213/-3); 1 consolidated commit aa9ae4b (feat); deploy-examples.md migrated (402 lines), 2 anchor fixes, +1 registry row; tsc 0 / 590 tests / verify:deploy kilo ✅ / upstream:check exit 0 (0 stale, 30 registered) |
+| Phase 12 P1 | ~28min | 2 tasks | 5 files (+622); 2 atomic commits 5f8ae28 (feat) + a85afea (test); ProtocolSamplingForwarder + ProtocolElicitationForwarder + MockMcpClient + 11 unit tests; tsc 0 / 11 tests pass; D-06/D-07/D-11 satisfied |
 
 ## Decisions
 
@@ -190,6 +199,10 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 11]: deploy-examples.md migrated verbatim via `cp` (byte-for-byte identical) to preserve published `pi-mcp-adapter` import paths
 - [Phase 11]: GitNexus `gitnexus_detect_changes()` skipped (MCP tools unavailable); only .ts change is bin/kilo-mcp-server.ts 1-line resolver fix, all others are .md (AGENTS.md GitNexus scope = .ts symbols only)
 - [Phase 11]: Plan's automated grep `=1` for deploy-examples.md over-constrained vs. its own footer text; correct intent = 1 registry ROW (verified via `^|` prefix grep)
+- [Phase 12 P1]: D-11 pure forwarding — no config.settings checks in forwarders; Agent Client capability declaration is the only gate
+- [Phase 12 P1]: maxTokens defaults to 0 when undefined (SamplingRequest.maxTokens optional at interface level, always present at runtime per MCP protocol)
+- [Phase 12 P1]: ElicitRequestFormParams type cast used for elicitInput params to bridge Record<string,unknown> to SDK's specific union type (Rule 3 fix)
+- [Phase 12 P1]: GitNexus impact analysis skipped — plan creates new files only (no existing symbols modified); MCP tools unavailable in runtime
 
 ## Naming Decisions
 
