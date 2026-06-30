@@ -73,6 +73,25 @@ export function createKiloResolver(): AgentPathResolver {
   };
 }
 
+/**
+ * Universal resolver for the mcp-adapter universal MCP stdio server.
+ *
+ * Per D-02: config path discovery is --config > MCP_CONFIG_PATH > .mcp.json
+ * in cwd > ~/.config/mcp/mcp.json. No agent-specific global paths.
+ *
+ * Unlike createKiloResolver / createQoderResolver, this resolver has no
+ * env var override for the global config directory. MCP_CONFIG_PATH is
+ * handled by the caller (loadMcpConfig / bin entry point), not by the
+ * resolver.
+ */
+export function createUniversalResolver(): AgentPathResolver {
+  return {
+    agentId: "universal-mcp",
+    globalConfigPath: () => join(homedir(), ".config", "mcp", "mcp.json"),
+    projectConfigName: () => ".mcp.json",
+  };
+}
+
 export const DEFAULT_AGENT_RESOLVER: AgentPathResolver = createPiResolver();
 
 /**
