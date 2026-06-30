@@ -65,7 +65,7 @@ describe("Capability Gate (universal, runs FIRST)", () => {
 			createMcpAdapter(adapter, testCtx, testConfig, null);
 
 			// Universal signal: the only externally-observable property
-			// (per RESEARCH.md Pattern 3, qoder-adapter-integration.test.ts:135)
+			// (per RESEARCH.md Pattern 3, verified via adapter-contract integration tests)
 			const tools = adapter.getAllTools().map((t) => t.name);
 			expect(tools).toContain("mcp");
 
