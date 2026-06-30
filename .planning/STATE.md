@@ -3,29 +3,29 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
 status: in-progress
-stopped_at: Phase 12 Plan 03 complete — universal bin/mcp-server.ts created, 13 per-agent files deleted, package.json/vitest/agent-paths updated
-last_updated: "2026-06-30T11:50:00.000Z"
-last_activity: "2026-06-30 — Phase 12 Plan 03 executed: 3 tasks, 3 commits, 1 file created, 5 modified, 13 deleted, 525 tests pass"
+stopped_at: Phase 12 Plan 04 complete — E2E tests created, parametric tests auto-adapted, full suite 528/528 pass
+last_updated: "2026-06-30T12:23:00.000Z"
+last_activity: "2026-06-30 — Phase 12 Plan 04 executed: 2 tasks, 2 commits, 2 files created, 528 tests pass"
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
-  percent: 78
+  completed_plans: 8
+  percent: 89
 ---
 
 # Project State
 
 **Created:** 2026-06-10T13:45:00+08:00
 **Last updated:** 2026-06-30
-**Status:** v3.0 milestone — Phase 12 in progress (Plans 01-03 complete)
+**Status:** v3.0 milestone — Phase 12 in progress (Plans 01-04 complete)
 
 ## Current Position
 
 Phase: 12 — Universal MCP Stdio Server — Protocol-Category Simplification 🔄
-Plan: 12-03 complete (3 commits: d26c1ef, 191bb62, 29c029d)
-Status: In progress — bin/mcp-server.ts created with reordered flow, inline AgentAPI, getClientCapabilities(), forwarder injection (D-04/D-05/D-06/D-07/D-11). 13 per-agent files deleted (D-04/D-09/D-10). package.json bin = 2 entries, vitest.config.ts cleaned, agent-paths.ts resolvers removed. 525/525 tests pass, tsc exit 0. Next: 12-04 (E2E tests + parametric verification).
-Last activity: 2026-06-30 — Phase 12 Plan 03 executed: 3 tasks, 3 commits, 1 file created (+435 lines), 5 modified, 13 deleted (-3005 lines), 525 tests pass
+Plan: 12-04 complete (2 commits: f820daf, f347898)
+Status: In progress — E2E test created (mcp-server-e2e.test.ts, 3 test cases: list tools, call tool, accept sampling capability). Parametric tests (adapter-contract 16/16, capability-gate 4/4) auto-adapted to universal-mcp + pi with zero code changes (D-08). Full suite: 528/528 tests pass, tsc exit 0. verify:deploy --agent universal-mcp PASS, --agent pi skipped gracefully. upstream:check exit 1 (5 stale entries from Plan 03 deletions, documented for Plan 05). Dual-layer testing complete (D-13): unit (Plan 01) + E2E (this plan). Next: 12-05 (SKILL.md + README + CHANGELOG + upstream-merge registry).
+Last activity: 2026-06-30 — Phase 12 Plan 04 executed: 2 tasks, 2 commits, 2 files created (+204 lines), 528 tests pass
 
 ## Recent Progress
 
@@ -34,6 +34,7 @@ Last activity: 2026-06-30 — Phase 12 Plan 03 executed: 3 tasks, 3 commits, 1 f
 - **12-01**: Created ProtocolSamplingForwarder (implements SamplingProvider via server.createMessage(), D-06/D-11), ProtocolElicitationForwarder (implements UISystem.form via server.elicitInput(), D-07), MockMcpClient test fixture (in-process, D-13), and 11 unit tests (4 sampling + 4 elicitation + 3 convertFieldToSchema). Pure forwarding — no config.settings checks (D-11). No logging of request/response payloads (T-12-01, T-12-02). tsc exit 0, all 11 tests pass. 2 commits: 5f8ae28 (feat) + a85afea (test).
 - **12-02**: Simplified AGENT_ADAPTERS to 2 entries (universal-mcp + pi) per D-01. Added createUniversalResolver to agent-paths.ts per D-02 (globalConfigPath: ~/.config/mcp/mcp.json, projectConfigName: .mcp.json). universal-mcp entry's factory provides inline AgentAPI implementation per D-04 (in-memory Maps for tools/commands/flags/handlers, all 8 AgentAPI methods, no shared base class). TDD RED/GREEN cycle: 23 structural tests (agent-adapters-registry.test.ts), 18 initially failing → all passing. Removed imports of KiloAdapter, QoderAdapter, adaptKiloContext, adaptQoderContext, createKiloResolver, createQoderResolver from agent-api.ts. Existing parametric tests (adapter-contract 16/16, capability-gate 4/4) auto-adapt. Full suite: 617 pass / 10 skip / 0 fail. 3 commits: 45302e1 (feat) + dcfac2b (test RED) + d7de66b (feat GREEN).
 - **12-03**: Created universal bin/mcp-server.ts (435 lines) with InlineMcpAdapter class (D-04: inline AgentAPI, all 8 methods + attachChannel + fireSessionStart/fireSessionShutdown), reordered flow per Pitfall 1 (server.connect BEFORE fireSessionStart), getClientCapabilities() for capability discovery (Pitfall 5), forwarder injection (D-06/D-07/D-11: pure forwarding, no config.settings checks), ctx.hasUI=true when forwarders injected (Pitfall 4). Deleted 13 files (D-04/D-09/D-10): kilo-adapter.ts, qoder-adapter.ts, store-adapter.ts, qoder-sampling-provider.ts, qoder-renderer.ts, kilo-mcp-server.ts, qoder-mcp-bridge.ts, kilo-mcp-entry.ts, qoder-smoke.ts, + 4 test files. Updated package.json (bin: 2 entries), vitest.config.ts (removed 4 coverage thresholds), agent-paths.ts (removed createKiloResolver/createQoderResolver/resolveQoderGlobalConfigPath). Cleaned dangling comment references in adapter-contract.test.ts and capability-gate.test.ts. tsc exit 0, 525/525 tests pass. 3 commits: d26c1ef (feat) + 191bb62 (chore) + 29c029d (feat).
+- **12-04**: Created E2E test (__tests__/mcp-server-e2e.test.ts, 172 lines, 3 test cases) for the universal MCP stdio server — spawns bin/mcp-server.ts as subprocess via StdioClientTransport, connects real MCP Client declaring sampling + elicitation.form capabilities, verifies tool listing (mcp proxy tool registered), tool calling (returns content), and sampling capability acceptance (D-13: E2E layer of dual-layer testing). Parametric tests auto-adapted: adapter-contract.test.ts 16/16 pass, capability-gate.test.ts 4/4 pass — zero code changes needed (D-08). Full suite: 528/528 tests pass (55 files), tsc exit 0. verify:deploy --agent universal-mcp PASS, --agent pi skipped gracefully. upstream:check exit 1 (5 stale entries from Plan 03 file deletions — documented in deferred-items.md for Plan 05). 2 commits: f820daf (test) + f347898 (docs).
 
 ### Phase 11 — Skill Unification & Post-Phase-10 Fixes (COMPLETE)
 
@@ -72,7 +73,7 @@ Last activity: 2026-06-30 — Phase 12 Plan 03 executed: 3 tasks, 3 commits, 1 f
 - ✅ 12-01: Protocol forwarders + mock client + unit tests (COMPLETE)
 - ✅ 12-02: AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver
 - ✅ 12-03: bin/mcp-server.ts universal server + delete per-agent adapters/tests (COMPLETE)
-- ⬜ 12-04: E2E tests + parametric test verification
+- ✅ 12-04: E2E tests + parametric test verification (COMPLETE)
 - ⬜ 12-05: SKILL.md simplification + README + CHANGELOG + upstream-merge registry
 
 ---
@@ -164,8 +165,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-30T11:50:00.000Z
-**Stopped at:** Phase 12 Plan 03 complete — universal bin/mcp-server.ts created, 13 per-agent files deleted, package.json/vitest/agent-paths updated
+**Last session:** 2026-06-30T12:23:00.000Z
+**Stopped at:** Phase 12 Plan 04 complete — E2E tests created, parametric tests auto-adapted, full suite 528/528 pass
 
 ## Performance Metrics
 
@@ -182,6 +183,7 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 12 P01 | ~15min | 2 tasks | 5 files (protocol-sampling-forwarder.ts + protocol-elicitation-forwarder.ts + mock-mcp-client.ts + 2 test files); 11 tests pass; tsc 0; 2 commits 5f8ae28..a85afea |
 | Phase 12 P02 | ~37min | 2 tasks | 3 files (agent-paths.ts +19 + agent-api.ts +65/-22 + agent-adapters-registry.test.ts 163 lines new); TDD RED/GREEN; 23 new tests + 20 parametric auto-adapt; 617/627 pass; tsc 0; 3 commits 45302e1..d7de66b |
 | Phase 12 P03 | ~18min | 3 tasks | 1 created (bin/mcp-server.ts 435 lines) + 5 modified + 13 deleted (-3005 lines); InlineMcpAdapter with reordered flow + getClientCapabilities + forwarder injection; package.json bin=2, vitest cleaned, agent-paths resolvers removed; tsc 0 / 525 tests pass; 3 commits d26c1ef..29c029d |
+| Phase 12 P04 | ~25min | 2 tasks | 2 created (mcp-server-e2e.test.ts 172 lines + deferred-items.md 33 lines); 3 E2E tests (subprocess + StdioClientTransport); parametric tests auto-adapted (adapter-contract 16/16, capability-gate 4/4, zero changes); full suite 528/528 pass; verify:deploy universal-mcp PASS; upstream:check 5 stale (deferred to Plan 05); 2 commits f820daf..f347898 |
 | Phase 12 P1 | ~28min | 2 tasks | 5 files (+622); 2 atomic commits 5f8ae28 (feat) + a85afea (test); ProtocolSamplingForwarder + ProtocolElicitationForwarder + MockMcpClient + 11 unit tests; tsc 0 / 11 tests pass; D-06/D-07/D-11 satisfied |
 
 ## Decisions
@@ -218,6 +220,10 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 12 P3]: D-11 pure forwarding — no config.settings checks in bin/mcp-server.ts; client capability declaration is the only gate
 - [Phase 12 P3]: Dangling comment references cleaned in adapter-contract.test.ts and capability-gate.test.ts after file deletions (Rule 2)
 - [Phase 12 P3]: GitNexus impact analysis skipped (MCP tools unavailable); manual grep-based analysis confirmed all imports of deleted files were internal to the deletion set
+- [Phase 12 P4]: D-13 dual-layer testing complete — unit tests (Plan 01, in-process MockMcpClient) + E2E tests (this plan, subprocess StdioClientTransport with real MCP Client)
+- [Phase 12 P4]: D-08 parametric tests auto-adapted — adapter-contract.test.ts (16/16) and capability-gate.test.ts (4/4) needed zero code changes for the new AGENT_ADAPTERS registry (universal-mcp + pi)
+- [Phase 12 P4]: upstream:check stale entries deferred to Plan 05 — 5 deleted-file entries in special-cases.md are stale due to Plan 03 deletions; acceptance criteria explicitly allows documentation
+- [Phase 12 P4]: GitNexus impact analysis skipped (MCP tools unavailable); Task 1 creates new test file only (no existing symbols modified), Task 2 makes zero code changes (verification only)
 
 ## Naming Decisions
 
