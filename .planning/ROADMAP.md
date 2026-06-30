@@ -344,7 +344,7 @@ Plans:
 **Goal:** Universal MCP stdio server — any MCP-compatible agent uses a single agent-agnostic server with runtime capability discovery and protocol forwarding
 **Requirements**: D-01 through D-13 (13 decisions from CONTEXT.md serving as requirements)
 **Depends on:** Phase 11
-**Plans:** 5 plans, 3 waves
+**Plans:** 5/5 plans complete
 
 Plans:
 
@@ -352,7 +352,7 @@ Plans:
 - [x] 12-02-PLAN.md — AGENT_ADAPTERS registry simplification (universal-mcp + pi) + createUniversalResolver (D-01, D-02) ✅
 - [x] 12-03-PLAN.md — bin/mcp-server.ts universal server (reordered flow, inline AgentAPI, capability discovery, forwarder injection) + delete per-agent adapters/tests + update package.json/vitest.config.ts (D-04, D-05, D-09, D-10) ✅
 - [x] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13) ✅
-- [ ] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
+- [x] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
 
 ---
 
