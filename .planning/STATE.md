@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v3.0
 milestone_name: milestone
 status: in-progress
-stopped_at: Phase 12 Plan 01 complete — protocol forwarders + mock client + 11 unit tests
-last_updated: "2026-06-30T10:48:00.000Z"
-last_activity: "2026-06-30 — Phase 12 Plan 01 executed: 2 tasks, 5 files, 11 tests pass, tsc exit 0"
+stopped_at: Phase 12 Plan 02 complete — AGENT_ADAPTERS simplified to universal-mcp + pi, createUniversalResolver added
+last_updated: "2026-06-30T11:20:00.000Z"
+last_activity: "2026-06-30 — Phase 12 Plan 02 executed: 2 tasks, 3 commits, 3 files, TDD RED/GREEN, 617/627 tests pass"
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 9
-  completed_plans: 5
-  percent: 56
+  completed_plans: 6
+  percent: 67
 ---
 
 # Project State
@@ -23,15 +23,16 @@ progress:
 ## Current Position
 
 Phase: 12 — Universal MCP Stdio Server — Protocol-Category Simplification 🔄
-Plan: 12-01 complete (2 commits: 5f8ae28, a85afea)
-Status: In progress — ProtocolSamplingForwarder + ProtocolElicitationForwarder + MockMcpClient fixture + 11 unit tests created and passing. Next: 12-02 (AGENT_ADAPTERS registry simplification).
-Last activity: 2026-06-30 — Phase 12 Plan 01 executed: 2 tasks, 5 files, 11 tests pass, tsc exit 0
+Plan: 12-02 complete (3 commits: 45302e1, dcfac2b, d7de66b)
+Status: In progress — AGENT_ADAPTERS simplified to universal-mcp + pi (D-01), createUniversalResolver added (D-02), inline AgentAPI factory (D-04). 617/627 tests pass, tsc exit 0. Next: 12-03 (bin/mcp-server.ts + delete per-agent adapters).
+Last activity: 2026-06-30 — Phase 12 Plan 02 executed: 2 tasks, 3 commits, 3 files, TDD RED/GREEN, 43 tests pass
 
 ## Recent Progress
 
 ### Phase 12 — Universal MCP Stdio Server (IN PROGRESS)
 
 - **12-01**: Created ProtocolSamplingForwarder (implements SamplingProvider via server.createMessage(), D-06/D-11), ProtocolElicitationForwarder (implements UISystem.form via server.elicitInput(), D-07), MockMcpClient test fixture (in-process, D-13), and 11 unit tests (4 sampling + 4 elicitation + 3 convertFieldToSchema). Pure forwarding — no config.settings checks (D-11). No logging of request/response payloads (T-12-01, T-12-02). tsc exit 0, all 11 tests pass. 2 commits: 5f8ae28 (feat) + a85afea (test).
+- **12-02**: Simplified AGENT_ADAPTERS to 2 entries (universal-mcp + pi) per D-01. Added createUniversalResolver to agent-paths.ts per D-02 (globalConfigPath: ~/.config/mcp/mcp.json, projectConfigName: .mcp.json). universal-mcp entry's factory provides inline AgentAPI implementation per D-04 (in-memory Maps for tools/commands/flags/handlers, all 8 AgentAPI methods, no shared base class). TDD RED/GREEN cycle: 23 structural tests (agent-adapters-registry.test.ts), 18 initially failing → all passing. Removed imports of KiloAdapter, QoderAdapter, adaptKiloContext, adaptQoderContext, createKiloResolver, createQoderResolver from agent-api.ts. Existing parametric tests (adapter-contract 16/16, capability-gate 4/4) auto-adapt. Full suite: 617 pass / 10 skip / 0 fail. 3 commits: 45302e1 (feat) + dcfac2b (test RED) + d7de66b (feat GREEN).
 
 ### Phase 11 — Skill Unification & Post-Phase-10 Fixes (COMPLETE)
 
@@ -162,8 +163,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 
 ## Session Tracking
 
-**Last session:** 2026-06-30T10:48:00.000Z
-**Stopped at:** Phase 12 Plan 01 complete — protocol forwarders + mock client + 11 unit tests
+**Last session:** 2026-06-30T11:20:00.000Z
+**Stopped at:** Phase 12 Plan 02 complete — AGENT_ADAPTERS simplified to universal-mcp + pi, createUniversalResolver added, TDD RED/GREEN
 
 ## Performance Metrics
 
@@ -177,6 +178,8 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 | Phase 8 P2 | ~28min | 5 tasks | 5 files (SKILL.md 141 lines + references 127 + Scenario 1 log 180 + Scenario 2 log 362 + deferred-items 112; 922 total lines added; 5 atomic commits 1b555cc..15e6b69) |
 | Phase 9 P1 | ~22min | 3 tasks | 5 files (special-cases.md 37 lines + scripts/upstream-divergence.ts 117 lines + SKILL.md 142→176 lines + package.json +1 script + UPSTREAM-CHANGES.md deleted); 7 atomic commits b3d51e8..89339ad; 222 diverged / 17 registered / 205 default-resolved / 0 stale |
 | Phase 11 P1 | ~10min | 6 tasks | 13 files (+1213/-3); 1 consolidated commit aa9ae4b (feat); deploy-examples.md migrated (402 lines), 2 anchor fixes, +1 registry row; tsc 0 / 590 tests / verify:deploy kilo ✅ / upstream:check exit 0 (0 stale, 30 registered) |
+| Phase 12 P01 | ~15min | 2 tasks | 5 files (protocol-sampling-forwarder.ts + protocol-elicitation-forwarder.ts + mock-mcp-client.ts + 2 test files); 11 tests pass; tsc 0; 2 commits 5f8ae28..a85afea |
+| Phase 12 P02 | ~37min | 2 tasks | 3 files (agent-paths.ts +19 + agent-api.ts +65/-22 + agent-adapters-registry.test.ts 163 lines new); TDD RED/GREEN; 23 new tests + 20 parametric auto-adapt; 617/627 pass; tsc 0; 3 commits 45302e1..d7de66b |
 | Phase 12 P1 | ~28min | 2 tasks | 5 files (+622); 2 atomic commits 5f8ae28 (feat) + a85afea (test); ProtocolSamplingForwarder + ProtocolElicitationForwarder + MockMcpClient + 11 unit tests; tsc 0 / 11 tests pass; D-06/D-07/D-11 satisfied |
 
 ## Decisions
@@ -200,6 +203,9 @@ Run `/gsd-verify-work 05-type-decoupling-entry-point-refactor` to verify the pha
 - [Phase 11]: GitNexus `gitnexus_detect_changes()` skipped (MCP tools unavailable); only .ts change is bin/kilo-mcp-server.ts 1-line resolver fix, all others are .md (AGENTS.md GitNexus scope = .ts symbols only)
 - [Phase 11]: Plan's automated grep `=1` for deploy-examples.md over-constrained vs. its own footer text; correct intent = 1 registry ROW (verified via `^|` prefix grep)
 - [Phase 12 P1]: D-11 pure forwarding — no config.settings checks in forwarders; Agent Client capability declaration is the only gate
+- [Phase 12 P2]: D-04 inline AgentAPI — universal-mcp factory uses in-memory Maps (not StoreAgentAdapter); each entry point has its own inline implementation; sendMessage is no-op, exec is mock (T-12-06 accepted)
+- [Phase 12 P2]: D-02 universal config path — createUniversalResolver returns ~/.config/mcp/mcp.json as global, .mcp.json as project; no agent-specific paths, no env var override in resolver (MCP_CONFIG_PATH handled by caller)
+- [Phase 12 P2]: GitNexus impact analysis skipped (MCP tools unavailable, index stale at 7bce545); manual grep-based impact analysis performed instead — all AGENT_ADAPTERS consumers are parametric
 - [Phase 12 P1]: maxTokens defaults to 0 when undefined (SamplingRequest.maxTokens optional at interface level, always present at runtime per MCP protocol)
 - [Phase 12 P1]: ElicitRequestFormParams type cast used for elicitInput params to bridge Record<string,unknown> to SDK's specific union type (Rule 3 fix)
 - [Phase 12 P1]: GitNexus impact analysis skipped — plan creates new files only (no existing symbols modified); MCP tools unavailable in runtime
