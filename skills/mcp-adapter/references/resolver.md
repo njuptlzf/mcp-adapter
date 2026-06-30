@@ -1,95 +1,93 @@
 # Agent Resolver Reference
 
-Unified path resolution for all registered adapters. Dynamically discovered from
-`AGENT_ADAPTERS` in [`interfaces/agent-api.ts`](../../interfaces/agent-api.ts) —
-**no static per-agent files needed.** This replaces the legacy
-`skills/mcp-adapter-test/references/agent-paths/<id>.md` pattern (Phase 11 DEC-02).
+Universal path resolution for the two integration branches: **Branch A (Pi)** and
+**Branch C (Universal MCP)**. Config path discovery is fully universalized (D-02) —
+no agent-specific global paths. This replaces the legacy per-agent resolver pattern.
 
 ## Dynamic Discovery
 
-Run this to see all currently registered adapters with their paths and capabilities:
+The `AGENT_ADAPTERS` registry in [`interfaces/agent-api.ts`](../../interfaces/agent-api.ts)
+contains two entries: `pi` (Branch A) and `universal-mcp` (Branch C). For programmatic
+consumption in skill workflows:
 
 ```bash
-echo "=== Current AGENT_ADAPTERS ==="
-grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabilities:|resolverFactory:)" | head -60
-```
-
-For programmatic consumption in skill workflows:
-
-```bash
-# Resolve an agent's global config path
+# Resolve the universal global config path
 node -e "
 const m = require('./interfaces/agent-paths.ts');  // handles .ts via tsx
-const resolver = m.createKiloResolver();  // or createPiResolver, createQoderResolver
+const resolver = m.createUniversalResolver();
 console.log(resolver.globalConfigPath());
 "
 ```
 
 ## Agent Capability Matrix
 
-Read from `AGENT_ADAPTERS[i].capabilities`. Updated automatically when new adapters are registered.
+Branch C capabilities are **runtime-discovered** (D-12) — they are NOT static.
+The table below shows the architectural defaults; actual capabilities depend on what
+the connecting MCP Client declares at runtime via `server.getClientCapabilities()`.
 
-| Agent ID | Display Name | UI | Sampling | Renderer | Integration Mode |
-|----------|-------------|-----|----------|----------|-----------------|
-| `pi` | Pi | ✅ | ✅ | ✅ | Native ExtensionAPI (Branch A) |
-| `qoder` | Qoder | ❌ | ✅ | ❌ | SDK Bridge + SessionStart hook (Branch B) |
-| `kilo` | Kilo | ❌ | ❌ | ❌ | MCP stdio server (Branch C / Strategy A) |
+| Branch | Agent ID | UI | Sampling | Renderer | Integration Mode |
+|--------|----------|-----|----------|----------|-----------------|
+| Branch A | `pi` | ✅ | ✅ | ✅ | Native Pi extension (in-process) |
+| Branch C | `universal-mcp` | runtime-discovered | runtime-discovered | runtime-discovered | Universal MCP stdio server (`mcp-server`) |
 
-> **Kilo note**: `sampling` and `renderer` are ❌ because Kilo uses MCP stdio transport,
-> which does not support server→client reverse calls. The `mcp` proxy tool is fully functional.
+> **Branch C note**: Sampling is forwarded via MCP `sampling/createMessage` reverse call
+> when the Agent Client declares `sampling` capability. Elicitation is forwarded via
+> `elicitation/create` when the client declares `elicitation.form` capability. The `mcp`
+> proxy tool is always available regardless of declared capabilities. TUI rendering is a
+> Pi-only presentation enhancement (Branch A), not a Branch C capability gap (D-08).
 
 ## Config Path Resolution
 
-For each agent, resolve the global config directory via `resolverFactory()`:
+The discovery chain is universal for all agents (D-02):
 
-| Agent | Global Config Path | Project Config | Override Env |
-|-------|-------------------|----------------|--------------|
-| Pi | `~/.pi/agent/mcp.json` | `.mcp.json` (`.pi/mcp.json` project override) | `PI_CODING_AGENT_DIR` |
-| Qoder | `~/.qoder/agent/mcp.json` | `.mcp.json` | `MCP_AGENT_DIR` |
-| Kilo | `~/.kilo/mcp.json` | `.mcp.json` | `MCP_AGENT_DIR` |
+| Precedence | Source | Description |
+|------------|--------|-------------|
+| 1 (highest) | `--config` flag | Explicit path passed to `mcp-server` |
+| 2 | `MCP_CONFIG_PATH` env var | Environment variable override |
+| 3 | `.mcp.json` in cwd | Project-local shared config |
+| 4 (lowest) | `~/.config/mcp/mcp.json` | User-global shared config |
 
-Precedence (all agents): `--config` flag > `MCP_AGENT_DIR` env > agent-global > shared-global (`~/.config/mcp/mcp.json`) > project (`.mcp.json`).
+> **Pi (Branch A) also reads**: `~/.pi/agent/mcp.json` (global override) and
+> `.pi/mcp.json` (project override). These are Pi-specific layers on top of the
+> universal chain. Branch C uses only the universal chain above.
 
 ### Using PATH-01 Self-Reporting
 
 When an agent knows its config path at runtime, pass it via `AgentContext.mcpConfigPath`:
 
 ```typescript
-const resolver = createKiloResolver();
-const ctx: AgentContext = adaptKiloContext({ 
-  cwd: process.cwd(), 
+const resolver = createUniversalResolver();
+const ctx: AgentContext = {
+  cwd: process.cwd(),
   hasUI: false,
   mcpConfigPath: resolver.globalConfigPath()  // PATH-01 self-reporting
-});
+};
 // loadMcpConfig will use ctx.mcpConfigPath before falling back to DEFAULT_AGENT_RESOLVER
 ```
 
-## Capability-Gate Decision (DEC-03)
+## Capability-Gate Decision (DEC-03 + D-12)
 
 Before deploying or generating config for an agent, check its capabilities.
+For Branch C, capabilities are discovered at runtime — there is no static gate.
 
 ### Phase 0 Preamble
 
-For every agent interaction in this skill, run this preamble:
+For Branch A (Pi), all capabilities are `true` — full support.
 
-```bash
-# 1. Identify target agent from AGENT_ADAPTERS
-# 2. Read its capabilities
-# 3. Present to user
+For Branch C (Universal MCP), present the runtime-discovery model:
+
+```
+Agent: <user-named>
+Integration mode: Branch C (universal MCP stdio server)
+Capabilities (runtime-discovered via MCP protocol):
+  ✅ mcp proxy tool — always available
+  ℹ️ Sampling — forwarded if agent declares `sampling` capability
+  ℹ️ Elicitation — forwarded if agent declares `elicitation` capability
+  ℹ️ Status/panel — via tool actions and content blocks
 ```
 
-**Decision table:**
-
-| Condition | Action |
-|-----------|--------|
-| All capabilities `false` | ⚠️ Warn: basic mcp proxy only. No UI/sampling/renderer. Proceed anyway. |
-| `ui: false` | ℹ️ Note: no interactive panel. CLI-only. |
-| `sampling: false` | ℹ️ Note: MCP sampling unavailable (agent has no model registry access). |
-| `renderer: false` | ℹ️ Note: custom tool renderers unavailable (notify-only). |
-| Any `true` | ✅ Full support for that capability. |
-
-**Never terminate** — all registered agents support the `mcp` proxy tool. But **always display**
-capability differences so the user knows what to expect.
+**Never terminate** — both branches support the `mcp` proxy tool. But **always display**
+the capability model so the user knows what to expect.
 
 ## Host × Target Matrix (D-16)
 
@@ -106,10 +104,13 @@ are independent dimensions:
 
 ## Adding a New Agent
 
+With the universal MCP server architecture, **most agents do not need a new adapter**
+(D-08). Any MCP-compatible agent uses Branch C directly — just register `mcp-server`
+in the agent's MCP config.
+
+If an agent requires a native integration (like Pi's Branch A):
+
 1. Implement `AgentAPI` (8 methods) in `adapters/<id>-adapter.ts`
 2. Provide `AgentPathResolver` in `interfaces/agent-paths.ts`
 3. Add descriptor to `AGENT_ADAPTERS` in `interfaces/agent-api.ts`
 4. **Done.** This resolver.md auto-discovers the new agent via the registry.
-
-No need to create a per-agent reference file or update any skill — the registry
-is the single source of truth (D-07).

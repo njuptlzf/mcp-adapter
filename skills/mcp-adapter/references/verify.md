@@ -1,7 +1,6 @@
 # Phase 3 Reference: Verify Deployment
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 3
-> **Migrated from**: `skills/mcp-adapter-test/SKILL.md` (deleted in Phase 11)
 > **Path resolution**: See [resolver.md](resolver.md) — Host × Target matrix from `AGENT_ADAPTERS`
 
 Runs the full mcp-adapter integration test matrix against registered adapters.
@@ -9,11 +8,11 @@ Runs the full mcp-adapter integration test matrix against registered adapters.
 ## Quick Verification
 
 ```bash
-npm run verify:deploy -- --agent <id>
+npm run verify:deploy -- --agent universal-mcp
 ```
 
 Checks: adapter creation → context → config loading → tool registration → session lifecycle.
-Pass: `✅ <Adapter> verification passed`.
+Pass: `✅ Universal MCP verification passed`.
 
 ## Full Test Matrix
 
@@ -90,39 +89,50 @@ npx vitest run tests/smoke/e2e-all-servers.test.ts --reporter=verbose
 
 **Pass**: 25/25.
 
-#### Step 5 — Adapter Integration Tests (Host × Target × Mode)
+#### Step 5 — Protocol Forwarder Tests (Phase 12)
+
+```bash
+# ProtocolSamplingForwarder unit tests (D-06: sampling forwarding via server.createMessage)
+npx vitest run __tests__/protocol-sampling-forwarder.test.ts --reporter=verbose
+
+# ProtocolElicitationForwarder unit tests (D-07: elicitation forwarding via server.elicitInput)
+npx vitest run __tests__/protocol-elicitation-forwarder.test.ts --reporter=verbose
+
+# Universal MCP server E2E tests (D-13: subprocess + real MCP Client)
+# Note: mcp-server-e2e.test.ts is created in Plan 12-04
+npx vitest run __tests__/mcp-server-e2e.test.ts --reporter=verbose
+```
+
+#### Step 6 — Adapter Integration Tests (Host × Target × Mode)
 
 The three dimensions are independent (D-16):
 
 | Dimension | Values | Default |
 |-----------|--------|---------|
-| Host | Qoder, Pi, Kilo, … | Current agent |
-| Target | kilo, pi, qoder, … | All AGENT_ADAPTERS |
+| Host | Pi, Universal MCP, … | Current agent |
+| Target | pi, universal-mcp | All AGENT_ADAPTERS |
 | Mode | in-process / spawn / mock | in-process |
 
-**Step 5a — Discover adapters**:
+**Step 6a — Discover adapters**:
 
 ```bash
 echo "=== Discovered adapters ==="
 grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabilities:)" | head -40
 ```
 
-**Step 5b — User selection**: AskUserQuestion for Host/Target/Mode (3D matrix).
+**Step 6b — User selection**: AskUserQuestion for Host/Target/Mode (3D matrix).
 
-**Step 5c — Run contract tests**:
+**Step 6c — Run contract tests**:
 
 ```bash
 npx vitest run __tests__/adapter-contract.test.ts --reporter=verbose
 ```
 
-Per-adapter tests (check file exists before running):
-- `npx vitest run __tests__/<id>-adapter-integration.test.ts --reporter=verbose`
-
-**Step 5d — Deployment wiring verification**:
+**Step 6d — Deployment wiring verification**:
 
 ```bash
-npm run verify:deploy  # all harnessed adapters
-npm run verify:deploy -- --agent qoder  # single adapter
+npm run verify:deploy                      # all harnessed adapters
+npm run verify:deploy -- --agent universal-mcp  # universal MCP server
 ```
 
 ### Report
@@ -140,7 +150,8 @@ Section 5B (Conversation):    ✅/⚠️/SKIP
 Proxy Unit Tests:             ✅ N/N
 DirectTools Unit+Integration: ✅ 24/24
 Section 6 (E2E):              ✅ 25/25
-Adapter Integration (Step 5): ✅ N/N
+Protocol Forwarders:           ✅ N/N
+Adapter Integration (Step 6): ✅ N/N
 Capability Gate:              Host=<current> × Target=<selected>
 
 Verdict: 🟢 ALL PASS
