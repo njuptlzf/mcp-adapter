@@ -757,22 +757,17 @@ export function createUniversalResolver(): AgentPathResolver {
 | A5 | The double conversion for elicitation (MCP → FormConfig → MCP) is acceptable | Common Pitfalls — Pitfall 3 | If the conversion loses information (e.g., field types not round-tripping correctly), elicitation forms may have missing or incorrect fields. The existing `convertMcpSchemaToPiForm()` and the new reverse converter must be tested for round-trip fidelity |
 | A6 | `scripts/kilo-mcp-entry.ts` is not referenced by package.json or tests and can be safely deleted | Runtime State Inventory | If it IS referenced somewhere (e.g., a CI script or documentation), deletion would break that reference |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **StoreAgentAdapter retention**
-   - What we know: D-04 lists `adapters/store-adapter.ts` for deletion, but the code_context section describes it as a "Reusable Asset" that "Could be retained (renamed) as the AgentAPI implementation for the universal-mcp registry entry."
-   - What's unclear: Does D-04's "Delete all per-agent adapter code" include the generic base class, or only the per-agent subclasses?
-   - Recommendation: The planner should ask the user to confirm. If StoreAgentAdapter is deleted, a new `InMemoryAdapter` must be created from the same code. The code evidence strongly supports retaining it.
+1. **StoreAgentAdapter retention** (RESOLVED — user confirmed full deletion)
+   - User decision: Delete StoreAgentAdapter entirely (D-04 clarified). The `universal-mcp` registry entry's factory and `bin/mcp-server.ts` each inline their own AgentAPI implementation. No shared adapter base class.
+   - Impact: `__tests__/store-adapter.test.ts` must also be deleted (it tests StoreAgentAdapter directly).
 
-2. **URL elicitation forwarding**
-   - What we know: D-07 says "URL elicitation (`elicitation.url`) is also forwarded if supported." The `UISystem.form` interface can't represent URL elicitation.
-   - What's unclear: How to forward URL elicitation through the existing `elicitation-handler.ts` which uses `ui.form()` for both form and URL modes.
-   - Recommendation: For Phase 12, implement form elicitation forwarding (via `ProtocolElicitationForwarder.form()`). URL elicitation can use the existing `handleUrlElicitation` code path (which opens a browser locally). True URL forwarding can be deferred or implemented as a separate handler. The "if supported" qualifier in D-07 allows this.
+2. **URL elicitation forwarding** (RESOLVED — form-only for Phase 12)
+   - Decision: Implement form elicitation forwarding only (via `ProtocolElicitationForwarder.form()`). URL elicitation uses the existing `handleUrlElicitation` code path. True URL forwarding deferred. The "if supported" qualifier in D-07 allows this.
 
-3. **init.ts modification depth**
-   - What we know: D-11 says "no config check" for Branch C, but init.ts checks `config.settings?.sampling`. The out-of-scope section says "init.ts — minimal modification only for forwarding support."
-   - What's unclear: Does "no config check" require modifying init.ts to bypass the check, or is it sufficient that the check passes by default?
-   - Recommendation: Use the approach of setting `ctx.hasUI = true` and providing forwarders on ctx. This satisfies all init.ts conditions without modifying init.ts. If the user has `sampling: false` in their config, that's an edge case — the planner should document it.
+3. **init.ts modification depth** (RESOLVED — no init.ts modification needed)
+   - Decision: Set `ctx.hasUI = true` and provide forwarders on `ctx.samplingProvider` / `ctx.ui.form`. This satisfies all init.ts conditions without modifying init.ts. Edge case: user explicitly sets `sampling: false` in config — documented as expected behavior (user opt-out).
 
 ## Environment Availability
 
