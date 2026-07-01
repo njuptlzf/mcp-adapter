@@ -244,6 +244,41 @@ When the §4.1 grep returns ≥1 hit in core source, the merge is **not blocked*
 
 For `manual` rows, accept upstream hunks unless they touch a function signature that generic code depends on — the canonical example is `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; that signature is frozen per D-07 and any upstream change to it is rejected (`git checkout --ours`).
 
+### 4.4 Same-function conflict resolution protocol (NEW, v3.1)
+
+When conflict hunk is in the same function (per §3.5 classification, "同文件 + 同一函数同一段"), agent MUST execute this 5-step protocol — no shortcuts:
+
+1. **Extract ours** — show the local version of the conflicting lines:
+   ```bash
+   git show :2:<file> | sed -n '<start>,<end>p'
+   ```
+
+2. **Extract theirs** — show the upstream version of the same lines:
+   ```bash
+   git show :3:<file> | sed -n '<start>,<end>p'
+   ```
+
+3. **View function context** — see the full function body for both versions to understand what the change is doing:
+   ```bash
+   git show :2:<file> | sed -n '<fn_start>,<fn_end>p'
+   ```
+
+4. **Classify merge mode** into one of 3 categories:
+   - **Append mode** — ours 在函数头加、theirs 在函数尾加 → 直接拼接（保留两侧）
+   - **Replace mode** — ours 替换函数中段、theirs 替换同一段 → 必须阅读代码决策
+   - **Wrap mode** — ours 在函数外包了 try/catch、theirs 在函数内加 validation → 嵌套合并
+
+5. **Document decision in commit body** — record the choice for future maintainers:
+   ```
+   upstream-merge: resolve <file> conflict
+   - function: <fn_name>
+   - mode: <append|replace|wrap>
+   - decision: <ours|theirs|merge|hybrid>
+   - rationale: <1-2 sentences>
+   ```
+
+Source: `docs/upstream-merge-retrospective.md` §2.3.2 (5-step analysis) + §3.1 P0-4 (P0 roadmap). Empirical example: the 3 hunks in `commands.ts` (L289, L367, L417) from the 2026-07-01 merge attempt were all "append mode" → direct concatenation preserved both sides; the L33-375 hunk in `index.ts` mcpAdapter was "replace mode" → required Phase 14 decomposition.
+
 ## 5. Checklist
 
 Run all 7 checks before declaring the upstream-merge flow complete. Each is a single command the agent can execute and inspect. Steps (a)–(f) gate the Step 1 merge commit on `main`; step (g) gates the Step 2 propagation into the working branch. A merge is not done until every item is recorded with PASS / N/A / FAIL.
