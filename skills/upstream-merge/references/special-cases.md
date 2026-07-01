@@ -1,6 +1,6 @@
 # Special cases registry
 
-Per Architecture C (decision **D-31**) this registry only enumerates files that cannot be resolved by the §3.2 12-category per-file default-resolution matrix. Files NOT listed here are resolved by the category defaults inlined in `SKILL.md` §3.2 — no need to add them to the registry.
+Per Architecture C (decision **D-31**) this registry only enumerates files that cannot be resolved by the §4.2 12-category per-file default-resolution matrix. Files NOT listed here are resolved by the category defaults inlined in `SKILL.md` §4.2 — no need to add them to the registry.
 
 Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The retired Phase 8 manifest `UPSTREAM-CHANGES.md` (51KB / 209 rows / repo root) is no longer maintained; if you are migrating from that file, this registry is its successor.
 
@@ -36,9 +36,9 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 
 **Status taxonomy** (5 values): `fork-only` (file exists only in fork, never in upstream) / `decoupled-wrapper` (fork wraps a Pi-specific concern behind a generic interface) / `deleted-in-fork` (file is in upstream, the fork removed it) / `sibling-config` (config file with both upstream and fork structural choices) / `framing-divergence` (doc file where fork framing differs from upstream).
 
-**Decision values** (4): `ours` (always keep fork version on conflict) / `manual` (line-by-line review) / `assess` (run §3.1 grep + intent alignment) / `wraps-theirs` (accept upstream, wrap behind generic interface in a follow-up commit).
+**Decision values** (4): `ours` (always keep fork version on conflict) / `manual` (line-by-line review) / `assess` (run §4.1 grep + intent alignment) / `wraps-theirs` (accept upstream, wrap behind generic interface in a follow-up commit).
 
-> `wraps-theirs` is reserved for entries where the §3.2b follow-up flow (accept-upstream + wrap) is committed up-front in the registry row itself, rather than invoked at merge time. As of Phase 9 no entries use it — all current entries commit to one of the merge-time decisions above. If a future conflict pattern matches the §3.2b flow exactly, prefer invoking §3.2b at merge time over pre-committing `wraps-theirs` to the registry, since the §3.2b follow-up commits are easier to audit alongside the merge commit than as separate registry annotations.
+> `wraps-theirs` is reserved for entries where the §4.2b follow-up flow (accept-upstream + wrap) is committed up-front in the registry row itself, rather than invoked at merge time. As of Phase 9 no entries use it — all current entries commit to one of the merge-time decisions above. If a future conflict pattern matches the §4.2b flow exactly, prefer invoking §4.2b at merge time over pre-committing `wraps-theirs` to the registry, since the §4.2b follow-up commits are easier to audit alongside the merge commit than as separate registry annotations.
 
 ## How to add an entry
 
