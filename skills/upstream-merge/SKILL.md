@@ -113,6 +113,34 @@ npx tsx scripts/upstream-divergence.ts --no-color
 
 Files NOT in the registry are resolved by the 12-category per-file default-resolution matrix inlined in §4.2 below — no need to add them to the registry.
 
+### 3.5 Conflict hunk independence check (NEW, v3.1)
+
+Before resolving any conflict, classify each hunk's independence. This separates "easy wins" (different function in same file) from "needs agent judgment" (same function, same section):
+
+```bash
+# 列出所有 conflict hunk 所在函数
+git diff --name-only --diff-filter=U | while read f; do
+  awk '
+    /^<<<<<<< / { hunk=1; start=NR; next }
+    /^=======/ { hunk=0; sep=NR; next }
+    /^>>>>>>> / { hunk=0; end=NR; next }
+    hunk && match($0, /^(export )?(async )?function ([A-Za-z_][A-Za-z0-9_]*)/, m) { fn=m[2] }
+    /^>>>>>>> / { print FILENAME ": hunk@" start "-" end " in function: " fn }
+  ' "$f"
+done
+```
+
+**Decision matrix** (4 categories, ordered from easiest to hardest):
+
+| hunk 独立性 | 解决策略 | 自动化程度 |
+|------------|---------|----------|
+| 同文件 + 不同函数 | 保留两侧（拼接）| ✅ 全自动 |
+| 同文件 + 同一函数不同段 | 视内容（追加/替换/包装 3 模式）| 🟡 半自动 |
+| 同文件 + 同一函数同一段 | 强制 agent 阅读 + 决策（§4.4）| 🟡 半自动 |
+| 同文件 + import 区域 | 检查 package 版本兼容性 | ✅ 全自动 |
+
+Source: `docs/upstream-merge-retrospective.md` §1.3 (4 类别分类) + §2.2.2 (用户问题 2 回答).
+
 ## 4. Decision tree
 
 Walk these steps in order, branching on the manifest row for each changed file.
