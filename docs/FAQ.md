@@ -98,7 +98,7 @@ graph TB
         CUSTOM_RT[Custom Agent Runtime]
     end
 
-    subgraph "部署层 — deploy-mcp-adapter Skill"
+    subgraph "部署层 — mcp-adapter Skill (Phase 2)"
         SKILL["SKILL.md<br/>Phase 0: 识别目标 Agent<br/>Phase 1: 验证前置条件<br/>Phase 2: 分支执行部署<br/>Phase 3: 验证持久化<br/>Phase 4: 注册 AGENT_ADAPTERS"]
         SKILL -->|"Branch A: Pi"| DEPLOY_PI["pi install npm:pi-mcp-adapter<br/>一条命令"]
         SKILL -->|"Branch B: Qoder"| DEPLOY_QODER["SDK bridge<br/>+ SessionStart hook"]
@@ -247,7 +247,7 @@ graph TB
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    deploy-mcp-adapter Skill                      │
+│                    mcp-adapter Skill (Phase 2)                    │
 │                                                                 │
 │  职责：部署流程通用化                                           │
 │  • 识别目标 Agent                                               │

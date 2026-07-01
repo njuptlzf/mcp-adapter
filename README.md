@@ -10,21 +10,20 @@ Use MCP servers without burning your context window, from Pi today and from any 
 
 ## Supported Agents
 
-Pi is a first-class supported adapter (not legacy). New agents plug in through `AGENT_ADAPTERS` in `interfaces/agent-api.ts` — adding a new adapter = one descriptor push, no other code changes.
+Pi is a first-class supported adapter (Branch A, native extension). **Any other MCP-compatible agent** works via Branch C — the universal `mcp-server` stdio entry point. No per-agent adapter code is needed; the server discovers client capabilities at runtime via MCP protocol.
 
-The **single source of truth** for supported adapters is the `AGENT_ADAPTERS` array in [`interfaces/agent-api.ts`](interfaces/agent-api.ts). The table below is a human-readable snapshot; when in doubt, read the registry directly:
+The **single source of truth** for the adapter registry is the `AGENT_ADAPTERS` array in [`interfaces/agent-api.ts`](interfaces/agent-api.ts). It contains two entries: `pi` (Branch A) and `universal-mcp` (Branch C).
 
-```bash
-# Show all currently registered adapters
-grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|capabilities:)" | head -40
-```
+| Branch | Agent | Config path | Integration | Sampling | Elicitation |
+|--------|-------|-------------|-------------|----------|-------------|
+| Branch A | Pi | `~/.pi/agent/mcp.json` | Native Pi extension (`pi install`) | ✅ In-process (`PiSamplingProvider`) | ✅ Pi UI forms |
+| Branch C | Any MCP-compatible agent | `~/.config/mcp/mcp.json` or `.mcp.json` | Universal MCP stdio server (`mcp-server`) | Runtime-discovered | Runtime-discovered |
 
-| Agent | Status | Default config path | Path resolver | Sampling | Renderer | Verified at |
-|-------|--------|---------------------|---------------|----------|----------|-------------|
-| Pi | ✅ First-class | `~/.pi/agent/mcp.json` | `createPiResolver()` | ✅ | ✅ | [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) |
-| Qoder | ✅ First-class | `~/.qoder/agent/mcp.json` | `createQoderResolver()` | ✅ | ❌ (notify-only) | [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) |
-| Kilo | ✅ MCP stdio server | `~/.kilo/mcp.json` | `createKiloResolver()` | ❌ | ❌ | `bin/kilo-mcp-server.ts` |
-| Claude, Cursor, others | 🟡 Adapter pattern supported — bring your own `AgentAPI` implementation | TBD | TBD | TBD | TBD | TBD |
+> **Branch C is a complete implementation** (D-08): the `mcp` proxy tool is always available.
+> Sampling is forwarded via MCP `sampling/createMessage` reverse call when the agent
+> declares `sampling` capability. Elicitation is forwarded via `elicitation/create` when
+> the agent declares `elicitation.form` capability. Capabilities are discovered at runtime
+> — no static matrix needed.
 
 See [Verification](#verification) below for the latest matrix results.
 
@@ -48,9 +47,21 @@ pi install npm:pi-mcp-adapter
 
 Restart Pi after installation. The rest of this README focuses on the Pi integration; for other agents see [Universal Adapter](#universal-adapter).
 
-### For other agents
+### For other agents (Branch C — universal MCP stdio server)
 
-This package ships a small agent-agnostic surface ([`AgentAPI` / `UISystem`](#the-shape)). To plug it into a different coding agent, write a thin adapter that implements those interfaces and instantiate the MCP machinery through it. See the full [Universal Adapter](#universal-adapter) section for a working mock example.
+Any MCP-compatible agent can use the universal `mcp-server` bin entry. Register it in the agent's MCP config:
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "mcp-server"
+    }
+  }
+}
+```
+
+The server is agent-agnostic — it speaks MCP protocol and discovers client capabilities at runtime. Sampling and elicitation are forwarded via MCP Server→Client reverse calls when the agent declares those capabilities. See [Universal Adapter](#universal-adapter) for the `AgentAPI` / `UISystem` interface details.
 
 ## What happens on first run (Pi)
 
@@ -81,12 +92,12 @@ export default mcpAdapter(pi); // Pi's ExtensionAPI — backward-compatible
 ```typescript
 import { createMcpAdapter } from "pi-mcp-adapter";
 import { PiAdapter } from "pi-mcp-adapter/adapters/pi-adapter";
-import { QoderAdapter } from "pi-mcp-adapter/adapters/qoder-adapter";
 
-// Pick the adapter matching your agent
-const adapter = process.env.MCP_AGENT_ID === "qoder"
-  ? new QoderAdapter()
-  : new PiAdapter(pi); // or your own AgentAPI implementation
+// For Pi (Branch A): use PiAdapter
+const adapter = new PiAdapter(pi);
+
+// For any other MCP-compatible agent (Branch C): use the `mcp-server` bin entry
+// — no adapter code needed, just register it in the agent's MCP config.
 
 createMcpAdapter(adapter, ctx, config, cache); // works for any adapter
 ```
@@ -159,7 +170,7 @@ Latest matrix (auto-refreshed by the reporter):
 | Adapter | Section 4 (MockAgent) | Section 5 (Token Bench) | Section 5B (Conv Sim) | Section 6 (E2E) |
 |---------|------------------------|--------------------------|----------------------|------------------|
 | Pi      | 44/44                  | 94% savings 🟡            | 56% savings 🟡        | 25/25            |
-| Qoder   | 44/44                  | 94% savings 🟡            | 56% savings 🟡        | 25/25            |
+| Universal MCP | 44/44             | 94% savings 🟡            | 56% savings 🟡        | 25/25            |
 
 🟡 = baseline-bound (fixture-determined, identical across adapters — see `docs/mcp-adapter-token-savings.md`).
 

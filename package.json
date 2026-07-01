@@ -7,8 +7,7 @@
   "author": "Nico Bailon",
   "bin": {
     "pi-mcp-adapter": "cli.js",
-    "kilo-mcp-server": "bin/kilo-mcp-server.ts",
-    "qoder-mcp-bridge": "bin/qoder-mcp-bridge.ts"
+    "mcp-server": "bin/mcp-server.ts"
   },
   "scripts": {
     "test": "npm run test:prebuild && vitest run",

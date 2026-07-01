@@ -3,7 +3,7 @@
 > Repository: https://github.com/njuptlzf/mcp-adapter  
 > System Under Test: General adaptation capability of mcp-adapter  
 > Executing Agent: Any agent (kilo, qodercli, Claude Code, etc.)
-> **Canonical Runbook**: `skills/mcp-adapter-test/SKILL.md` — use `/mcp-adapter-test` to execute
+> **Canonical Runbook**: `skills/mcp-adapter/SKILL.md` (Phase 3: Verify) — use `/mcp-adapter` to execute
 
 ---
 
@@ -551,7 +551,7 @@ Agent 执行以下检查：
 
 ### 6.1 创建 `.mcp.json`（Agent 必须执行）
 
-详见 `skills/mcp-adapter-test/SKILL.md` Phase 4 Step 0 — 包含完整模板。
+详见 `skills/mcp-adapter/references/verify.md` Phase 4 Step 0 — 包含完整模板。
 
 > 此文件不是项目预设的。Agent 在执行 E2E 前按 skill 中的模板创建于项目根目录。
 
@@ -679,8 +679,8 @@ mcp tool available: <YES / NO>
 
 ## 7. Execution Order
 
-> **Canonical runbook**: `skills/mcp-adapter-test/SKILL.md` — 包含完整执行命令和 pass criteria。
-> 本节仅提供概要。执行测试时请使用 `/mcp-adapter-test` skill。
+> **Canonical runbook**: `skills/mcp-adapter/references/verify.md` — 包含完整执行命令和 pass criteria。
+> 本节仅提供概要。执行测试时请使用 `/mcp-adapter` skill（Phase 3: Verify）。
 
 ```bash
 # 1. Install dependencies

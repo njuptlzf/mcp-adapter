@@ -5,7 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [Unreleased] - Universal MCP Stdio Server
+
+### Breaking Changes
+
+- **`kilo-mcp-server` renamed to `mcp-server`** — no backward compatibility alias kept (D-10). Update any agent MCP config that references `kilo-mcp-server` to use `mcp-server` instead.
+- **`qoder-mcp-bridge` deleted entirely** (D-04). The Qoder SDK bridge approach is removed. Use the universal `mcp-server` bin entry instead.
+- **Per-agent adapters deleted** (D-04): `KiloAdapter`, `QoderAdapter`, `StoreAgentAdapter`, `QoderSamplingProvider`, `QoderRenderer` — all removed. The universal MCP stdio server replaces them.
+- **`createKiloResolver` and `createQoderResolver` removed** from `interfaces/agent-paths.ts` (D-02). Use `createUniversalResolver()` instead, which returns `~/.config/mcp/mcp.json` as the global config path.
+
+### Added
+
+- **Universal MCP stdio server** (`bin/mcp-server.ts`) — agent-agnostic stdio server that speaks MCP protocol (D-05). Replaces the per-agent `kilo-mcp-server` and `qoder-mcp-bridge` entry points.
+- **`ProtocolSamplingForwarder`** — implements `SamplingProvider` via MCP Server→Client `sampling/createMessage` reverse call (D-06). Injected when the connecting agent declares `sampling` capability.
+- **`ProtocolElicitationForwarder`** — implements `UISystem.form` via MCP Server→Client `elicitation/create` reverse call (D-07). Injected when the connecting agent declares `elicitation.form` capability.
+- **Runtime capability discovery** via `server.getClientCapabilities()` (D-11) — the server checks client-declared capabilities at connection time and injects forwarders accordingly. No config-based gating; pure forwarding (D-11).
+
+### Changed
+
+- **`AGENT_ADAPTERS` registry simplified** to 2 entries: `pi` (Branch A) and `universal-mcp` (Branch C). Kilo and Qoder entries removed (D-01).
+- **Config path discovery universalized** (D-02): `--config` flag > `MCP_CONFIG_PATH` env > `.mcp.json` in cwd > `~/.config/mcp/mcp.json`. No agent-specific global paths (`~/.kilo/mcp.json`, `~/.qoder/agent/mcp.json` removed).
+- **`package.json` bin** reduced from 3 entries to 2: `pi-mcp-adapter` + `mcp-server` (D-10).
+- **`vitest.config.ts`** cleaned of coverage thresholds for deleted adapter files.
+
+### Migration
+
+1. **Replace `kilo-mcp-server` with `mcp-server`** in your agent's MCP config:
+   ```json
+   {
+     "mcpServers": {
+       "mcp-adapter": {
+         "command": "mcp-server"
+       }
+     }
+   }
+   ```
+2. **Remove any Qoder-specific bridge setup** — delete `qoder-mcp-bridge` references and SessionStart hooks. Use `mcp-server` instead.
+3. **Config path is now universal**: `--config` > `MCP_CONFIG_PATH` > `.mcp.json` > `~/.config/mcp/mcp.json`. No agent-specific paths needed.
 
 ## [2.9.0] - 2026-06-04
 

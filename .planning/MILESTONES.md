@@ -1,5 +1,22 @@
 # Milestones
 
+## v3.0 v3.0 (Shipped: 2026-07-01)
+
+**Phases completed:** 3 phases, 9 plans, 16 tasks
+
+**Key accomplishments:**
+
+- Extracted shared StoreAgentAdapter base class from QoderAdapter (346→157 lines) and KiloAdapter (298→132 lines), eliminating ~350 lines of duplicated in-memory store logic via STORE-02 constructor injection.
+- ✅ Complete
+- Updated upstream-merge special-cases registry with 3 new Phase 10 entries (store-adapter.ts fork-only, qoder/kilo-adapter decoupled-wrapper), verified full 590-test suite + TypeScript compilation + parametric contract tests across all 3 agents.
+- Unified mcp-adapter skill shipped with deploy-examples.md migration, broken-anchor fixes, complete fork-only registry (7 entries), and kilo resolver fix — all committed with upstream:check exit 0
+- 1. [Rule 3 - Blocking] ElicitRequestFormParams type cast for elicitInput params
+- Created `__tests__/agent-adapters-registry.test.ts` with 23 tests verifying the simplified registry structure — entry count, IDs, factory methods, resolver, capabilities, createVerificationContext, and fresh-object-per-call (T-12-05). 18 tests failed with the old 3-entry registry.
+- InlineMcpAdapter class
+- D-13: E2E layer of dual-layer testing.
+
+---
+
 ## v2.0 Multi-Agent Adapter Completion (Shipped: 2026-06-23, released as git tag `v2.0.0-universal`)
 
 **Release tag:** `v2.0.0-universal` (annotated, SHA `84bf7e5` → commit `1f493b1`). SemVer pre-release derivative of upstream `v2.0.0` (`5e1be49`). Naming rationale: see `.planning/STATE.md` → `## Naming Decisions` (collision with upstream `v2.0.0` namespace resolved by switching to `vX.Y.Z-{fork-identifier}` pattern).

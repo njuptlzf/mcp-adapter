@@ -17,12 +17,8 @@
 
 import type { SamplingProvider } from "./sampling.ts";
 import type { AgentPathResolver } from "./agent-paths.ts";
-import { createKiloResolver, createPiResolver, createQoderResolver } from "./agent-paths.ts";
+import { createPiResolver, createUniversalResolver } from "./agent-paths.ts";
 import { PiAdapter } from "../adapters/pi-adapter.ts";
-import { QoderAdapter } from "../adapters/qoder-adapter.ts";
-import { adaptQoderContext } from "../adapters/qoder-adapter.ts";
-import { KiloAdapter } from "../adapters/kilo-adapter.ts";
-import { adaptKiloContext } from "../adapters/kilo-adapter.ts";
 
 /** A registered tool's information, as exposed by `AgentAPI.getAllTools`. */
 export interface ToolInfo {
@@ -196,14 +192,71 @@ export interface AgentAdapterDescriptor {
  */
 export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
 	{
-		id: "kilo",
-		displayName: "Kilo",
-		factory: () => new KiloAdapter(),
-		resolverFactory: createKiloResolver,
-		envHints: [{ envVar: "MCP_AGENT_DIR" }],
+		id: "universal-mcp",
+		displayName: "Universal MCP",
+		// D-04: inline AgentAPI implementation — no shared base class, no
+		// adapter base class import. Each entry point has its own inline
+		// implementation. This factory provides in-memory tool/command/flag
+		// storage and event simulators for createMcpAdapter.
+		factory: () => {
+			const tools = new Map<string, ToolRegistration>();
+			const commands = new Map<string, CommandConfig>();
+			const flags = new Map<string, FlagConfig & { value?: string }>();
+			const handlers = new Map<string, Set<(...args: unknown[]) => unknown>>();
+
+			const adapter: AgentAPI & {
+				attachChannel: (channel: unknown) => void;
+				fireSessionStart: (ctx: AgentContext) => Promise<void>;
+				fireSessionShutdown: () => Promise<void>;
+			} = {
+				registerTool(tool: ToolRegistration): void {
+					tools.set(tool.name, tool);
+				},
+				registerCommand(name: string, config: CommandConfig): void {
+					commands.set(name, config);
+				},
+				registerFlag(name: string, config: FlagConfig): void {
+					flags.set(name, { ...config });
+				},
+				on(event: string, handler: (...args: unknown[]) => void | Promise<void>): void {
+					let set = handlers.get(event);
+					if (!set) {
+						set = new Set();
+						handlers.set(event, set);
+					}
+					set.add(handler as (...args: unknown[]) => unknown);
+				},
+				getAllTools(): ToolInfo[] {
+					return [...tools.values()].map((t) => ({ name: t.name }));
+				},
+				getFlag(name: string): string | undefined {
+					return flags.get(name)?.value;
+				},
+				// No-op: messages go to stderr in bin/mcp-server.ts, not here.
+				// This factory is for testing / parametric contract tests.
+				sendMessage(_message: unknown, _options?: unknown): void {},
+				// Mock for testing — does not spawn a real process.
+				// T-10-02 pattern: no path from MCP tool result to exec.
+				async exec(_command: string, _args: string[]): Promise<unknown> {
+					return { code: 0, stdout: "", stderr: "" };
+				},
+				// No-op stubs for contract test compatibility.
+				// createMcpAdapter calls adapter.on("session_start", ...) but
+				// does not call fireSessionStart directly; these are provided
+				// for any test that drives session lifecycle events.
+				attachChannel(_channel: unknown): void {},
+				async fireSessionStart(_ctx: AgentContext): Promise<void> {},
+				async fireSessionShutdown(): Promise<void> {},
+			};
+			return adapter;
+		},
+		resolverFactory: createUniversalResolver,
+		envHints: [{ envVar: "MCP_CONFIG_PATH" }],
+		// Static capabilities — actual capabilities are runtime-discovered
+		// via server.getClientCapabilities() when an MCP Client connects.
 		capabilities: { ui: false, sampling: false, renderer: false },
-		createVerificationContext: (input, adapter) =>
-			adaptKiloContext(input, adapter as KiloAdapter),
+		// universal-mcp verification context: minimal, no agent-specific runtime needed.
+		createVerificationContext: (input, _adapter) => ({ cwd: input.cwd, hasUI: input.hasUI }),
 	},
 	{
 		id: "pi",
@@ -234,15 +287,5 @@ export const AGENT_ADAPTERS: AgentAdapterDescriptor[] = [
 		resolverFactory: createPiResolver,
 		envHints: [{ envVar: "PI_CODING_AGENT_DIR" }],
 		capabilities: { ui: true, sampling: true, renderer: true },
-	},
-	{
-		id: "qoder",
-		displayName: "Qoder",
-		factory: () => new QoderAdapter(),
-		resolverFactory: createQoderResolver,
-		envHints: [{ envVar: "MCP_AGENT_DIR" }],
-		capabilities: { ui: false, sampling: true, renderer: false },
-		createVerificationContext: (input, adapter) =>
-			adaptQoderContext(input, adapter as QoderAdapter),
 	},
 ];
