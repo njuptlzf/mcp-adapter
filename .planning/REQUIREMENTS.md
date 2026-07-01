@@ -22,18 +22,18 @@ The retrospective produced a 4-question reflection + P0/P1/P2 improvement plan. 
 
 ### Category: MERGE (upstream-merge policy)
 
-- [ ] **MERGE-01**: User can run `git merge upstream/main` with default `--theirs` policy in `assess` rows (SKILL.md §4.1)
-- [ ] **MERGE-02**: SKILL.md §4.2b reduces from 5-step mandatory follow-up to 2-step soft follow-up, with explicit `gh` CLI unavailability fallback
-- [ ] **MERGE-03**: User gets conflict hunk independence classification via new §3.5 (4 categories: different function / same-function-different-section / same-function-same-section / import-region)
-- [ ] **MERGE-04**: Agent follows 5-step same-function conflict resolution protocol via new §4.4 (extract ours/theirs → view function context → classify merge mode → document decision in commit body)
+- [x] **MERGE-01**: User can run `git merge upstream/main` with default `--theirs` policy in `assess` rows (SKILL.md §4.1)
+- [x] **MERGE-02**: SKILL.md §4.2b reduces from 5-step mandatory follow-up to 2-step soft follow-up, with explicit `gh` CLI unavailability fallback
+- [x] **MERGE-03**: User gets conflict hunk independence classification via new §3.5 (4 categories: different function / same-function-different-section / same-function-same-section / import-region)
+- [x] **MERGE-04**: Agent follows 5-step same-function conflict resolution protocol via new §4.4 (extract ours/theirs → view function context → classify merge mode → document decision in commit body)
 
 ### Category: ARCH (file-level architecture)
 
-- [ ] **ARCH-02**: `elicitation-handler.ts` (286 lines) decomposed into 3 files: `elicitation/form-handler.ts`, `elicitation/url-handler.ts`, `elicitation/coerce.ts`
-- [ ] **ARCH-03**: `proxy-modes.ts` (835 lines) decomposed into 4 files: `proxy/manager.ts`, `proxy/stdio.ts`, `proxy/http.ts`, `proxy/sse.ts`
-- [ ] **ARCH-04**: `__tests__/init-elicitation.test.ts` (98 lines, 3 conflict hunks) decomposed into 3 files: `init-elicitation-success.test.ts`, `init-elicitation-error.test.ts`, `init-elicitation-cancel.test.ts`
-- [ ] **ARCH-05**: All decomposed files maintain single-responsibility (each file <350 lines, one logical concern)
-- [ ] **ARCH-06 (NEW, replaces retired ARCH-01)**: `adapters/entry.ts` (381 lines, `createMcpAdapter` 324 lines) — extract module-level helpers where closure-independent + add intra-function section dividers. Target: file ≤350 lines, `createMcpAdapter` ≤300 lines.
+- [x] **ARCH-02**: `elicitation-handler.ts` (286 lines) decomposed into 3 files: `elicitation/form-handler.ts`, `elicitation/url-handler.ts`, `elicitation/coerce.ts`
+- [x] **ARCH-03**: `proxy-modes.ts` (835 lines) decomposed into 4 files: `proxy/manager.ts`, `proxy/stdio.ts`, `proxy/http.ts`, `proxy/sse.ts`
+- [x] **ARCH-04**: `__tests__/init-elicitation.test.ts` (98 lines, 3 conflict hunks) decomposed into 3 files: `init-elicitation-success.test.ts`, `init-elicitation-error.test.ts`, `init-elicitation-cancel.test.ts`
+- [x] **ARCH-05**: All decomposed files maintain single-responsibility (each file <350 lines, one logical concern)
+- [x] **ARCH-06 (NEW, replaces retired ARCH-01)**: `adapters/entry.ts` (381 lines, `createMcpAdapter` 324 lines) — extract module-level helpers where closure-independent + add intra-function section dividers. Target: file ≤350 lines, `createMcpAdapter` ≤300 lines.
 
 ### Category: ARCH-RETIRED
 
@@ -41,9 +41,9 @@ The retrospective produced a 4-question reflection + P0/P1/P2 improvement plan. 
 
 ### Category: CI (defensive continuous integration)
 
-- [ ] **CI-01**: GitHub Actions workflow detects Pi-coupling re-introduction in `src/` (excluding `adapters/`, `types/`, `__tests__/`)
-- [ ] **CI-02**: `scripts/upstream-divergence.ts` extended to output JSON with `hunk-independence` field (4 categories from MERGE-03)
-- [ ] **CI-03**: Local `npm run predict-conflicts` script (or similar) runs 3-way diff to pre-identify potential conflicts before merge
+- [x] **CI-01**: GitHub Actions workflow detects Pi-coupling re-introduction in `src/` (excluding `adapters/`, `types/`, `__tests__/`)
+- [x] **CI-02**: `scripts/upstream-divergence.ts` extended to output JSON with `hunk-independence` field (4 categories from MERGE-03)
+- [x] **CI-03**: Local `npm run predict-conflicts` script (or similar) runs 3-way diff to pre-identify potential conflicts before merge
 
 ## Out of Scope (Explicit Exclusions)
 
