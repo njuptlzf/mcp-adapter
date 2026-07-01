@@ -457,6 +457,46 @@ When conflict hunk is in the same function, agent MUST execute 5-step:
 
 **预计工作量**: 1-2 小时
 
+### 3.2.1 Fork-only 代码 L1/L2/L3 决策矩阵（2026-07-01 重新设计）
+
+> **背景**: 用户的洞察——"fork 引入的独立代码应该独立成文件，避免与上游共享文件产生冲突"。
+> 通过扫描 `git log upstream/main..main`（249 个 fork-only commits, 278 个 diverged files），
+> 找到真正应该独立的代码段，而不是仅分析冲突的 11 个文件。
+
+**全 fork 引入代码分类**：
+
+| 类别 | 文件数 | 性质 | 行动 |
+|------|--------|------|------|
+| **Fork-ONLY 新文件** | 233 | fork 全新引入，✅ 已是独立文件 | 无需重构 |
+| **Fork-MODIFIED upstream files** | 45 | 候选——fork 在 upstream 文件里加的代码段 | 见 L1/L2/L3 分类 |
+
+**L1/L2/L3 决策矩阵**（fork-modified upstream files 的 45 个）：
+
+| 层 | 类别 | 数量 | 策略 | 例子 |
+|----|------|------|------|------|
+| **L1** | REPLACEMENTS（Phase 3 抽象改造）| 9 | ❌ **接受冲突风险**——核心抽象，撤回 = 撤销 Phase 3 universal 目标 | `init.ts`, `commands.ts`, `proxy-modes.ts`, `direct-tools.ts`, `elicitation-handler.ts`, `config.ts`, `types.ts`, `sampling-handler.ts`, `tool-result-renderer.ts` |
+| **L2** | ADDITIONS（fork 加 universal 段）| 8 | 🟡 **逐文件判断**——若 fork-only 段显著则抽到独立文件 | `agent-dir.ts` (+4), `ui-session.ts` (-1), `ui-resource-handler.ts` (-1), `mcp-panel.ts` (-3), `mcp-setup-panel.ts` (-4), `mcp-auth-flow.ts` (-97 ✅), `mcp-oauth-provider.ts` (-47 ✅), `server-manager.ts` (-49 ✅) |
+| **L3** | TESTS（fork universal 测试）| ~10 | ✅ 已规划——按 Plan 14-02/03/04 拆分 | `__tests__/init-elicitation.test.ts` 等 5+ 文件 |
+
+**关键洞察**：
+
+1. **L1（9 个 REPLACEMENTS）**是 Phase 3 抽象改造的"已完成投资"——**不可撤回**。
+   按 SKILL.md §4.4 同函数 5-step 协议处理合并冲突。
+
+2. **L2（8 个 ADDITIONS）**大部分已经被 Phase 12"删除 per-agent code"工作**最小化**（5/8 的 delta 是负数）。
+   仅 3 个文件（`agent-dir.ts`, `ui-session.ts`, `ui-resource-handler.ts`）的 fork 改动是"加 universal 段"——但 delta 都很小（+4/-1/-1 行），**不值得抽出**。
+
+3. **L3（~10 个 TESTS）**按 Plan 14-04 拆 init-elicitation 即可。
+
+**新原则**（应用到未来 fork 引入代码）：
+
+> **当 fork 引入新功能时，必须是"独立文件"模式**：
+> - ✅ 创建 `adapters/<new-agent>.ts`，不是修改 `adapters/entry.ts`
+> - ✅ 创建 `__tests__/<new-agent>.test.ts`，不是扩展现有 `__tests__/init-*.test.ts`
+> - ✅ 通过 `interfaces/agent-api.ts` 抽象扩展，不是直接 import Pi
+>
+> **目标**：把冲突粒度从"行级/函数级"推到**"文件级"**——这是冲突解决的最高效路径。
+
 ### 3.3 P2 — 长期（2-4 周内）
 
 #### P2-1: 类型边界守卫

@@ -292,3 +292,72 @@ Run all 7 checks before declaring the upstream-merge flow complete. Each is a si
 - **(g) Step 2 propagation complete (skipped if working branch is `main`)** — `git checkout <working-branch> && git merge main` succeeds as a fast-forward or a clean small merge. The working branch now contains the upstream changes from Step 1; if conflicts appear, they are fork-vs-fork, not upstream-vs-fork, and the resolution strategy is the fork's own (consult the relevant Phase plan, not the §4 decision tree). After Step 2, re-run (c) and (d) on the working branch to confirm the propagated state still builds and tests pass.
 
 When steps (a)–(f) PASS, push the merge branch and open a PR per the standard fork workflow (see `references/pi-coupling-markers.md` §"PR template" for the body). When step (g) also PASS, the upstream-merge flow is fully complete on both `main` and the working branch.
+
+## 6. Fork architecture principles (NEW, v3.1)
+
+> **Purpose**: Prevent future merge conflicts at the source, not just resolve them better.
+> Source: User insight 2026-07-01 ("fork 引入的代码，如果是独立的，应该独立成文件") + retrospective §3.2.1 L1/L2/L3 decision matrix.
+
+### 6.1 Core principle
+
+**When introducing fork-only code, ALWAYS prefer "独立文件" over "修改 upstream 文件".**
+
+The conflict resolution cost grows with granularity:
+
+| 粒度 | 冲突表现 | 解决成本 |
+|------|---------|---------|
+| 文件级 | 整个文件 conflict | 🟢 1 行 |
+| 段落级 | 文件内某段 conflict | 🟡 需 §4.4 5 步 |
+| 函数级 | 同一函数内 conflict | 🟠 需 §4.4 5 步 |
+| 行级大块 | 同一函数 343 行同时被改 | 🔴 灾难 |
+
+**Target: 把所有 fork 引入的独立代码推到"文件级"粒度。**
+
+### 6.2 L1/L2/L3 decision matrix (for current fork state)
+
+> Full matrix in `docs/upstream-merge-retrospective.md` §3.2.1.
+
+| Layer | Category | Action |
+|-------|----------|--------|
+| **L1** | REPLACEMENTS（9 个 Phase 3 抽象改造）| **接受冲突**——撤回 = 撤销 universal 目标 |
+| **L2** | ADDITIONS（8 个 fork 加 universal 段）| 大部分已优化（Phase 12 删除 per-agent）；剩余不值得抽 |
+| **L3** | TESTS（~10 个 fork universal 测试）| 按 Plan 14-04 拆 init-elicitation |
+
+### 6.3 Future-proofing rules (apply to all new fork code)
+
+When adding new fork-only functionality:
+
+1. **New agent adapter** → create `adapters/<new-agent>.ts`, NOT modify `adapters/entry.ts`
+2. **New test scenario** → create `__tests__/<new-scenario>.test.ts`, NOT extend existing `__tests__/init-*.test.ts`
+3. **New abstract type** → extend `interfaces/agent-api.ts`, NOT import Pi types directly in core
+4. **New universal helper** → create `adapters/<helper>.ts` or `utils/<helper>.ts`, NOT add as inline closure in `entry.ts`
+5. **New fork-only documentation** → create `docs/<new-topic>.md`, NOT extend `docs/upstream-merge-retrospective.md` in place (use references + cross-links)
+
+**Anti-pattern**: Adding a new `registerCommand` or `registerTool` call inline in `adapters/entry.ts` `createMcpAdapter` body. This creates future merge conflict at the function level (243-line function body).
+
+**Correct pattern**: Create a new file like `adapters/commands/<new-command>.ts` exporting a `setup<NewCommand>(agentapi, getState, getInitPromise)` function, then call that function from `createMcpAdapter`.
+
+### 6.4 Pre-commit guardrail (CI in Phase 15)
+
+Phase 15 P2-3 will add a CI check that runs:
+
+```bash
+# Count: new files vs modified files in this PR
+new_files=$(git diff --name-only --diff-filter=A origin/main...HEAD | wc -l)
+modified_files=$(git diff --name-only --diff-filter=M origin/main...HEAD | wc -l)
+
+# Warn if too many modifications relative to new files
+# (suggests inline additions rather than new file extractions)
+ratio=$(echo "scale=2; $modified_files / ($new_files + 1)" | bc)
+if (( $(echo "$ratio > 2.0" | bc -l) )); then
+  echo "⚠ High modify-to-new ratio: $ratio. Consider extracting independent code to new files."
+fi
+```
+
+**Target ratio**: ≤ 2.0 modifications per new file. If exceeded, PR review should consider whether fork code could be extracted to a new file.
+
+### 6.5 Cross-references
+
+- `docs/upstream-merge-retrospective.md` §3.2.1 — full L1/L2/L3 matrix with empirical data (249 fork-only commits, 278 diverged files)
+- `docs/upstream-merge-retrospective.md` §2.4 — multi-perspective reflection on conflict granularity
+- SKILL.md §1 — Two-step git merge flow (the merge strategy that this principle supports)
