@@ -361,6 +361,7 @@ Plans:
 **Requirements**: MERGE-01, MERGE-02, MERGE-03, MERGE-04
 **Depends on:** Phase 12
 **Plans:** 4/4 plans complete (13-01, 13-02, 13-03, 13-04) + 1 verification plan (13-05)
+**Status:** ✅ COMPLETE (5 atomic commits: ebb7ed8, d48bf3c, d5341af, 872e55a, 2a9da9b; SKILL.md +§3.5 +§4.2b +§4.4 +§5(b) updated; pi-coupling-markers.md advisory; 528/528 tests pass)
 
 Success criteria:
 
@@ -378,6 +379,7 @@ Success criteria:
 **Requirements**: ARCH-02, ARCH-03, ARCH-04, ARCH-05, **ARCH-06 (new)**
 **Depends on:** Phase 13 (so new conflict-resolution protocols can be applied to subsequent merges)
 **Plans:** 1/4 plans + 1 docs deliverable + 2 CI workflows complete (CLOSED with policy + CI, no code refactor)
+**Status:** ✅ COMPLETE (4-deliverable approach: A L1/L2/L3 matrix in retrospective §3.2.1; B 8 L2 files per-file analysis in §12; C 2 CI workflows; D SKILL.md §6 architecture principles; L2 analysis confirmed 0 refactor needed; ARCH-01 retired, ARCH-06 added)
 
 Success criteria:
 
@@ -408,6 +410,7 @@ Success criteria:
 **Requirements**: CI-01, CI-02, CI-03
 **Depends on:** Phase 14 (so file-level architecture is stable)
 **Plans:** 3/3 CI deliverables shipped (CI-01 + CI-02 + CI-03)
+**Status:** ✅ COMPLETE (CI-01: .github/workflows/check-pi-coupling.yml; CI-02: scripts/upstream-divergence.ts --json mode + JSON Schema v1.0 documented in retrospective §13; CI-03: .github/workflows/check-fork-only-ratio.yml with modify-to-new ratio target ≤ 2.0)
 
 Success criteria:
 
