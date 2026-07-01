@@ -50,7 +50,20 @@ Create a universal adapter architecture:
 - **Easy upstream updates**: Clean separation allows merging upstream changes without conflicts
 - **Gradual migration**: Existing code works as-is, new features use generic interfaces
 
-## Current Milestone: v3.1 — upstream-merge 治理与架构优化
+## Current Milestone: v3.2 — upstream-merge 实战 (重试第一次 merge with v3.1 protocols)
+
+> **Status (2026-07-01):** PLANNING. Initialized from v3.1 milestone completion. v3.1 (upstream-merge 治理与架构优化) is archived; this milestone targets the **first real upstream-merge attempt** using the v3.1 SKILL.md §3.5 + §4.2b + §4.4 protocols shipped in v3.1.
+
+**Goal:** Validate the v3.1 governance improvements by executing the first real `git merge upstream/main` using the new protocols. The 11 conflicts that aborted the 2026-07-01 first attempt should resolve at the policy/protocol level, not case-by-case. Expected outcome: conflict granularity moves from "line-level" / "function-level" to "file-level" / "section-level" per the L1/L2/L3 classification in retrospective §3.2.1.
+
+**Target phases:**
+- Phase 16 — Upstream-merge 实战 (v3.1 protocols applied): re-run `git merge upstream/main`, classify conflicts via §3.5 awk script, resolve same-function conflicts via §4.4 5-step protocol, accept upstream Pi-coupling per §4.1 default `--theirs`, propagate to v1.0 working branch per §1 two-step flow, push to origin, tag new release.
+
+**Source artifacts:**
+- `skills/upstream-merge/SKILL.md` (363 lines) — §3.5 + §4.2b + §4.4 + §6 protocols
+- `docs/upstream-merge-retrospective.md` (938 lines) — first attempt analysis
+- `scripts/upstream-divergence.ts --json` — pre-merge divergence check
+- `.github/workflows/check-fork-only-ratio.yml` + `check-pi-coupling.yml` — post-merge CI guardrails
 
 > **Status (2026-07-01):** PLANNING. Initialized from `docs/upstream-merge-retrospective.md` (the 772-line retrospective written after the first upstream-merge attempt produced 11 conflicts). v3.0 (Universal MCP Stdio Server — Protocol-Category Simplification) is archived; this milestone targets the SKILL.md + architecture debt surfaced by that first merge attempt.
 

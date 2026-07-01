@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v3.1
-milestone_name: upstream-merge 治理与架构优化
-status: completed
-stopped_at: Phase 12 Plan 05 complete — all documentation updated, SKILL.md simplified to Branch A + Branch C, Phase 12 COMPLETE
-last_updated: "2026-07-01T10:38:09.341Z"
-last_activity: 2026-07-01 — Milestone v3.1 completed and archived
+milestone: v3.2
+milestone_name: upstream-merge 实战 (重试第一次 merge with v3.1 protocols)
+status: planning
+last_updated: "2026-07-01T13:02:31.876Z"
+last_activity: 2026-07-01
 progress:
-  total_phases: 6
-  completed_phases: 2
-  total_plans: 16
-  completed_plans: 9
-  percent: 33
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -22,10 +21,10 @@ progress:
 
 ## Current Position
 
-Phase: Milestone v3.1 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-01 — Milestone v3.1 completed and archived
+Status: Defining requirements
+Last activity: 2026-07-01 — Milestone v3.2 started
 
 ## Recent Progress
 

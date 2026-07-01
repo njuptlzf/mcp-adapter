@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- 🚧 **v3.2 upstream-merge 实战 (重试第一次 merge with v3.1 protocols)** — Phase 16 (planning 2026-07-01) — 1 phase / 0 plans. Source: SKILL.md §3.5 + §4.2b + §4.4 + §6 (shipped in v3.1). Goal: validate v3.1 protocols by re-running the first real `git merge upstream/main`.
 - ✅ **v3.1 upstream-merge 治理与架构优化** — Phases 13-15 (shipped 2026-07-01) — 3 phases / 0 plans / 16 commits. Source: `docs/upstream-merge-retrospective.md`. SKILL.md policy rewrite (§3.5 + §4.2b + §4.4 + §6), 2 GitHub Actions workflows (fork-only ratio + Pi-coupling guard), `--json` mode for `upstream-divergence.ts`. Archive: `.planning/milestones/v3.1-ROADMAP.md` + `.planning/milestones/v3.1-REQUIREMENTS.md` + `.planning/milestones/v3.1-MILESTONE-AUDIT.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v3.0 Protocol-Category Simplification** — Phases 10-12 (shipped 2026-06-30) — 3 phases / 9 plans / 16 tasks. Universal MCP stdio server, protocol forwarding, per-agent adapter elimination. Archive: `.planning/milestones/v3.0-ROADMAP.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
@@ -417,6 +418,32 @@ Success criteria:
 1. ✅ `.github/workflows/check-pi-coupling.yml` exists and runs on every PR; advisory detects `import .*@earendil-works/pi-` in `src/` excluding `adapters/`, `types/`, `__tests__/`
 2. ✅ `scripts/upstream-divergence.ts` extended with `--json` output mode emitting JSON Schema v1.0 (documented in `docs/upstream-merge-retrospective.md` §13); exit code 0 means no stale entries
 3. ✅ `.github/workflows/check-fork-only-ratio.yml` exists; counts new files vs modified files in PR; modify-to-new ratio target ≤ 2.0 (WARN at >2.0, FAIL at >5.0)
+
+### Phase 16: Upstream-merge 实战 (v3.1 protocols applied) — PLANNING
+
+**Goal:** Execute the first real `git merge upstream/main` using the v3.1 SKILL.md §3.5 + §4.2b + §4.4 protocols. Validate that conflict granularity moves from "line-level/function-level" (the 2026-07-01 first attempt) to "file-level/section-level" (per L1/L2/L3 classification in retrospective §3.2.1). Propagate to v1.0 working branch per §1 two-step flow. Push to origin. Tag new release.
+**Requirements**: TBD (will be derived from the actual conflicts in the merge attempt)
+**Depends on:** Phase 15 (so CI guardrails are in place to validate the merge result)
+**Plans:** 0/3 plans complete (planning)
+
+**3-plan structure** (planned, to be created via `gsd-plan-phase 16` after merge attempt):
+
+- **16-01-PLAN.md — Pre-merge preparation**: Fetch upstream, run `npm run upstream:check -- --json` to see live divergence. Compare with 2026-07-01 baseline (278 diverged files). Document expected conflicts based on v3.0/v3.1 fork-only commits.
+- **16-02-PLAN.md — Execute `git merge upstream/main`**: Resolve conflicts using new protocols (§3.5 classification + §4.4 5-step + §4.1 default `--theirs` + §4.2b soft follow-up). Commit with `upstream-merge:` prefix including merge-mode + pi-coupling-hits metadata.
+- **16-03-PLAN.md — Step 2 propagation + finalization**: `git checkout v1.0 && git merge main` per §1 two-step flow. Run tsc + npm test + npm run upstream:check. Push to origin. Tag new release. Open PR.
+
+Success criteria:
+
+1. ⏳ Pre-merge divergence count ≤ 278 (no new conflicts beyond v3.1 baseline)
+2. ⏳ All conflicts resolve via policy/protocol (not case-by-case reading)
+3. ⏳ Zero "function-level" conflicts (per §3.5 classification, all should be "different function" or "import region")
+4. ⏳ All `upstream-merge:` commits include `merge-mode` + `pi-coupling-hits` metadata in body
+5. ⏳ `npx tsc --noEmit` exit 0 after merge
+6. ⏳ `npm test` 528/528+ tests pass (no regressions)
+7. ⏳ `npm run upstream:check` exit 0 after merge
+8. ⏳ Step 2 propagation to v1.0 working branch clean
+9. ⏳ Tag v3.1.1-universal or v3.2.0-universal created (depending on conflict magnitude)
+10. ⏳ Retrospective update: `docs/upstream-merge-retrospective.md` §14 added with first-merge-v3.2 lessons
 
 ---
 
