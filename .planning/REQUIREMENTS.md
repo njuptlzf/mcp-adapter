@@ -29,11 +29,15 @@ The retrospective produced a 4-question reflection + P0/P1/P2 improvement plan. 
 
 ### Category: ARCH (file-level architecture)
 
-- [ ] **ARCH-01**: `index.ts` `mcpAdapter()` function body (343 lines) decomposed into 4 small functions: `registerTools`, `registerCommands`, `setupUiHandlers`, `initConnections`
-- [ ] **ARCH-02**: `elicitation-handler.ts` (565 lines) decomposed into 3 files: `elicitation/form-handler.ts`, `elicitation/url-handler.ts`, `elicitation/coerce.ts`
-- [ ] **ARCH-03**: `proxy-modes.ts` (958 lines) decomposed into 4 files: `proxy/manager.ts`, `proxy/stdio.ts`, `proxy/http.ts`, `proxy/sse.ts`
-- [ ] **ARCH-04**: `__tests__/init-elicitation.test.ts` (3 conflict hunks) decomposed into 3 files: `init-elicitation-success.test.ts`, `init-elicitation-error.test.ts`, `init-elicitation-cancel.test.ts`
-- [ ] **ARCH-05**: All decomposed files maintain single-responsibility (each file <300 lines, one logical concern)
+- [ ] **ARCH-02**: `elicitation-handler.ts` (286 lines) decomposed into 3 files: `elicitation/form-handler.ts`, `elicitation/url-handler.ts`, `elicitation/coerce.ts`
+- [ ] **ARCH-03**: `proxy-modes.ts` (835 lines) decomposed into 4 files: `proxy/manager.ts`, `proxy/stdio.ts`, `proxy/http.ts`, `proxy/sse.ts`
+- [ ] **ARCH-04**: `__tests__/init-elicitation.test.ts` (98 lines, 3 conflict hunks) decomposed into 3 files: `init-elicitation-success.test.ts`, `init-elicitation-error.test.ts`, `init-elicitation-cancel.test.ts`
+- [ ] **ARCH-05**: All decomposed files maintain single-responsibility (each file <350 lines, one logical concern)
+- [ ] **ARCH-06 (NEW, replaces retired ARCH-01)**: `adapters/entry.ts` (381 lines, `createMcpAdapter` 324 lines) — extract module-level helpers where closure-independent + add intra-function section dividers. Target: file ≤350 lines, `createMcpAdapter` ≤300 lines.
+
+### Category: ARCH-RETIRED
+
+- ~~**ARCH-01**: `index.ts` `mcpAdapter()` function body (343 lines) decomposed into 4 small functions~~ — **RETIRED 2026-07-01**: Phase 5 entry-point refactor already made `index.ts` a 27-line thin wrapper. The "343 行 mcpAdapter" is actually `adapters/entry.ts` `createMcpAdapter` (324 lines), tracked as **ARCH-06**.
 
 ### Category: CI (defensive continuous integration)
 
@@ -57,11 +61,12 @@ The retrospective produced a 4-question reflection + P0/P1/P2 improvement plan. 
 | MERGE-02 | Phase 13 | §3.1 P0-2 |
 | MERGE-03 | Phase 13 | §3.1 P0-3 (new §3.5) |
 | MERGE-04 | Phase 13 | §3.1 P0-4 (new §4.4) |
-| ARCH-01 | Phase 14 | §3.2 P1-1 (index.ts mcpAdapter) |
-| ARCH-02 | Phase 14 | §3.2 P1-2 (elicitation-handler.ts) |
-| ARCH-03 | Phase 14 | §3.2 P1-3 (proxy-modes.ts) |
+| ARCH-01 | ~~Phase 14~~ (retired) | Retired 2026-07-01 (Phase 5 already did this) |
+| ARCH-02 | Phase 14 | §3.2 P1-2 (elicitation-handler.ts, was 565 lines) |
+| ARCH-03 | Phase 14 | §3.2 P1-3 (proxy-modes.ts, was 958 lines) |
 | ARCH-04 | Phase 14 | §3.2 P1-4 (init-elicitation.test.ts) |
 | ARCH-05 | Phase 14 | §3.2 success criterion (single-responsibility) |
+| **ARCH-06** | Phase 14 | **NEW**: real target is `adapters/entry.ts` 381 lines (retrospective incorrectly listed `index.ts` 343 lines, but Phase 5 already made `index.ts` 27 lines) |
 | CI-01 | Phase 15 | §3.3 P2-1 (CI type-boundary guard) |
 | CI-02 | Phase 15 | §3.3 P2-2 (conflict-statistics dashboard) |
 | CI-03 | Phase 15 | §3.3 P2-3 (same-file-conflict predictor) |
