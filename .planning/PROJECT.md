@@ -50,16 +50,18 @@ Create a universal adapter architecture:
 - **Easy upstream updates**: Clean separation allows merging upstream changes without conflicts
 - **Gradual migration**: Existing code works as-is, new features use generic interfaces
 
-## Current Milestone: v2.0 — Multi-Agent Adapter Completion
+## Current Milestone: v3.1 — upstream-merge 治理与架构优化
 
-> **Status (2026-06-23):** SHIPPED. Released as git tag `v2.0.0-universal` (SemVer pre-release; see STATE.md Naming Decisions for naming rationale). The historical "Current Milestone" goal text below describes the v2.0 plan that was executed; v2.0 is now archived in `.planning/milestones/v2.0-*` and the next milestone is awaiting kickoff (see STATE.md Operator Next Steps).
+> **Status (2026-07-01):** PLANNING. Initialized from `docs/upstream-merge-retrospective.md` (the 772-line retrospective written after the first upstream-merge attempt produced 11 conflicts). v3.0 (Universal MCP Stdio Server — Protocol-Category Simplification) is archived; this milestone targets the SKILL.md + architecture debt surfaced by that first merge attempt.
 
-**Goal:** Complete "for every MCP-compatible agent" transformation — decouple all remaining Pi type bindings, add at least one non-Pi agent adapter, rebuild integration test as agent-agnostic, and update `README.md` to clearly communicate that the project remains fully Pi-compatible while supporting every MCP-compatible agent.
+**Goal:** Convert the retrospective's P0/P1/P2 improvement roadmap into shipped code. The first real upstream-merge exposed three categories of debt — outdated SKILL.md policy (Pi-coupling-first vs upstream-first), file-level architecture that aggregates too many responsibilities in single files (index.ts 343 lines, elicitation-handler.ts 565 lines, proxy-modes.ts 958 lines), and absence of defensive CI for Pi-coupling re-introduction. v3.1 ships the three-layer response: policy change → file decomposition → guardrails.
 
 **Target phases:**
-- Phase 5 — Type Decoupling & Entry Point Refactor: Replace Pi types in 6 source files, add agent-agnostic entry point
-- Phase 6 — Second Agent Adapter: Implement non-Pi AgentAPI adapter, prove portability
-- Phase 7 — Integration Test Rebuild: Rebuild skill as "for every agent" with per-adapter verification; revise `README.md` to highlight Pi compatibility + universal agent support + integration test verification results
+- Phase 13 — SKILL.md 改写 (P0 from retrospective): Default `--theirs`, soften §4.2b from 5-step to 2-step soft follow-up, add §3.5 conflict independence check + §4.4 same-function 5-step analysis protocol
+- Phase 14 — 大文件拆分 (P1 from retrospective): Decompose `index.ts` mcpAdapter (343 lines) into 4 small functions, split `elicitation-handler.ts` (565 lines) into 3 files, split `proxy-modes.ts` (958 lines) into 4 files, split `__tests__/init-elicitation.test.ts` (3 hunks) into 3 files
+- Phase 15 — 防御性 CI (P2 from retrospective): CI type-boundary guard for Pi-coupling re-introduction, conflict-statistics dashboard, same-file-conflict predictor
+
+**Source artifact:** `docs/upstream-merge-retrospective.md` (772 lines, written 2026-07-01)
 
 ## Current State
 
@@ -99,4 +101,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 ---
 
-*Last updated: 2026-06-23 after v2.0 Multi-Agent Adapter Completion milestone (released as git tag `v2.0.0-universal`)*
+*Last updated: 2026-07-01 — Milestone v3.1 (upstream-merge 治理与架构优化) initialized from `docs/upstream-merge-retrospective.md`. v3.0 (Universal MCP Stdio Server) archived.*
