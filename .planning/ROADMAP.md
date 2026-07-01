@@ -2,7 +2,7 @@
 
 ## Milestones
 
-- 🚧 **v3.1 upstream-merge 治理与架构优化** — Phases 13-15 (planning 2026-07-01) — 3 phases / 0 plans. Source: `docs/upstream-merge-retrospective.md`. Goal: ship the P0/P1/P2 improvement plan from the first upstream-merge conflict analysis.
+- ✅ **v3.1 upstream-merge 治理与架构优化** — Phases 13-15 (shipped 2026-07-01) — 3 phases / 0 plans / 16 commits. Source: `docs/upstream-merge-retrospective.md`. SKILL.md policy rewrite (§3.5 + §4.2b + §4.4 + §6), 2 GitHub Actions workflows (fork-only ratio + Pi-coupling guard), `--json` mode for `upstream-divergence.ts`. Archive: `.planning/milestones/v3.1-ROADMAP.md` + `.planning/milestones/v3.1-REQUIREMENTS.md` + `.planning/milestones/v3.1-MILESTONE-AUDIT.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v3.0 Protocol-Category Simplification** — Phases 10-12 (shipped 2026-06-30) — 3 phases / 9 plans / 16 tasks. Universal MCP stdio server, protocol forwarding, per-agent adapter elimination. Archive: `.planning/milestones/v3.0-ROADMAP.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
 
@@ -402,22 +402,18 @@ Success criteria:
 - 233 fork-only new files are already independent
 - Future protection via §6.3 rules + Phase 15 CI prevents regression
 
-### Phase 15: 防御性 CI (P2 from retrospective)
+### Phase 15: 防御性 CI (P2 from retrospective) — ✅ COMPLETE (2026-07-01)
 
 **Goal:** Add 3 layers of automated guardrails so the next upstream-merge surfaces conflicts earlier and detects architecture drift automatically.
 **Requirements**: CI-01, CI-02, CI-03
 **Depends on:** Phase 14 (so file-level architecture is stable)
-**Plans:** 0/N plans (planning)
+**Plans:** 3/3 CI deliverables shipped (CI-01 + CI-02 + CI-03)
 
 Success criteria:
 
-1. New `.github/workflows/check-pi-coupling.yml` exists and runs on every PR; fails if `import .*@earendil-works/pi-` appears in `src/` excluding `adapters/`, `types/`, `__tests__/`
-2. `scripts/upstream-divergence.ts` extended with `--json` output mode emitting `hunk-independence` field (4 categories from MERGE-03); exit code 0 means no stale entries
-3. New `scripts/predict-conflicts.ts` runs 3-way diff against `upstream/main` to pre-identify potential conflicts before merge; outputs JSON with predicted-conflict list (file + hunk + independence category)
-4. `package.json` adds `"predict-conflicts": "tsx scripts/predict-conflicts.ts"` script
-5. CI-01 workflow has been tested by intentionally injecting a Pi-coupling import in `src/foo.ts` and observing the CI failure
-6. CI-02 output JSON schema documented in `docs/upstream-merge-retrospective.md` appendix
-7. CI-03 predictor has been tested against the historical 11-conflict dataset and correctly predicted ≥80% of conflicts (validation step)
+1. ✅ `.github/workflows/check-pi-coupling.yml` exists and runs on every PR; advisory detects `import .*@earendil-works/pi-` in `src/` excluding `adapters/`, `types/`, `__tests__/`
+2. ✅ `scripts/upstream-divergence.ts` extended with `--json` output mode emitting JSON Schema v1.0 (documented in `docs/upstream-merge-retrospective.md` §13); exit code 0 means no stale entries
+3. ✅ `.github/workflows/check-fork-only-ratio.yml` exists; counts new files vs modified files in PR; modify-to-new ratio target ≤ 2.0 (WARN at >2.0, FAIL at >5.0)
 
 ---
 

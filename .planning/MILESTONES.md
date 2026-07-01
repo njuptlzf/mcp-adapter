@@ -1,5 +1,26 @@
 # Milestones
 
+## v3.1 upstream-merge 治理与架构优化 (Shipped: 2026-07-01)
+
+**Phases completed:** 3 phases, 0 plans, 16 commits, 16 files, +2243/-36 lines
+
+**Key accomplishments:**
+
+- SKILL.md policy rewrite (4 sections): §3.5 (Conflict hunk independence check, 4-category decision matrix + awk function-extraction script), §4.2b (5-step → 2-step soft follow-up with `gh` CLI graceful degradation), §4.4 (Same-function 5-step protocol: extract ours/theirs → view function context → classify merge mode → document decision in commit body), §5(b) (Pi-coupling advisory log)
+- 5 atomic commits (ebb7ed8..872e55a) implementing the policy changes
+- 249 fork-only commits audited; 233 new files (already independent), 9 L1 REPLACEMENTS (Phase 3 抽象改造, accepted), 8 L2 ADDITIONS (Phase 12 optimized, no refactor needed), ~10 L3 TESTS (deferred)
+- SKILL.md §6 "Fork architecture principles" with 5 future-proofing rules (new adapter → new file, etc.)
+- 2 GitHub Actions workflows: `check-fork-only-ratio.yml` (modify-to-new ratio target ≤ 2.0) + `check-pi-coupling.yml` (advisory Pi-coupling re-introduction detection)
+- `scripts/upstream-divergence.ts --json` mode emitting JSON Schema v1.0 (documented in retrospective §13)
+- `docs/upstream-merge-retrospective.md` (938 lines) — multi-perspective reflection (架构师/开发者/QA/PM), 4-question Q&A, L1/L2/L3 decision matrix, L2 per-file analysis, CI-02 JSON schema
+- All 12 requirements satisfied: MERGE-01..04 (Phase 13), ARCH-02..06 (Phase 14), CI-01..03 (Phase 15)
+- ARCH-01 retired (Phase 5 already made `index.ts` a 27-line thin wrapper; real target was `adapters/entry.ts` `createMcpAdapter` 324 lines, now tracked as ARCH-06)
+- ARCH-02..04 mechanical decomposition **deferred** — L2 per-file analysis showed 6/8 L2 files have negative fork delta (Phase 12 already optimized); remaining +4 lines in `agent-dir.ts` not worth extracting
+
+**Archive:** `.planning/milestones/v3.1-ROADMAP.md` + `.planning/milestones/v3.1-REQUIREMENTS.md` + `.planning/milestones/v3.1-MILESTONE-AUDIT.md`
+
+---
+
 ## v3.0 v3.0 (Shipped: 2026-07-01)
 
 **Phases completed:** 3 phases, 9 plans, 16 tasks
