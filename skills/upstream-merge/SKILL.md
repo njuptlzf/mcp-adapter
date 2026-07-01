@@ -125,7 +125,7 @@ Walk these steps in order, branching on the manifest row for each changed file.
 |--------------------|--------|
 | `ours` | `git checkout --ours <path>`; mark "ours" in the merge commit body; jump to §5 Checklist |
 | `theirs` | `git checkout --theirs <path>`; run `npx tsc --noEmit`; jump to §5 Checklist |
-| `assess` | Run the §4.1 Pi-coupling marker grep; 0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow |
+| `assess` | **Default `--theirs`** (prefer upstream improvements). §4.1 Pi-coupling marker grep is now **advisory** — 0 hits = clean accept; ≥1 hit = log warning, accept upstream, optionally create §4.2b follow-up issue (best-effort, not blocking). For same-function conflicts, follow §4.4 5-step protocol. |
 | `manual` | Open the editor; for each hunk, prefer upstream if generic, prefer ours if Pi-coupled; see §4.3 rule of thumb |
 
 **Fast-path summary by Category** (covers `ours` / `theirs` rows without grep):
@@ -203,15 +203,14 @@ The 12-category per-file default-resolution matrix (sourced from D-23; inlined h
 
 This matrix covers ~70% of files; the remaining ~10% are the special cases in `references/special-cases.md`. The §4.1 grep runs on `assess` rows before any `--theirs` decision.
 
-#### 4.2b 5-step follow-up flow (Pi-coupling re-introduction)
+#### 4.2b Pi-coupling soft follow-up (advisory, non-blocking) (v3.1)
 
-When the §4.1 grep returns ≥1 hit (in sub-commands 1-3, 5; or hits 4 with non-`ctx.ui` Pi-coupling source), the merge is **not** blocked. The follow-up flow extracts the Pi-coupling in a separate commit and tracks it with a labelled issue:
+When the §4.1 grep returns ≥1 hit in core source, the merge is **not blocked**. Best-effort follow-up:
 
-1. **Accept the upstream diff first.** `git checkout --theirs <path> && git add <path>`. Do **not** block the merge on the Pi-coupling; the merge commit lands cleanly.
-2. **Stage a follow-up commit** that refactors the Pi-coupling out. Use the Phase 5 DECOUPLE pattern: extract to an adapter (`adapters/<agent>/*`), wrap behind `AgentContext.ui`, or route through the generic `RenderOutput` interface (see D-04 / D-07).
-3. **Open a follow-up issue** with title prefix `pi-coupling-followup:` and label `pi-coupling-followup`. The issue body should reference the merge commit SHA and the offending file.
-4. **Reference the issue number in the merge commit body** (e.g., `Refs #N`). The follow-up commit's message should also include the issue reference.
-5. **Do not manually re-edit the upstream diff during merge.** Editing upstream hunks to "fix" the Pi-coupling creates more conflicts and obscures the audit trail; let the follow-up commit do the work in isolation.
+1. **Accept the upstream diff** (mandatory). `git checkout --theirs <path> && git add <path>`.
+2. **Optionally open a follow-up issue** (best-effort, only if `gh` CLI authenticated). Skip if `gh` not authenticated.
+
+> **Removed from v1** (2026-07-01, Phase 13): steps "Stage a follow-up commit that refactors the Pi-coupling out", "Open a follow-up issue" (now optional), and "Reference the issue number in the merge commit body" are removed from the mandatory path. Rationale: fork is downstream, not adversarial. The adapter layer (`adapters/pi-adapter.ts`) provides runtime isolation; Pi-coupling in core is log-only. See `docs/upstream-merge-retrospective.md` §2.1.3 for the full rationale.
 
 ### 4.3 `manual` review rule of thumb
 
@@ -222,7 +221,7 @@ For `manual` rows, accept upstream hunks unless they touch a function signature 
 Run all 7 checks before declaring the upstream-merge flow complete. Each is a single command the agent can execute and inspect. Steps (a)–(f) gate the Step 1 merge commit on `main`; step (g) gates the Step 2 propagation into the working branch. A merge is not done until every item is recorded with PASS / N/A / FAIL.
 
 - **(a) All conflicts resolved** — `git diff --name-only --diff-filter=U | wc -l` returns 0. If > 0, there are still unresolved hunks; re-walk the decision tree.
-- **(b) Pi-coupling markers = 0 in merged core code** — re-run the 5 sub-commands from §4.1 against the post-merge working tree; the only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones). For Scenario-2-style Pi-coupling re-introductions, this passes only **after** the §4.2b follow-up commit lands, not after the merge commit alone.
+- **(b) Pi-coupling markers advisory log (no longer blocking)** — re-run the 5 sub-commands from §4.1 against the post-merge working tree; record the total hit count in the merge commit body. The only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones); any hit outside these zones is acceptable (advisory) but should be tracked for the next Pi-coupling reduction cycle. Per v3.1 Phase 13 policy change (2026-07-01), this check no longer blocks the merge — see §4.2b and `docs/upstream-merge-retrospective.md` §2.1.3.
 - **(c) TypeScript compiles** — `npx tsc --noEmit` exits 0.
 - **(d) Tests are green** — `npm test` (which runs `test:prebuild` then the full vitest suite) exits 0. The quick alternative is `npx vitest run __tests__/adapter-contract.test.ts` for the parametric adapter contract.
 - **(e) Divergence check passes — `npm run upstream:check` exits 0** (no stale registry entries; `diverged-but-not-registered` warnings are acceptable, see §4.2a category defaults). The cross-check script replaces the Phase 8 manifest-gap ≤ 10 check; per D-34, exit 1 means stale entries require registry cleanup before the merge commit.
