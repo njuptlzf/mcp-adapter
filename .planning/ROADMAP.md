@@ -355,22 +355,22 @@ Plans:
 - [x] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13) ✅
 - [x] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
 
-### Phase 13: SKILL.md 改写 (P0 from retrospective)
+### Phase 13: SKILL.md 改写 (P0 from retrospective) — ✅ COMPLETE
 
 **Goal:** Update `skills/upstream-merge/SKILL.md` so that the first real upstream-merge attempt in v3.2+ can resolve all 11 conflicts using policy + protocol, not on a case-by-case basis.
 **Requirements**: MERGE-01, MERGE-02, MERGE-03, MERGE-04
 **Depends on:** Phase 12
-**Plans:** 0/N plans (planning)
+**Plans:** 4/4 plans complete (13-01, 13-02, 13-03, 13-04) + 1 verification plan (13-05)
 
 Success criteria:
 
-1. SKILL.md §4.1 row for `assess` reads "Default `--theirs`" instead of "0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow"
-2. SKILL.md §4.2b reduces from 5-step mandatory to 2-step soft, with explicit "skip step 2 if `gh` not authenticated" branch
-3. New §3.5 "Conflict hunk independence check" exists with 4-category decision matrix and awk-based function-extraction script
-4. New §4.4 "Same-function conflict resolution protocol" exists with mandatory 5-step: extract ours/theirs → view function context → classify merge mode (append/replace/wrap) → document decision in commit body
-5. `references/pi-coupling-markers.md` updated to reflect advisory (not blocking) status of Pi-coupling hits
-6. Section numbering globally consistent (no orphan §3.5/§4.4 references in other docs)
-7. `npm test` still PASS (SKILL.md is markdown, no test impact expected; but verify SKILL.md is still discoverable by `find_skills` skill)
+1. ✅ SKILL.md §4.1 row for `assess` reads "Default `--theirs`" instead of "0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow"
+2. ✅ SKILL.md §4.2b reduces from 5-step mandatory to 2-step soft, with explicit "skip step 2 if `gh` not authenticated" branch
+3. ✅ New §3.5 "Conflict hunk independence check" exists with 4-category decision matrix and awk-based function-extraction script
+4. ✅ New §4.4 "Same-function conflict resolution protocol" exists with mandatory 5-step: extract ours/theirs → view function context → classify merge mode (append/replace/wrap) → document decision in commit body
+5. ✅ `references/pi-coupling-markers.md` updated to reflect advisory (not blocking) status of Pi-coupling hits
+6. ✅ Section numbering globally consistent (no orphan §3.4/§3.6/§4.5 references)
+7. ✅ `npm test` still PASS (528/528 tests, exit 0; markdown changes have zero test impact)
 
 ### Phase 14: 大文件拆分 (P1 from retrospective)
 
