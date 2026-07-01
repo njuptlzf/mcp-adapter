@@ -5,7 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - Universal MCP Stdio Server
+## [3.1.0-universal] - 2026-07-01
+
+> Fork release of upstream `v3.0.0` + governance improvements. See `.planning/milestones/v3.1-MILESTONE-AUDIT.md` for full audit.
+
+### Added
+
+- **`skills/upstream-merge/SKILL.md` §3.5 "Conflict hunk independence check"** — classifies each conflict hunk into 4 categories (different function / same function different section / same function same section / import region) with awk-based function-extraction script. Replaces the "merge by reading 11 conflict files manually" workflow.
+- **`skills/upstream-merge/SKILL.md` §4.4 "Same-function conflict resolution protocol"** — mandatory 5-step protocol for same-function conflicts: extract ours/theirs → view function context → classify merge mode (append/replace/wrap) → document decision in commit body. Empirical reference: commands.ts 3 hunks (append mode) + index.ts mcpAdapter 343-line hunk (replace mode).
+- **`skills/upstream-merge/SKILL.md` §6 "Fork architecture principles"** — 5 future-proofing rules for new fork-only code (new adapter → new file, new test → new file, new abstract type → extend interfaces/agent-api.ts, new universal helper → new file, new fork-only doc → new file). Replaces the previous "modify upstream files" anti-pattern.
+- **`.github/workflows/check-pi-coupling.yml`** (CI-01) — GitHub Actions workflow that runs on every PR to main/v1.0. Detects `import .*@earendil-works/pi-` in `src/` core (excluding `adapters/`, `types/`, `__tests__/`). Advisory only (does not fail build) per §4.2b soft follow-up.
+- **`.github/workflows/check-fork-only-ratio.yml`** (CI-03) — counts new files vs modified files in PR vs `origin/main`, computes modify-to-new ratio. Target ≤ 2.0 (WARN at >2.0, FAIL at >5.0). Implements SKILL.md §6.4 pre-commit guardrail.
+- **`scripts/upstream-divergence.ts --json` mode** (CI-02) — emits JSON Schema v1.0 with fields `upstream_ref`, `diverged_count`, `registered`, `diverged_but_not_registered`, `stale`, `default_resolved_by_category`, `exit_code`, `hunk_independence_note`, `schema_version`, `schema_documented_in`. Full schema in `docs/upstream-merge-retrospective.md` §13.
+- **`docs/upstream-merge-retrospective.md`** (938 lines) — multi-perspective reflection (架构师/资深开发者/QA/PM) on the first real `git merge upstream/main` attempt (2026-07-01) that produced 11 conflict files. Includes:
+  - §1.3 4-category conflict analysis (33% import-region + 27% same-function + 9% same-function-body-large + 37% same-file different-section)
+  - §2 4-question Q&A (合并原则 / 同文件不同函数 / 同函数冲突 / 冲突根因)
+  - §3.2.1 L1/L2/L3 decision matrix (9 REPLACEMENTS + 8 ADDITIONS + ~10 TESTS)
+  - §3.3 P0/P1/P2 roadmap
+  - §12 L2 ADDITIONS per-file analysis (8 files, 0 refactor needed)
+  - §13 CI-02 JSON Schema v1.0 documentation
+
+### Changed
+
+- **`skills/upstream-merge/SKILL.md` §4.1** — `assess` row now reads "**Default `--theirs`** (prefer upstream improvements). §4.1 Pi-coupling marker grep is now **advisory** (was: 0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow). For same-function conflicts, follow §4.4 5-step protocol. **Strategy shift**: fork is downstream, not adversarial; accept upstream by default.
+- **`skills/upstream-merge/SKILL.md` §4.2b** — reduced from 5-step mandatory follow-up flow to **2-step soft follow-up**. Step 1 (mandatory): `git checkout --theirs <path> && git add <path>`. Step 2 (best-effort, only if `gh` CLI authenticated): optionally open follow-up issue. "Removed from v1" rationale blockquote explains why steps 2-5 from the original 5-step flow were removed (Phase 13 §4.2b "soft follow-up" principle).
+- **`skills/upstream-merge/SKILL.md` §5(b) Checklist** — Pi-coupling markers changed from "must be 0" (blocking) to "**advisory log** (no longer blocking; record hit count in commit body)". The only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones).
+- **`skills/upstream-merge/references/pi-coupling-markers.md`** "Blast radius if missed" callout — updated to reflect v3.1 advisory policy with cross-reference to retrospective §2.1.3.
+
+### Removed
+
+- **§4.2b 5-step follow-up flow** (replaced by 2-step soft) — steps "Stage a follow-up commit that refactors the Pi-coupling out", "Open a follow-up issue" (now optional), and "Reference the issue number in the merge commit body" removed from the mandatory path. Rationale: fork is downstream, not adversarial. The adapter layer (`adapters/pi-adapter.ts`) provides runtime isolation; Pi-coupling hits in core are now log-only.
+
+### Migration
+
+**For end users (agents using mcp-adapter)**: No migration required. v3.1.0-universal is a governance/refactor release; all public APIs (`mcpAdapter`, `piMcpAdapter`, `createMcpAdapter`, `createPiAdapter`, `createQoderAdapter`, `resolveAgentGlobalConfigPath`, `getAgentDir`) are unchanged.
+
+**For maintainers merging upstream**:
+1. Run `npm run upstream:check` (with new `--json` flag for CI) to see live divergence before merge
+2. On conflict, run `awk`-based hunk independence check from SKILL.md §3.5 to classify hunks
+3. For same-function conflicts, follow the 5-step protocol in §4.4
+4. For Pi-coupling, accept `--theirs` by default (§4.1 change); log hit count in commit body
+
+**For PR contributors**:
+- GitHub Actions will run `check-pi-coupling.yml` (advisory) and `check-fork-only-ratio.yml` (WARN at >2.0, FAIL at >5.0)
+- New fork-only code MUST follow SKILL.md §6.3 future-proofing rules (use new files, don't modify upstream files)
+
+### Technical Debt Closed
+
+- **ARCH-01 retired** — `index.ts` 343-line `mcpAdapter()` function body was the retrospective's stated target, but Phase 5 entry-point refactor had already made `index.ts` a 27-line thin wrapper. Real target was `adapters/entry.ts` `createMcpAdapter` (324 lines), now tracked as **ARCH-06**.
+- **ARCH-02..04 mechanical decomposition deferred** — L2 per-file analysis (retrospective §12) showed 6/8 L2 files have NEGATIVE fork delta (Phase 12 already removed per-agent code); remaining +4 lines in `agent-dir.ts` not worth extracting. Closed via policy + docs + CI instead of code refactor.
+
+### Cross-references
+
+- `.planning/milestones/v3.1-MILESTONE-AUDIT.md` (108 lines) — full audit of v3.1
+- `.planning/milestones/v3.1-ROADMAP.md` (101 lines) — v3.1 phases snapshot
+- `.planning/milestones/v3.1-REQUIREMENTS.md` (188 lines) — v3.1 requirements archive
+- `docs/upstream-merge-retrospective.md` (938 lines) — multi-perspective reflection
+- `skills/upstream-merge/SKILL.md` (363 lines) — full protocol documentation
+- Git tag: `v3.1.0-universal` (annotated, SHA `98ca50b`)
+
+## [3.0.0-universal] - 2026-06-30 - Universal MCP Stdio Server
 
 ### Breaking Changes
 
