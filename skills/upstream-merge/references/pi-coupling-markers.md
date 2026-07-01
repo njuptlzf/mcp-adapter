@@ -1,6 +1,6 @@
 # Pi-coupling markers (reference)
 
-The grep template in `SKILL.md` §3.1 is a 5-sub-command recipe; this page is
+The grep template in `SKILL.md` §4.1 is a 5-sub-command recipe; this page is
 the per-marker inventory behind it. For each marker: which sub-command
 detects it, why it's HIGH/MEDIUM/DELETED precision, and the false-positive
 profile that drove the classification.
@@ -15,9 +15,9 @@ profile that drove the classification.
 
 These 7 markers identify direct Pi-coupling. Any hit in core MCP source
 (`init.ts`, `mcp-*.ts`, `commands.ts`, `proxy-modes.ts`, etc.) is a
-**follow-up issue** per `SKILL.md` §3.2.
+**follow-up issue** per `SKILL.md` §4.2b.
 
-| # | Marker | Sub-cmd in §3.1 | Why HIGH | False-positive profile |
+| # | Marker | Sub-cmd in §4.1 | Why HIGH | False-positive profile |
 |---|--------|-----------------|----------|------------------------|
 | 1 | `\bExtensionAPI\b` | 1 (Type/class) | Pi's extension API class; not used in this fork. | 0 (fork uses `AgentAPI`, not `ExtensionAPI`). |
 | 2 | `\bExtensionContext\b` | 1 | Pi's extension context class. | 0. |
@@ -25,13 +25,13 @@ These 7 markers identify direct Pi-coupling. Any hit in core MCP source
 | 4 | `\bAgentToolResult\b` | 1 | Pi's tool-result type. | 0 (fork uses generic `result.content` shape). |
 | 5 | `\bAgentToolUpdateCallback\b` | 1 | Pi's tool-update callback type. | 0. |
 | 6 | `PI_CODING_AGENT_DIR` | 3 (Env var) | Pi's env var; DECOUPLE-07 moved it to `AgentPathResolver`. | 0 outside `agent-dir.ts` (and even there only via the env reader). |
-| 7 | `@earendil-works/pi-(coding-agent\|ai\|tui)` + bare `earendil-works` token | 2 (Package) | Direct import from Pi packages; any leak into core is a follow-up. | The `types/pi-*.d.ts` declarations are excluded by the §3.1 grep via `grep -vE 'types/pi-(ai\|coding-agent\|tui)\.d\.ts:'`. |
+| 7 | `@earendil-works/pi-(coding-agent\|ai\|tui)` + bare `earendil-works` token | 2 (Package) | Direct import from Pi packages; any leak into core is a follow-up. | The `types/pi-*.d.ts` declarations are excluded by the §4.1 grep via `grep -vE 'types/pi-(ai\|coding-agent\|tui)\.d\.ts:'`. |
 
 > **Blast radius if missed:** a HIGH-precision hit that slips past the
 > grep means Pi-coupling re-enters the core. The downstream effect: fork
 > can no longer be used with Qoder / future agents (D-07 violations
 > compound), and future upstream merges get harder. Always escalate a
-> HIGH-precision hit via the §3.2 follow-up flow, never silently
+> HIGH-precision hit via the §4.2b follow-up flow, never silently
 > `git checkout --theirs`.
 
 ## MEDIUM-precision markers
@@ -41,7 +41,7 @@ the same shape as Pi's UI API, but the fork owns it as a generic
 interface. Hits in `commands.ts` and `index.ts` are **expected** and
 **not** a follow-up trigger.
 
-| # | Marker | Sub-cmd in §3.1 | Why MEDIUM | False-positive profile |
+| # | Marker | Sub-cmd in §4.1 | Why MEDIUM | False-positive profile |
 |---|--------|-----------------|------------|------------------------|
 | 1 | `\bctx\.ui\.(notify\|form\|custom\|theme)` | 4 (UI surface) | Pi-style API surface, but this fork exposes it as a generic `UISystem` interface per D-04 (Phase 3). The `ctx.ui` chain is the canonical agent-agnostic UI access pattern. | Hits in `commands.ts` (14× per `UPSTREAM-CHANGES.md`) are legal — they're this fork's `UISystem` impl, not upstream re-introduction. Do **not** flag as follow-up. |
 
@@ -56,7 +56,7 @@ interface. Hits in `commands.ts` and `index.ts` are **expected** and
 The 8 `pi.<method>` call patterns from the original CONTEXT-03-B draft,
 plus `ToolInfo` (unqualified) and `AgentToolUpdateCallback` flagging
 strategy. These are catalogued here so future maintainers can see why
-they are absent from `SKILL.md` §3.1.
+they are absent from `SKILL.md` §4.1.
 
 | # | Pattern | Why DELETED | Where to find (if needed) |
 |---|---------|-------------|---------------------------|
@@ -70,10 +70,10 @@ they are absent from `SKILL.md` §3.1.
 | 8 | `` `pi\.getFlag\(` `` | Substring collision with any adapter's `getFlag(` call. | This file. |
 
 > **Future-proofing:** Do **not** reintroduce any of these 8 patterns in
-> `SKILL.md` §3.1's grep template without re-verifying against the latest
+> `SKILL.md` §4.1's grep template without re-verifying against the latest
 > codebase. The original CONTEXT-03-B draft was empirically tested and
 > failed: every `agentapi.X` call (the fork's generic adapter convention
-> per D-07) produced a false positive. The corrected template in §3.1
+> per D-07) produced a false positive. The corrected template in §4.1
 > uses `\b` word boundaries to avoid this collision.
 
 ### `ToolInfo` import-path filter
@@ -92,7 +92,7 @@ in **two** shapes in this fork:
   import type { ToolInfo } from '@earendil-works/pi-coding-agent';
   ```
 
-`SKILL.md` §3.1 sub-command 5 uses the import-path filter
+`SKILL.md` §4.1 sub-command 5 uses the import-path filter
 (`from .*pi-coding-agent.*ToolInfo|from .*pi-ai.*ToolInfo`) to catch only
 the Pi-specific import. The generic `ToolInfo` is legal coupling and
 should never trigger a follow-up issue.
@@ -101,12 +101,12 @@ should never trigger a follow-up issue.
 > using the generic `ToolInfo` (a common type in this fork) would
 > generate a false positive. The corrected filter is a 2-line grep and
 > has 0 false positives in the current codebase (verified by
-> `dry-run-scenario-2-mcp-toggle-commands.md` §"SKILL.md §3.1 Pi-coupling
+> `dry-run-scenario-2-mcp-toggle-commands.md` §"SKILL.md §4.1 Pi-coupling
 > marker grep").
 
 ## PR template
 
-A body template for the PR opened at the end of `SKILL.md` §4(f):
+A body template for the PR opened at the end of `SKILL.md` §5(f):
 
 ```
 ## Upstream merge <short-sha>
@@ -123,5 +123,5 @@ Refs: <list of follow-up issues>
 ```
 
 Use the `Refs:` trailer to link any follow-up issues created via the
-§3.2 flow. The PR body should be auto-generated by the agent, then
+§4.2b flow. The PR body should be auto-generated by the agent, then
 reviewed by a human before merge.
