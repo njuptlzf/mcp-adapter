@@ -810,3 +810,54 @@ git diff --name-only --diff-filter=U
 - P0 改写 SKILL.md 后，**在 `docs/plan.md` Phase 1 添加引用**
 - P1 拆分后，**更新 MAPPING.md 中的文件位置引用**
 - P2 CI 守卫，**不要立即 FAIL，先 WARN 1 周观察**
+
+---
+
+## 12. L2 ADDITIONS 逐文件分析结果（2026-07-01）
+
+> **背景**: Phase 14 Step 2 (B) —— 对 8 个 L2 ADDITIONS 文件做逐文件 `git log` 分析，识别真正应该抽但没抽的 fork-only 段。
+
+### 12.1 8 个 L2 文件 fork 改动总览
+
+| 文件 | fork_size delta | fork commits | fork + | fork - | 净增 fork-only 段 |
+|------|----------------|--------------|--------|--------|------------------|
+| `agent-dir.ts` | +4 | 2 | 5 | 1 | +4（env var 解析）|
+| `mcp-panel.ts` | -3 | 0 | 9 | 12 | -3（无独立 fork-only 段）|
+| `mcp-setup-panel.ts` | -4 | 0 | 9 | 13 | -4（无独立 fork-only 段）|
+| `mcp-auth-flow.ts` | -97 | 0 | 30 | 127 | -97（Phase 12 大删 per-agent）|
+| `mcp-oauth-provider.ts` | -47 | 0 | 1 | 48 | -47（Phase 12 大删 per-agent）|
+| `ui-session.ts` | -1 | 0 | 1 | 2 | -1（无独立 fork-only 段）|
+| `ui-resource-handler.ts` | -1 | 0 | 1 | 2 | -1（无独立 fork-only 段）|
+| `server-manager.ts` | -49 | 0 | 39 | 88 | -49（Phase 12 大删 per-agent）|
+
+### 12.2 关键发现
+
+1. **6/8 L2 文件 fork 净改动是负的**（删 > 加）—— Phase 12 已经最大化 universal 化
+2. **仅 `agent-dir.ts` 有显著 fork-only 段（+4 行）**—— `MCP_AGENT_DIR` env var 解析逻辑
+3. **`mcp-panel.ts` 9 行 +** 实际是**替换**（非新加）—— fork 在用 universal API 替换 Pi-specific 段
+4. **L2 没有需要抽到独立文件的代码**——5 行 env var 解析属于 `agent-dir.ts` 核心职责
+
+### 12.3 决策
+
+| 文件 | 决策 | 理由 |
+|------|------|------|
+| `agent-dir.ts` | ✅ 保留 | 5 行 env var 解析是核心职责，不值得抽 |
+| `mcp-panel.ts` | ✅ 保留 | fork 改是替换非新加 |
+| `mcp-setup-panel.ts` | ✅ 保留 | 同上 |
+| `mcp-auth-flow.ts` | ✅ 已优化 | Phase 12 删 127 行 per-agent |
+| `mcp-oauth-provider.ts` | ✅ 已优化 | Phase 12 删 48 行 per-agent |
+| `ui-session.ts` | ✅ 保留 | 净 -1，无显著 fork-only 段 |
+| `ui-resource-handler.ts` | ✅ 保留 | 同上 |
+| `server-manager.ts` | ✅ 已优化 | Phase 12 删 88 行 per-agent |
+
+### 12.4 结论
+
+**L2 不需要重构**。这反过来验证了**用户的洞察**：当前 fork 已经很接近"独立代码独立文件"原则——233 个 fork-only 新文件已独立，8 个 L2 ADDITIONS 中只有 5 行真正的 fork-only 代码（在 `agent-dir.ts`），不值得抽。
+
+未来引入新 fork-only 代码时，**严格遵守 SKILL.md §6.3 未来防护规则**：
+- new adapter → new file
+- new test → new file
+- new abstract type → extend interfaces/agent-api.ts
+- new universal helper → new file
+- new doc → new file
+
