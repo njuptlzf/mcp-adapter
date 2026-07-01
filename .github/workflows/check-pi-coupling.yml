@@ -1,0 +1,53 @@
+name: Pi-Coupling Guard
+
+# Implements Phase 15 CI-01 (Pi-coupling re-introduction guard)
+# Source: docs/upstream-merge-retrospective.md §3.3 P2-1 + SKILL.md §6.4
+# Date: 2026-07-01
+
+on:
+  pull_request:
+    branches: [main, v1.0]
+  push:
+    branches: [main]
+
+jobs:
+  check-pi-coupling:
+    name: Detect Pi-coupling re-introduction
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+
+      - name: Detect Pi imports in core (excludes legal zones)
+        run: |
+          echo "## Pi-Coupling Detection Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Checking for Pi-coupling imports in core source..." >> $GITHUB_STEP_SUMMARY
+          echo "Excluded: \`adapters/\`, \`types/\`, \`__tests__/\`, \`examples/\` (legal coupling zones)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Find all .ts files in src/ that import from @earendil-works/pi-*
+          # Exclude adapters/, types/, __tests__/ subdirectories
+          HITS=$(find src/ -name "*.ts" \
+            -not -path "src/adapters/*" \
+            -not -path "src/types/*" \
+            -not -path "src/__tests__/*" \
+            -not -path "src/examples/*" \
+            -exec grep -lE 'from ["'\''"]@earendil-works/pi-' {} \; 2>/dev/null || true)
+
+          if [ -z "$HITS" ]; then
+            echo "✅ **PASS**: No Pi-coupling imports found in core source" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+
+          echo "⚠️ **WARNING**: Pi-coupling imports found in core source:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "$HITS" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "These are advisory per v3.1 Phase 13 §4.2b. See SKILL.md §4.2b." >> $GITHUB_STEP_SUMMARY
+
+          # Advisory only — do not fail the build
+          exit 0
