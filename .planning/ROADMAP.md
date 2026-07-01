@@ -2,6 +2,7 @@
 
 ## Milestones
 
+- 🚧 **v3.1 upstream-merge 治理与架构优化** — Phases 13-15 (planning 2026-07-01) — 3 phases / 0 plans. Source: `docs/upstream-merge-retrospective.md`. Goal: ship the P0/P1/P2 improvement plan from the first upstream-merge conflict analysis.
 - ✅ **v3.0 Protocol-Category Simplification** — Phases 10-12 (shipped 2026-06-30) — 3 phases / 9 plans / 16 tasks. Universal MCP stdio server, protocol forwarding, per-agent adapter elimination. Archive: `.planning/milestones/v3.0-ROADMAP.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
 
@@ -353,6 +354,58 @@ Plans:
 - [x] 12-03-PLAN.md — bin/mcp-server.ts universal server (reordered flow, inline AgentAPI, capability discovery, forwarder injection) + delete per-agent adapters/tests + update package.json/vitest.config.ts (D-04, D-05, D-09, D-10) ✅
 - [x] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13) ✅
 - [x] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
+
+### Phase 13: SKILL.md 改写 (P0 from retrospective)
+
+**Goal:** Update `skills/upstream-merge/SKILL.md` so that the first real upstream-merge attempt in v3.2+ can resolve all 11 conflicts using policy + protocol, not on a case-by-case basis.
+**Requirements**: MERGE-01, MERGE-02, MERGE-03, MERGE-04
+**Depends on:** Phase 12
+**Plans:** 0/N plans (planning)
+
+Success criteria:
+
+1. SKILL.md §4.1 row for `assess` reads "Default `--theirs`" instead of "0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow"
+2. SKILL.md §4.2b reduces from 5-step mandatory to 2-step soft, with explicit "skip step 2 if `gh` not authenticated" branch
+3. New §3.5 "Conflict hunk independence check" exists with 4-category decision matrix and awk-based function-extraction script
+4. New §4.4 "Same-function conflict resolution protocol" exists with mandatory 5-step: extract ours/theirs → view function context → classify merge mode (append/replace/wrap) → document decision in commit body
+5. `references/pi-coupling-markers.md` updated to reflect advisory (not blocking) status of Pi-coupling hits
+6. Section numbering globally consistent (no orphan §3.5/§4.4 references in other docs)
+7. `npm test` still PASS (SKILL.md is markdown, no test impact expected; but verify SKILL.md is still discoverable by `find_skills` skill)
+
+### Phase 14: 大文件拆分 (P1 from retrospective)
+
+**Goal:** Decompose 4 large files (index.ts 376 lines, elicitation-handler.ts 565 lines, proxy-modes.ts 958 lines, __tests__/init-elicitation.test.ts 149 lines) so that conflict hunk independence is at the FILE level, not section-within-file level.
+**Requirements**: ARCH-01, ARCH-02, ARCH-03, ARCH-04, ARCH-05
+**Depends on:** Phase 13 (so new conflict-resolution protocols can be applied to subsequent merges)
+**Plans:** 0/N plans (planning)
+
+Success criteria:
+
+1. `index.ts` ≤ 80 lines (entry only); 4 new files in `src/setup/`: `register-tools.ts` (~80 lines), `register-commands.ts` (~80 lines), `setup-ui-handlers.ts` (~80 lines), `init-connections.ts` (~80 lines). `mcpAdapter()` becomes a thin orchestrator calling these 4 functions.
+2. `elicitation-handler.ts` ≤ 60 lines (re-export barrel); 3 new files in `src/elicitation/`: `form-handler.ts` (~180 lines), `url-handler.ts` (~150 lines), `coerce.ts` (~120 lines)
+3. `proxy-modes.ts` ≤ 70 lines (re-export + manager); 4 new files in `src/proxy/`: `manager.ts` (~250 lines), `stdio.ts` (~250 lines), `http.ts` (~250 lines), `sse.ts` (~250 lines)
+4. `__tests__/init-elicitation.test.ts` ≤ 60 lines (shared setup + imports); 3 new files: `init-elicitation-success.test.ts`, `init-elicitation-error.test.ts`, `init-elicitation-cancel.test.ts`
+5. All new files are < 300 lines (ARCH-05)
+6. `npx tsc --noEmit` exit 0 (no type regressions)
+7. `npm test` exit 0 with same or better pass count (no test coverage lost)
+8. `npm run upstream:check` exit 0 (no new Pi-coupling leaks)
+
+### Phase 15: 防御性 CI (P2 from retrospective)
+
+**Goal:** Add 3 layers of automated guardrails so the next upstream-merge surfaces conflicts earlier and detects architecture drift automatically.
+**Requirements**: CI-01, CI-02, CI-03
+**Depends on:** Phase 14 (so file-level architecture is stable)
+**Plans:** 0/N plans (planning)
+
+Success criteria:
+
+1. New `.github/workflows/check-pi-coupling.yml` exists and runs on every PR; fails if `import .*@earendil-works/pi-` appears in `src/` excluding `adapters/`, `types/`, `__tests__/`
+2. `scripts/upstream-divergence.ts` extended with `--json` output mode emitting `hunk-independence` field (4 categories from MERGE-03); exit code 0 means no stale entries
+3. New `scripts/predict-conflicts.ts` runs 3-way diff against `upstream/main` to pre-identify potential conflicts before merge; outputs JSON with predicted-conflict list (file + hunk + independence category)
+4. `package.json` adds `"predict-conflicts": "tsx scripts/predict-conflicts.ts"` script
+5. CI-01 workflow has been tested by intentionally injecting a Pi-coupling import in `src/foo.ts` and observing the CI failure
+6. CI-02 output JSON schema documented in `docs/upstream-merge-retrospective.md` appendix
+7. CI-03 predictor has been tested against the historical 11-conflict dataset and correctly predicted ≥80% of conflicts (validation step)
 
 ---
 
