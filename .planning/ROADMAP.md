@@ -372,23 +372,35 @@ Success criteria:
 6. ✅ Section numbering globally consistent (no orphan §3.4/§3.6/§4.5 references)
 7. ✅ `npm test` still PASS (528/528 tests, exit 0; markdown changes have zero test impact)
 
-### Phase 14: 大文件拆分 (P1 from retrospective) — REDESIGNED 2026-07-01
+### Phase 14: 大文件拆分 (P1 from retrospective) — REDESIGNED 2026-07-01 → COMPLETE (DOCS + CI)
 
 **Goal:** Decompose 4 large files (adapters/entry.ts 381, proxy-modes.ts 835, elicitation-handler.ts 286, __tests__/init-elicitation.test.ts 98) so that conflict hunk independence is at the FUNCTION or SECTION level, not line-within-function level. **NOTE**: retrospective's "index.ts 343 lines" target was outdated — Phase 5 entry-point refactor already made `index.ts` a 27-line thin wrapper; the real target is `adapters/entry.ts` `createMcpAdapter` (324 lines).
 **Requirements**: ARCH-02, ARCH-03, ARCH-04, ARCH-05, **ARCH-06 (new)**
 **Depends on:** Phase 13 (so new conflict-resolution protocols can be applied to subsequent merges)
-**Plans:** 0/4 plans complete (planning — Redesigned after 14-01 discovery)
+**Plans:** 1/4 plans + 1 docs deliverable + 2 CI workflows complete (CLOSED with policy + CI, no code refactor)
 
 Success criteria:
 
-1. `adapters/entry.ts` ≤ 350 lines (was 381); `createMcpAdapter` ≤ 300 lines (was 324). Module-level helpers extracted where closure-independent; intra-function section dividers added for the rest. **ARCH-06 (NEW)**
-2. `elicitation-handler.ts` ≤ 250 lines (was 286); split into `form-handler.ts` + `url-handler.ts` + `coerce.ts` if internal structure permits
-3. `proxy-modes.ts` ≤ 700 lines (was 835); split into 4 transport-specific files (`manager.ts` + `stdio.ts` + `http.ts` + `sse.ts`) if internal structure permits
-4. `__tests__/init-elicitation.test.ts` ≤ 60 lines (was 98); split by scenario into 3 files (success/error/cancel)
-5. All new files are < 350 lines (ARCH-05)
-6. `npx tsc --noEmit` exit 0 (no type regressions)
-7. `npm test` exit 0 with same or better pass count (no test coverage lost)
-8. `npm run upstream:check` exit 0 (no new Pi-coupling leaks)
+1. ✅ L1/L2/L3 decision matrix documented in `docs/upstream-merge-retrospective.md` §3.2.1 + SKILL.md §6
+2. ✅ 8 L2 ADDITIONS per-file analysis (no refactor needed; documented in retrospective §12)
+3. ✅ Future-proofing rules enforced via 2 GitHub Actions workflows (fork-only ratio + Pi-coupling guard)
+4. ✅ All new files are < 350 lines (ARCH-05) — no violation found
+5. ✅ `npx tsc --noEmit` exit 0 (no type regressions)
+6. ✅ `npm test` exit 0 with 528/528 tests pass
+7. ✅ `npm run upstream:check` exit 0 (no new Pi-coupling leaks)
+8. ✅ Phase 15 partial (CI-01 + CI-03) shipped; CI-02 (`--json` mode for upstream-divergence.ts) deferred to v3.2
+
+**Final approach (user insight 2026-07-01)**: Instead of mechanical refactoring, Phase 14 closed via 4 deliverables:
+- A: L1/L2/L3 matrix in retrospective §3.2.1
+- B: 8 L2 files per-file analysis (0 refactor needed)
+- C: 2 CI workflows (.github/workflows/check-fork-only-ratio.yml + check-pi-coupling.yml)
+- D: SKILL.md §6 "Fork architecture principles" + 5 future-proofing rules
+
+**Rationale**: Empirical analysis of 249 fork-only commits + 278 diverged files shows:
+- 9 L1 REPLACEMENTS are core abstractions (Phase 3 — cannot be reversed)
+- 8 L2 ADDITIONS are already optimized (Phase 12 removed per-agent code; remaining +4 lines in agent-dir.ts not worth extracting)
+- 233 fork-only new files are already independent
+- Future protection via §6.3 rules + Phase 15 CI prevents regression
 
 ### Phase 15: 防御性 CI (P2 from retrospective)
 
