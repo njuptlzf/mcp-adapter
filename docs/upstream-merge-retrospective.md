@@ -861,3 +861,78 @@ git diff --name-only --diff-filter=U
 - new universal helper → new file
 - new doc → new file
 
+
+---
+
+## 13. CI-02 JSON Schema（Phase 15，2026-07-01）
+
+> **背景**: Phase 15 CI-02 要求扩展 `scripts/upstream-divergence.ts` 支持 `--json` 输出模式，emit `hunk-independence` field。
+
+### 13.1 用法
+
+```bash
+# JSON 输出（适合 CI 管道 / 脚本解析）
+npx tsx scripts/upstream-divergence.ts --json --no-color
+
+# 与默认 ANSI 输出兼容
+npx tsx scripts/upstream-divergence.ts --json --base origin/main
+```
+
+### 13.2 JSON Schema (v1.0)
+
+```json
+{
+  "upstream_ref": "upstream/main",
+  "diverged_count": 277,
+  "registered": ["CHANGELOG.md", "README.md", "index.ts", ...],
+  "diverged_but_not_registered": ["__tests__/foo.test.ts", ...],
+  "stale": [],
+  "default_resolved_by_category": 242,
+  "exit_code": 0,
+  "hunk_independence_note": "Run SKILL.md §3.5 awk script during merge conflict for 4-category classification (different-function / same-function-different-section / same-function-same-section / import-region)",
+  "schema_version": "1.0",
+  "schema_documented_in": "docs/upstream-merge-retrospective.md §13 (appendix)"
+}
+```
+
+### 13.3 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `upstream_ref` | string | 比较的 upstream ref（默认 `upstream/main`，可通过 `--base` 覆盖）|
+| `diverged_count` | number | fork 与 upstream 之间 diverged 的文件总数 |
+| `registered` | string[] | 在 `references/special-cases.md` 中注册的 diverged 文件 |
+| `diverged_but_not_registered` | string[] | diverged 但未注册的文件（按 §4.2a 12-category matrix 默认处理）|
+| `stale` | string[] | registry 中列出但已不再 diverged 的条目（exit 1 触发条件）|
+| `default_resolved_by_category` | number | `diverged_but_not_registered` 的数量（同上）|
+| `exit_code` | number | 0 = clean, 1 = stale entries, 2 = fatal (fetch failed) |
+| `hunk_independence_note` | string | 提示：hunk-independence 4 分类需要在 merge conflict 时跑 §3.5 awk 脚本（pre-merge 无法预测）|
+| `schema_version` | string | "1.0" |
+| `schema_documented_in` | string | 本文档位置 |
+
+### 13.4 设计决策
+
+1. **`hunk_independence` 不在 pre-merge 阶段预测**——4 分类（different-function / same-function-different-section / same-function-same-section / import-region）需要 conflict markers (`<<<<<<<` / `=======` / `>>>>>>>`)，只有在 merge conflict 时才有。Pre-merge 只能输出 `hunk_independence_note` 提示。
+
+2. **JSON 输出与 ANSI 输出共用 `classify()` 函数**——逻辑一致，只是输出格式不同。
+
+3. **`exit_code` 在 JSON 中也包含**——CI 管道可以解析 JSON 取 exit_code，也可以直接用 process exit code。
+
+4. **`schema_version` 为 "1.0"**——未来如需添加字段（如 `fork_only_ratio`），递增到 "1.1"。
+
+### 13.5 CI 集成示例
+
+```yaml
+# .github/workflows/upstream-divergence-check.yml
+- name: Run divergence check (JSON)
+  run: |
+    npx tsx scripts/upstream-divergence.ts --json --no-color > divergence-report.json
+    # Parse JSON for CI decisions
+    EXIT_CODE=$(jq '.exit_code' divergence-report.json)
+    if [ "$EXIT_CODE" -ne 0 ]; then
+      echo "::error::Stale registry entries detected"
+      cat divergence-report.json
+      exit 1
+    fi
+```
+
