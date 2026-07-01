@@ -38,6 +38,9 @@ const useColor =
 const c = useColor
   ? { green: "\u001b[32m", yellow: "\u001b[33m", red: "\u001b[31m", reset: "\u001b[0m" }
   : { green: "", yellow: "", red: "", reset: "" };
+// CI-02 (Phase 15): --json emits machine-readable output for CI pipelines.
+// JSON schema documented in docs/upstream-merge-retrospective.md §12 (appendix).
+const jsonMode = argv.includes("--json");
 
 function runGit(args: string[], envOverride?: Record<string, string>): string {
   return execFileSync("git", args, {
@@ -120,6 +123,27 @@ function main(): void {
   const diff = parseDiff(runGit(DIFF_ARGS));
   const registry = parseRegistry();
   const { registered, divergedButNotRegistered, stale } = classify(diff, registry);
+
+  // CI-02 (Phase 15): JSON output mode for CI pipelines.
+  // hunk_independence is NOT predicted here (requires in-flight conflict markers).
+  // Run SKILL.md §3.5 awk script during merge conflict for 4-category classification.
+  if (jsonMode) {
+    const output = {
+      upstream_ref: baseRef,
+      diverged_count: diff.length,
+      registered,
+      diverged_but_not_registered: divergedButNotRegistered,
+      stale,
+      default_resolved_by_category: divergedButNotRegistered.length,
+      exit_code: stale.length > 0 ? 1 : 0,
+      hunk_independence_note:
+        "Run SKILL.md §3.5 awk script during merge conflict for 4-category classification (different-function / same-function-different-section / same-function-same-section / import-region)",
+      schema_version: "1.0",
+      schema_documented_in: "docs/upstream-merge-retrospective.md §12 (appendix)",
+    };
+    console.log(JSON.stringify(output, null, 2));
+    process.exit(stale.length > 0 ? 1 : 0);
+  }
 
   console.log(`${LOG_PREFIX} upstream ref: main, scanned ${diff.length} files`);
   console.log(`${c.green}✓ registered (${registered.length}):${c.reset}`);
