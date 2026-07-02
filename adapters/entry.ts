@@ -30,6 +30,8 @@ import {
 } from "../direct-tools.ts";
 import { flushMetadataCache, initializeMcp, updateStatusBar } from "../init.ts";
 import {
+	executeAuthComplete,
+	executeAuthStart,
 	executeCall,
 	executeConnect,
 	executeDescribe,
@@ -308,7 +310,7 @@ export function createMcpAdapter(
 				regex: Type.Optional(Type.Boolean({ description: "Treat search as regex (default: substring match)" })),
 				includeSchemas: Type.Optional(Type.Boolean({ description: "Include parameter schemas in search results (default: true)" })),
 				server: Type.Optional(Type.String({ description: "Filter to specific server (also disambiguates tool calls)" })),
-				action: Type.Optional(Type.String({ description: "Action: 'ui-messages' to retrieve prompts/intents from UI sessions" })),
+				action: Type.Optional(Type.String({ description: "Action: 'ui-messages' to retrieve prompts/intents from UI sessions, 'auth-start'/'auth-complete' for remote/headless OAuth" })),
 			}),
 			renderResult: renderMcpToolResult,
 			async execute(_toolCallId, params: {
@@ -358,6 +360,12 @@ export function createMcpAdapter(
 
 				if (params.action === "ui-messages") {
 					return executeUiMessages(state);
+				}
+				if (params.action === "auth-start" && params.server) {
+					return executeAuthStart(state, params.server);
+				}
+				if (params.action === "auth-complete" && params.server) {
+					return executeAuthComplete(state, params.server, params.args ?? "");
 				}
 				if (params.tool) {
 					return executeCall(state, params.tool, parsedArgs, params.server, getAgentTools);

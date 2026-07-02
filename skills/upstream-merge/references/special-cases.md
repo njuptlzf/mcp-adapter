@@ -7,9 +7,6 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | Path | Status | Why special | Decision |
 |---|---|---|---|
 | `index.ts` | `decoupled-wrapper` | D-04 backward-compat wrapper; preserves Pi `mcpAdapter(pi)` signature | `ours` |
-| `mcp-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; still imports `@earendil-works/pi-tui` (matchesKey/truncateToWidth/visibleWidth) | `assess` |
-| `mcp-setup-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; same `pi-tui` import residual as mcp-panel.ts | `assess` |
-| `panel-keys.ts` | `deleted-in-fork` | Present in upstream; fork removed it (legacy; unreferenced after D-04 Phase 3); do NOT `git checkout --theirs` | `ours` |
 | `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; AGENT_ADAPTERS simplified to `universal-mcp` + `pi` (Phase 12); legal JSDoc mentions of Pi types (not import coupling) | `manual` |
 | `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; removed createKiloResolver/createQoderResolver (Phase 12); createUniversalResolver added; Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |
@@ -19,7 +16,6 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `README.md` | `framing-divergence` | Preserve 'Universal MCP Adapter' framing per D-18 | `assess` |
 | `MAPPING.md` | `framing-divergence` | Phase 1 interface mapping doc; fork-owned | `assess` |
 | `CHANGELOG.md` | `framing-divergence` | Versioned fork changelog (Universal MCP Adapter v2.x) | `assess` |
-| `OAUTH.md` | `framing-divergence` | Fork-side OAuth flow doc; upstream has no equivalent | `assess` |
 | `types/pi-coding-agent.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21); declarations ≠ coupling | `ours` |
 | `types/pi-ai.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |
 | `types/pi-tui.d.ts` | `fork-only` | Fork-side Pi type declaration (D-21) | `ours` |

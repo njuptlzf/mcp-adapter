@@ -1,6 +1,6 @@
 {
   "name": "pi-mcp-adapter",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "MCP (Model Context Protocol) adapter extension for Pi coding agent",
   "type": "module",
   "license": "MIT",
@@ -78,6 +78,7 @@
     "mcp-callback-server.ts",
     "mcp-auth-flow.ts",
     "mcp-panel.ts",
+    "panel-keys.ts",
     "logger.ts",
     "errors.ts",
     "bin",
@@ -114,6 +115,7 @@
     "@earendil-works/pi-tui": "^0.74.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.1",
     "@types/bun": "^1.0.0",
     "@types/node": "^20.0.0",
     "@types/open": "^6.2.1",

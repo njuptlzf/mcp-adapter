@@ -112,7 +112,7 @@ describe("proxy auto auth", () => {
     const result = await executeConnect(state, "demo");
 
     expect(mocks.authenticate).not.toHaveBeenCalled();
-    expect(result.content[0].text).toContain("interactive session");
+    expect(result.content[0].text).toContain("auth-start");
     expect(result.content[0].text).toContain("/mcp-auth demo");
   });
 
@@ -143,6 +143,45 @@ describe("proxy auto auth", () => {
 
     expect(mocks.authenticate).not.toHaveBeenCalled();
     expect(result.content[0].text).toBe("Reconnect demo from the host app.");
+  });
+
+  it("runs URL elicitations returned by proxy tool calls", async () => {
+    const { UrlElicitationRequiredError } = await import("@modelcontextprotocol/sdk/types.js");
+    const { executeCall } = await import("../proxy-modes.ts");
+    const error = new UrlElicitationRequiredError([{
+      mode: "url",
+      message: "Connect your account",
+      elicitationId: "connect-1",
+      url: "https://example.com/connect",
+    }]);
+    const connection = {
+      status: "connected",
+      client: { callTool: vi.fn().mockRejectedValue(error) },
+    };
+    const manager = {
+      getConnection: vi.fn(() => connection),
+      handleUrlElicitationRequired: vi.fn().mockResolvedValue("accept"),
+      touch: vi.fn(),
+      incrementInFlight: vi.fn(),
+      decrementInFlight: vi.fn(),
+    };
+    const state = {
+      config: { settings: {}, mcpServers: { demo: { command: "demo" } } },
+      manager,
+      toolMetadata: new Map([["demo", [{
+        name: "demo_search",
+        originalName: "search",
+        description: "Search",
+        inputSchema: { type: "object", properties: {} },
+      }]]]),
+      failureTracker: new Map(),
+      completedUiSessions: [],
+    } as any;
+
+    const result = await executeCall(state, "demo_search", {}, "demo");
+
+    expect(manager.handleUrlElicitationRequired).toHaveBeenCalledWith("demo", error);
+    expect(result.details).toMatchObject({ error: "url_elicitation_required", action: "accept" });
   });
 
   it("auto-authenticates and retries executeCall once", async () => {

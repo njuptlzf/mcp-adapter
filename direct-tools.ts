@@ -1,4 +1,5 @@
 import type { AgentContext } from "./interfaces/agent-api.ts";
+import { UrlElicitationRequiredError } from "@modelcontextprotocol/sdk/types.js";
 import type { McpExtensionState } from "./state.ts";
 import type { DirectToolSpec, McpConfig, McpContent } from "./types.ts";
 import type { MetadataCache } from "./metadata-cache.ts";
@@ -56,7 +57,7 @@ async function attemptDirectAutoAuth(
       message: getDirectAuthRequiredMessage(
         state,
         serverName,
-        `MCP server "${serverName}" requires OAuth authentication. Run /mcp-auth ${serverName} in an interactive session.`,
+        `MCP server "${serverName}" requires OAuth authentication. Run mcp({ action: "auth-start", server: "${serverName}" }) to get a browser URL, or /mcp-auth ${serverName} in an interactive local session.`,
       ),
     };
   }
@@ -407,6 +408,17 @@ export function createDirectToolExecutor(
         details: { server: spec.serverName, tool: spec.originalName },
       };
     } catch (error) {
+      if (error instanceof UrlElicitationRequiredError) {
+        const action = await state.manager.handleUrlElicitationRequired(spec.serverName, error);
+        const message = action === "accept"
+          ? "The original MCP tool did not run. Complete the opened browser interaction, then retry the tool."
+          : `The URL interaction was ${action === "decline" ? "declined" : "cancelled"}.`;
+        uiSession?.sendToolCancelled(message);
+        return {
+          content: [{ type: "text" as const, text: message }],
+          details: { error: "url_elicitation_required", server: spec.serverName, action },
+        };
+      }
       const message = error instanceof Error ? error.message : String(error);
       uiSession?.sendToolCancelled(message);
       let errorText = `Failed to call tool: ${message}`;

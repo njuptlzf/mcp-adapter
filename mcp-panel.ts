@@ -1,4 +1,5 @@
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { createPanelKeys, type PanelKeybindings, type PanelKeys } from "./panel-keys.ts";
 import { isToolExcluded } from "./types.ts";
 import type { McpConfig, McpPanelCallbacks, McpPanelResult, ServerProvenance } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
@@ -126,6 +127,7 @@ class McpPanel {
   private tui: { requestRender(): void };
   private t = DEFAULT_THEME;
   private authOnly: boolean;
+  private keys: PanelKeys;
 
   private static readonly MAX_VISIBLE = 12;
   private static readonly INACTIVITY_MS = 60_000;
@@ -137,11 +139,12 @@ class McpPanel {
     private callbacks: McpPanelCallbacks,
     tui: { requestRender(): void },
     private done: (result: McpPanelResult) => void,
-    options: { noticeLines?: string[]; authOnly?: boolean } = {},
+    options: { noticeLines?: string[]; authOnly?: boolean; keybindings?: PanelKeybindings } = {},
   ) {
     this.tui = tui;
     this.noticeLines = options.noticeLines ?? [];
     this.authOnly = options.authOnly === true;
+    this.keys = createPanelKeys(options.keybindings);
     this.prefix = config.settings?.toolPrefix ?? "server";
 
     for (const [serverName, definition] of Object.entries(config.mcpServers)) {
@@ -318,7 +321,7 @@ class McpPanel {
 
     // Modal description search mode
     if (this.descSearchActive) {
-      if (matchesKey(data, "escape") || matchesKey(data, "return")) {
+      if (matchesKey(data, "escape") || this.keys.selectConfirm(data)) {
         this.descSearchActive = false;
         this.descQuery = "";
         this.rebuildVisibleItems();
@@ -333,8 +336,8 @@ class McpPanel {
         }
         return;
       }
-      if (matchesKey(data, "up")) { this.moveCursor(-1); return; }
-      if (matchesKey(data, "down")) { this.moveCursor(1); return; }
+      if (this.keys.selectUp(data)) { this.moveCursor(-1); return; }
+      if (this.keys.selectDown(data)) { this.moveCursor(1); return; }
       if (matchesKey(data, "space")) {
         // Toggle even while in desc search
         const item = this.visibleItems[this.cursorIndex];
@@ -367,8 +370,8 @@ class McpPanel {
       return;
     }
 
-    if (matchesKey(data, "up")) { this.moveCursor(-1); return; }
-    if (matchesKey(data, "down")) { this.moveCursor(1); return; }
+    if (this.keys.selectUp(data)) { this.moveCursor(-1); return; }
+    if (this.keys.selectDown(data)) { this.moveCursor(1); return; }
 
     if (matchesKey(data, "space")) {
       const item = this.visibleItems[this.cursorIndex];
@@ -376,7 +379,7 @@ class McpPanel {
       return;
     }
 
-    if (matchesKey(data, "return")) {
+    if (this.keys.selectConfirm(data)) {
       const item = this.visibleItems[this.cursorIndex];
       if (!item) return;
       const server = this.servers[item.serverIndex];
@@ -518,7 +521,7 @@ class McpPanel {
       this.confirmingDiscard = false;
       return;
     }
-    if (matchesKey(data, "return")) {
+    if (this.keys.selectConfirm(data)) {
       if (this.discardSelected === 0) {
         this.cleanup();
         this.done({ cancelled: true, changes: new Map() });
@@ -820,7 +823,7 @@ export function createMcpPanel(
   callbacks: McpPanelCallbacks,
   tui: { requestRender(): void },
   done: (result: McpPanelResult) => void,
-  options?: { noticeLines?: string[]; authOnly?: boolean },
+  options?: { noticeLines?: string[]; authOnly?: boolean; keybindings?: PanelKeybindings },
 ): McpPanel & { dispose(): void } {
   return new McpPanel(config, cache, provenance, callbacks, tui, done, options ?? {});
 }

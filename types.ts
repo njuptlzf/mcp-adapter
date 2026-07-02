@@ -342,7 +342,7 @@ export interface McpSettings {
   sampling?: boolean;
   samplingAutoApprove?: boolean;
   elicitation?: boolean;
-  elicitationAutoOpenUrls?: boolean;
+  elicitationAutoOpenUrls?: boolean; // Open URL elicitations in browser without prompting (default: false)
   /**
    * Message returned in tool results when a server needs (re-)authentication.
    * "${server}" is substituted with the server name. Defaults to a TUI

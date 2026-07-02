@@ -102,6 +102,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 2. **Remove any Qoder-specific bridge setup** — delete `qoder-mcp-bridge` references and SessionStart hooks. Use `mcp-server` instead.
 3. **Config path is now universal**: `--config` > `MCP_CONFIG_PATH` > `.mcp.json` > `~/.config/mcp/mcp.json`. No agent-specific paths needed.
 
+## [2.10.0] - 2026-06-13
+
+### Added
+- Added manual remote/headless OAuth proxy actions for copying authorization URLs and completing pasted redirect URLs or codes. Thanks @Gabrielgvl for PR #120.
+
+### Fixed
+- Honored user `tui.select.*` keybindings in MCP management, setup, and auth panels. Thanks @owenniles for PR #138.
+- Included configured OAuth scopes in authorization-code flows while preserving token endpoint authentication method selection. Thanks @carlosdagos for PR #140.
+- Fixed MCP elicitation on stock Pi, including form dialogs with validation and review, consent-based URL handling, URL-required errors, completion notifications, and TUI-only browser navigation. Thanks @dmmulroy for PR #139.
+- Expanded MCP schema formatting for nested `anyOf`/`oneOf` variants, `const` discriminators, nested object properties, and array items.
+
 ## [2.9.0] - 2026-06-04
 
 ### Added

@@ -1,4 +1,5 @@
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { createPanelKeys, type PanelKeybindings, type PanelKeys } from "./panel-keys.ts";
 import type { ImportKind } from "./types.ts";
 import type { ConfigWritePreview, McpDiscoverySummary } from "./config.ts";
 import type { McpOnboardingState } from "./onboarding-state.ts";
@@ -59,6 +60,7 @@ export interface SetupPanelCallbacks {
 export interface SetupPanelOptions {
   mode: "empty" | "setup";
   onboardingState: McpOnboardingState;
+  keybindings?: PanelKeybindings;
 }
 
 type Screen = "empty" | "setup" | "imports" | "paths";
@@ -89,6 +91,7 @@ export class McpSetupPanel {
   private notice: { text: string; tone: "success" | "warning" | "muted" } | null = null;
   private tui: { requestRender(): void };
   private t = DEFAULT_THEME;
+  private keys: PanelKeys;
   private inactivityTimeout: ReturnType<typeof setTimeout> | null = null;
   private static readonly INACTIVITY_MS = 60_000;
 
@@ -100,6 +103,7 @@ export class McpSetupPanel {
     private done: () => void,
   ) {
     this.tui = tui;
+    this.keys = createPanelKeys(options.keybindings);
     this.screen = options.mode;
     for (const entry of discovery.imports) {
       this.selectedImports.add(entry.kind);
@@ -191,17 +195,17 @@ export class McpSetupPanel {
     }
 
     const actions = this.getActions();
-    if (matchesKey(data, "up")) {
+    if (this.keys.selectUp(data)) {
       this.actionCursor = Math.max(0, this.actionCursor - 1);
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "down")) {
+    if (this.keys.selectDown(data)) {
       this.actionCursor = Math.min(actions.length - 1, this.actionCursor + 1);
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "return")) {
+    if (this.keys.selectConfirm(data)) {
       const selected = this.getSelectedAction();
       if (selected) void this.runAction(selected.id);
     }
@@ -209,12 +213,12 @@ export class McpSetupPanel {
 
   private handleImportsInput(data: string): void {
     const imports = this.discovery.imports;
-    if (matchesKey(data, "up")) {
+    if (this.keys.selectUp(data)) {
       this.importCursor = Math.max(0, this.importCursor - 1);
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "down")) {
+    if (this.keys.selectDown(data)) {
       this.importCursor = Math.min(imports.length - 1, this.importCursor + 1);
       this.tui.requestRender();
       return;
@@ -230,24 +234,24 @@ export class McpSetupPanel {
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "return")) {
+    if (this.keys.selectConfirm(data)) {
       void this.applySelectedImports();
     }
   }
 
   private handlePathsInput(data: string): void {
     const paths = this.getDetectedPaths();
-    if (matchesKey(data, "up")) {
+    if (this.keys.selectUp(data)) {
       this.pathCursor = Math.max(0, this.pathCursor - 1);
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "down")) {
+    if (this.keys.selectDown(data)) {
       this.pathCursor = Math.min(paths.length - 1, this.pathCursor + 1);
       this.tui.requestRender();
       return;
     }
-    if (matchesKey(data, "return")) {
+    if (this.keys.selectConfirm(data)) {
       const selected = paths[this.pathCursor];
       if (!selected) return;
       void this.runBusy(async () => {
