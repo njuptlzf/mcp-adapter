@@ -27,6 +27,34 @@ The **single source of truth** for the adapter registry is the `AGENT_ADAPTERS` 
 
 See [Verification](#verification) below for the latest matrix results.
 
+## Agent Skills
+
+`mcp-adapter` ships three project-level Agent Skills to automate common maintainer and integration workflows. Copy a skill into your agent's global skills directory, then trigger it with the prompt.
+
+| Skill | Purpose | Trigger | Flow |
+|-------|---------|---------|------|
+| `mcp-adapter` | Universal agent integration — config generation, adapter deployment, verification | `integrate agent` · `deploy mcp-adapter` · `configure MCP servers` · `verify mcp-adapter` | Identify agent + capability-gate → Generate `mcp.json` → Deploy adapter → Verify |
+| `upstream-merge` | Sync upstream [`nicobailon/pi-mcp-adapter`](https://github.com/nicobailon/pi-mcp-adapter) into this fork with conflict resolution (e.g. reverse-merging the source repo) | `merge upstream` · `sync fork` · `upstream conflict` · `/upstream-merge` | Run divergence check → Apply 12-category resolution matrix → Delegate conflicts to `/resolve-conflicts` → Validate with §5 checklist |
+| `resolve-conflicts` | Professional Git conflict resolution — 7 conflict type patterns, plan-first, user-approved | `merge conflict` · `/resolve-conflicts` | Assess conflicts → Create resolution plan → Get user approval → Execute resolution → Validate with tests |
+
+> **`upstream-merge` is the recommended way to reverse-merge the source repo.** When upstream `pi-mcp-adapter` cuts a new release, run `/upstream-merge` from your agent — it creates a `upstream-merge/<version>` branch (no direct commits to `main`, per `AGENTS.md` branch policy), runs `npm run upstream:check` to surface live divergence, and walks the per-file decision tree before delegating to `/resolve-conflicts`. Both `upstream-merge` and `resolve-conflicts` must be installed together.
+
+Install & use:
+
+```bash
+# 1. Copy the skills you need into your agent's global skills directory
+cp -r skills/mcp-adapter       ~/.qoder/skills/   # or your agent's equivalent path
+cp -r skills/upstream-merge    ~/.qoder/skills/   # also copy resolve-conflicts
+cp -r skills/resolve-conflicts ~/.qoder/skills/
+
+# 2. Trigger the skill from your agent
+#   /mcp-adapter        — integrate an agent (Phase 0 → 1 → 2 → 3)
+#   /upstream-merge     — sync this fork with upstream pi-mcp-adapter
+#   /resolve-conflicts  — resolve Git merge conflicts professionally
+```
+
+See [`skills/README.md`](skills/README.md) for the full skill directory, dependency graph, and `Skill Usage Order` diagram.
+
 https://github.com/user-attachments/assets/4b7c66ff-e27e-4639-b195-22c3db406a5a
 
 ## Why This Exists
