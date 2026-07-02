@@ -1,0 +1,34 @@
+#!/bin/sh
+# Pre-push hook: block direct pushes to main branch
+# Enforces the rule "绝对不允许直接提交到main分支" (2026-07-02)
+#
+# To enable in your local clone:
+#   git config core.hooksPath .githooks
+#
+# This hook is shared via git (committed to repo) so all developers get it.
+
+remote="$1"
+url="$2"
+
+# Read the local ref being pushed and its remote ref
+while read local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ] || [ "$remote_ref" = "refs/heads/master" ]; then
+    echo ""
+    echo "🚫 ERROR: Direct push to '$remote_ref' is FORBIDDEN"
+    echo ""
+    echo "Per the rule: '绝对不允许直接提交到main分支'"
+    echo ""
+    echo "Required workflow:"
+    echo "  1. Create a feature branch: git checkout -b feat/<name>"
+    echo "  2. Push the feature branch: git push -u origin feat/<name>"
+    echo "  3. Create a PR: gh pr create --base main --head feat/<name>"
+    echo "  4. After CI passes + review, merge the PR"
+    echo ""
+    echo "If you intentionally need to bypass (e.g., repo owner emergency),"
+    echo "you can override with: git push --no-verify"
+    echo ""
+    exit 1
+  fi
+done
+
+exit 0
