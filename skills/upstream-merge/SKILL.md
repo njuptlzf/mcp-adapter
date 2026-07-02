@@ -113,33 +113,24 @@ npx tsx scripts/upstream-divergence.ts --no-color
 
 Files NOT in the registry are resolved by the 12-category per-file default-resolution matrix inlined in §4.2 below — no need to add them to the registry.
 
-### 3.5 Conflict hunk independence check (NEW, v3.1)
+### 3.5 Conflict resolution: delegate to `resolve-conflicts` skill (v3.2)
 
-Before resolving any conflict, classify each hunk's independence. This separates "easy wins" (different function in same file) from "needs agent judgment" (same function, same section):
+When `git merge upstream/main` produces conflicts, **do not resolve them manually with custom rules**. Instead, delegate to the `resolve-conflicts` skill:
 
-```bash
-# 列出所有 conflict hunk 所在函数
-git diff --name-only --diff-filter=U | while read f; do
-  awk '
-    /^<<<<<<< / { hunk=1; start=NR; next }
-    /^=======/ { hunk=0; sep=NR; next }
-    /^>>>>>>> / { hunk=0; end=NR; next }
-    hunk && match($0, /^(export )?(async )?function ([A-Za-z_][A-Za-z0-9_]*)/, m) { fn=m[2] }
-    /^>>>>>>> / { print FILENAME ": hunk@" start "-" end " in function: " fn }
-  ' "$f"
-done
+```
+Skill /resolve-conflicts
 ```
 
-**Decision matrix** (4 categories, ordered from easiest to hardest):
+The `resolve-conflicts` skill provides a professional, plan-first conflict resolution framework with:
+- 7 conflict type patterns (imports, tests, generated files, config, code logic, structs, deleted-modified)
+- Structured resolution plan + user approval before executing
+- Decision tracking (remember user choices, apply to similar conflicts)
+- Validation scripts (`validate-conflicts.sh`, `handle-deleted-modified.sh`)
+- One-line explanation for every conflict resolved
 
-| hunk 独立性 | 解决策略 | 自动化程度 |
-|------------|---------|----------|
-| 同文件 + 不同函数 | 保留两侧（拼接）| ✅ 全自动 |
-| 同文件 + 同一函数不同段 | 视内容（追加/替换/包装 3 模式）| 🟡 半自动 |
-| 同文件 + 同一函数同一段 | 强制 agent 阅读 + 决策（§4.4）| 🟡 半自动 |
-| 同文件 + import 区域 | 检查 package 版本兼容性 | ✅ 全自动 |
+**upstream-merge's role**: After resolve-conflicts resolves the conflicts, run §4.1 Pi-coupling grep (advisory) + §5 Checklist to validate the merge result from a fork-specific perspective.
 
-Source: `docs/upstream-merge-retrospective.md` §1.3 (4 类别分类) + §2.2.2 (用户问题 2 回答).
+> **Removed in v3.2** (2026-07-01): The previous §3.5 "Conflict hunk independence check" (awk-based 4-category classification + "保留两侧" conditions) and §4.4 "Same-function 5-step protocol" were custom conflict resolution rules that duplicated `resolve-conflicts` skill's functionality. They have been removed in favor of the professional skill.
 
 ## 4. Decision tree
 
@@ -153,7 +144,7 @@ Walk these steps in order, branching on the manifest row for each changed file.
 |--------------------|--------|
 | `ours` | `git checkout --ours <path>`; mark "ours" in the merge commit body; jump to §5 Checklist |
 | `theirs` | `git checkout --theirs <path>`; run `npx tsc --noEmit`; jump to §5 Checklist |
-| `assess` | **Default `--theirs`** (prefer upstream improvements). §4.1 Pi-coupling marker grep is now **advisory** — 0 hits = clean accept; ≥1 hit = log warning, accept upstream, optionally create §4.2b follow-up issue (best-effort, not blocking). For same-function conflicts, follow §4.4 5-step protocol. |
+| `assess` | **遇到冲突时委托给 `resolve-conflicts` skill** (§3.5). After conflicts are resolved, run §4.1 Pi-coupling grep (advisory only — record hit count in commit body, not blocking). |
 | `manual` | Open the editor; for each hunk, prefer upstream if generic, prefer ours if Pi-coupled; see §4.3 rule of thumb |
 
 **Fast-path summary by Category** (covers `ours` / `theirs` rows without grep):
@@ -235,7 +226,7 @@ This matrix covers ~70% of files; the remaining ~10% are the special cases in `r
 
 When the §4.1 grep returns ≥1 hit in core source, the merge is **not blocked**. Best-effort follow-up:
 
-1. **Accept the upstream diff** (mandatory). `git checkout --theirs <path> && git add <path>`.
+1. **Conflicts resolved by `resolve-conflicts` skill** (§3.5) — accept the resolution result.
 2. **Optionally open a follow-up issue** (best-effort, only if `gh` CLI authenticated). Skip if `gh` not authenticated.
 
 > **Removed from v1** (2026-07-01, Phase 13): steps "Stage a follow-up commit that refactors the Pi-coupling out", "Open a follow-up issue" (now optional), and "Reference the issue number in the merge commit body" are removed from the mandatory path. Rationale: fork is downstream, not adversarial. The adapter layer (`adapters/pi-adapter.ts`) provides runtime isolation; Pi-coupling in core is log-only. See `docs/upstream-merge-retrospective.md` §2.1.3 for the full rationale.
@@ -244,40 +235,24 @@ When the §4.1 grep returns ≥1 hit in core source, the merge is **not blocked*
 
 For `manual` rows, accept upstream hunks unless they touch a function signature that generic code depends on — the canonical example is `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; that signature is frozen per D-07 and any upstream change to it is rejected (`git checkout --ours`).
 
-### 4.4 Same-function conflict resolution protocol (NEW, v3.1)
+### 4.4 Conflict resolution: delegate to `resolve-conflicts` skill (v3.2)
 
-When conflict hunk is in the same function (per §3.5 classification, "同文件 + 同一函数同一段"), agent MUST execute this 5-step protocol — no shortcuts:
+When conflicts occur during `git merge upstream/main`, **delegate to the `resolve-conflicts` skill** instead of using custom resolution rules:
 
-1. **Extract ours** — show the local version of the conflicting lines:
-   ```bash
-   git show :2:<file> | sed -n '<start>,<end>p'
-   ```
+```
+Skill /resolve-conflicts
+```
 
-2. **Extract theirs** — show the upstream version of the same lines:
-   ```bash
-   git show :3:<file> | sed -n '<start>,<end>p'
-   ```
+The `resolve-conflicts` skill handles all conflict types professionally:
+- **Imports**: Merge all unique imports, group by module
+- **Tests**: Keep all tests unless identical, merge fixtures
+- **Generated files**: Regenerate from source
+- **Config**: Merge all keys, choose appropriate values
+- **Code logic**: Analyze intent, merge if orthogonal, choose one if conflicting
+- **Structs**: Include all fields from both branches
+- **Deleted-modified**: Backup, analyze, apply to new location
 
-3. **View function context** — see the full function body for both versions to understand what the change is doing:
-   ```bash
-   git show :2:<file> | sed -n '<fn_start>,<fn_end>p'
-   ```
-
-4. **Classify merge mode** into one of 3 categories:
-   - **Append mode** — ours 在函数头加、theirs 在函数尾加 → 直接拼接（保留两侧）
-   - **Replace mode** — ours 替换函数中段、theirs 替换同一段 → 必须阅读代码决策
-   - **Wrap mode** — ours 在函数外包了 try/catch、theirs 在函数内加 validation → 嵌套合并
-
-5. **Document decision in commit body** — record the choice for future maintainers:
-   ```
-   upstream-merge: resolve <file> conflict
-   - function: <fn_name>
-   - mode: <append|replace|wrap>
-   - decision: <ours|theirs|merge|hybrid>
-   - rationale: <1-2 sentences>
-   ```
-
-Source: `docs/upstream-merge-retrospective.md` §2.3.2 (5-step analysis) + §3.1 P0-4 (P0 roadmap). Empirical example: the 3 hunks in `commands.ts` (L289, L367, L417) from the 2026-07-01 merge attempt were all "append mode" → direct concatenation preserved both sides; the L33-375 hunk in `index.ts` mcpAdapter was "replace mode" → required Phase 14 decomposition.
+> **Removed in v3.2**: The previous §4.4 "Same-function 5-step protocol" (extract ours/theirs → classify merge mode → document decision) was a custom conflict resolution rule. It has been removed in favor of `resolve-conflicts` skill's Step 4 "Execute Resolution Plan" which provides the same functionality with a more comprehensive framework (7 patterns, decision tracking, user approval flow).
 
 ## 5. Checklist
 
@@ -361,3 +336,43 @@ fi
 - `docs/upstream-merge-retrospective.md` §3.2.1 — full L1/L2/L3 matrix with empirical data (249 fork-only commits, 278 diverged files)
 - `docs/upstream-merge-retrospective.md` §2.4 — multi-perspective reflection on conflict granularity
 - SKILL.md §1 — Two-step git merge flow (the merge strategy that this principle supports)
+
+### 6.6 Code structure optimization: how to reduce future conflicts (v3.2)
+
+Based on the 2026-07-01 first merge attempt (11 conflicts, 249 fork-only commits, 278 diverged files), the following code structure changes would reduce future conflict frequency:
+
+**1. Fork-only code in independent files (not modify upstream files)**
+
+When adding new fork-only functionality, create new files — do NOT add code to upstream files that upstream will also modify:
+
+- ✅ New agent adapter → `adapters/<new-agent>.ts` (not modify `adapters/entry.ts`)
+- ✅ New test scenario → `__tests__/<new-scenario>.test.ts` (not extend `__tests__/init-*.test.ts`)
+- ✅ New abstract type → extend `interfaces/agent-api.ts` (not import Pi types in core)
+- ✅ New universal helper → `adapters/<helper>.ts` or `utils/<helper>.ts` (not inline in `entry.ts`)
+- ✅ New fork-only doc → `docs/<new-topic>.md` (not extend `docs/upstream-merge-retrospective.md` in place)
+
+**2. Avoid large functions that both sides will modify**
+
+The 2026-07-01 attempt showed `adapters/entry.ts` `createMcpAdapter` (324 lines) as the hardest conflict — both fork and upstream modify the same function body. Break large functions into smaller, independently-modifiable units:
+
+- ❌ One 324-line function → ✅ 4 small functions (~80 lines each) + thin orchestrator
+- ❌ Inline session lifecycle in `createMcpAdapter` → ✅ Extract to `setupSessionHandlers()`
+- ❌ Inline command registration → ✅ Extract to `registerCommands()`
+
+**3. Keep import sections stable**
+
+Import conflicts are the easiest to resolve but still cost time. Minimize import churn:
+
+- Use `interfaces/agent-api.ts` abstractions instead of direct Pi type imports (fork-specific imports don't conflict with upstream Pi imports)
+- Group imports consistently (std → external → internal → relative)
+- When adding a new dependency, add it in a new file, not in an existing core file
+
+**4. Separate fork-only config from upstream config**
+
+- ✅ Fork config in `.planning/` (fork-only, never conflicts)
+- ✅ Fork CI in `.github/workflows/` (fork-only, never conflicts)
+- ❌ Fork config inline in `package.json` or `tsconfig.json` (shared with upstream, will conflict)
+
+**5. Run `npm run upstream:check` before every PR**
+
+The `--json` mode (CI-02) provides machine-readable divergence data. Use it to detect new divergence early.
