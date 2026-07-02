@@ -96,7 +96,6 @@ describe("McpServerManager sampling", () => {
       capabilities: {
         elicitation: {
           form: { applyDefaults: true },
-          url: {},
         },
       },
     });
@@ -126,7 +125,6 @@ describe("McpServerManager sampling", () => {
         sampling: {},
         elicitation: {
           form: { applyDefaults: true },
-          url: {},
         },
       },
     });

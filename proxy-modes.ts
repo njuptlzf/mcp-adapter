@@ -1,4 +1,5 @@
 import type { ToolInfo } from "./interfaces/agent-api.ts";
+import { UrlElicitationRequiredError } from "@modelcontextprotocol/sdk/types.js";
 import { checkSync } from "recheck";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata, McpContent } from "./types.ts";
@@ -8,7 +9,7 @@ import { buildToolMetadata, getToolNames, findToolByName, formatSchema } from ".
 import { transformMcpContent } from "./tool-registrar.ts";
 import { maybeStartUiSession, type UiSessionRuntime } from "./ui-session.ts";
 import { formatAuthRequiredMessage, truncateAtWord } from "./utils.ts";
-import { authenticate, supportsOAuth } from "./mcp-auth-flow.ts";
+import { authenticate, completeAuthFromInput, startAuth, supportsOAuth } from "./mcp-auth-flow.ts";
 import type { McpToolResult } from "./types.ts";
 
 type ProxyToolResult = McpToolResult<Record<string, unknown>>;
@@ -28,7 +29,7 @@ type AutoAuthResult =
 function getAuthRequiredMessage(
   state: McpExtensionState,
   serverName: string,
-  defaultMessage = `Server "${serverName}" requires OAuth authentication. Run /mcp-auth ${serverName} first.`,
+  defaultMessage = `Server "${serverName}" requires OAuth authentication. Run mcp({ action: "auth-start", server: "${serverName}" }) to get a browser URL, or /mcp-auth ${serverName} in an interactive local session.`,
 ): string {
   return formatAuthRequiredMessage(state.config, serverName, defaultMessage);
 }
@@ -38,7 +39,39 @@ function getAuthFailedMessage(state: McpExtensionState, serverName: string, mess
   if (customGuidance) {
     return `OAuth authentication failed for "${serverName}": ${message}. ${getAuthRequiredMessage(state, serverName)}`;
   }
-  return `OAuth authentication failed for "${serverName}": ${message}. Run /mcp-auth ${serverName} first.`;
+  return `OAuth authentication failed for "${serverName}": ${message}. Run mcp({ action: "auth-start", server: "${serverName}" }) to get a browser URL, or /mcp-auth ${serverName} in an interactive local session.`;
+}
+
+function getRedirectPort(authorizationUrl: string): number | undefined {
+  try {
+    const redirectUri = new URL(authorizationUrl).searchParams.get("redirect_uri");
+    if (!redirectUri) return undefined;
+    const port = Number.parseInt(new URL(redirectUri).port, 10);
+    return Number.isInteger(port) ? port : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function formatManualAuthInstructions(serverName: string, authorizationUrl: string): string {
+  const port = getRedirectPort(authorizationUrl);
+  const portNote = port
+    ? `\nThe redirect URL will use local port ${port}. On a remote server it is expected for that localhost page to fail locally; copy the address bar URL anyway.`
+    : "";
+
+  return [
+    `MCP OAuth required for "${serverName}".`,
+    "",
+    "Open this URL in your local browser:",
+    "",
+    authorizationUrl,
+    "",
+    "After approving, copy the full redirected localhost URL from your browser address bar and send it back with:",
+    `mcp({ action: "auth-complete", server: "${serverName}", args: '{"redirectUrl":"PASTE_REDIRECT_URL_HERE"}' })`,
+    "",
+    "You can also pass just the `code` query parameter as `args: '{\"code\":\"PASTE_CODE_HERE\"}'`.",
+    portNote.trimEnd(),
+  ].filter(Boolean).join("\n");
 }
 
 async function attemptAutoAuth(
@@ -61,7 +94,7 @@ async function attemptAutoAuth(
       message: getAuthRequiredMessage(
         state,
         serverName,
-        `Server "${serverName}" requires OAuth authentication. Run /mcp-auth ${serverName} in an interactive session.`,
+        `Server "${serverName}" requires OAuth authentication. Run mcp({ action: "auth-start", server: "${serverName}" }) to get a browser URL, or /mcp-auth ${serverName} in an interactive local session.`,
       ),
     };
   }
@@ -210,6 +243,77 @@ export function executeStatus(state: McpExtensionState): ProxyToolResult {
     content: [{ type: "text" as const, text: text.trim() }],
     details: { mode: "status", servers, totalTools, connectedCount },
   };
+}
+
+export async function executeAuthStart(state: McpExtensionState, serverName: string): Promise<ProxyToolResult> {
+  const definition = state.config.mcpServers[serverName];
+  if (!definition) {
+    return {
+      content: [{ type: "text" as const, text: `Server "${serverName}" not found. Use mcp({}) to see available servers.` }],
+      details: { mode: "auth-start", error: "not_found", server: serverName },
+    };
+  }
+
+  if (!definition.url || !supportsOAuth(definition)) {
+    return {
+      content: [{ type: "text" as const, text: `Server "${serverName}" is not configured for OAuth over HTTP.` }],
+      details: { mode: "auth-start", error: "oauth_not_supported", server: serverName },
+    };
+  }
+
+  try {
+    const { authorizationUrl } = await startAuth(serverName, definition.url, definition);
+    if (!authorizationUrl) {
+      return {
+        content: [{ type: "text" as const, text: `OAuth authentication successful for "${serverName}".` }],
+        details: { mode: "auth-start", server: serverName, authenticated: true },
+      };
+    }
+
+    return {
+      content: [{ type: "text" as const, text: formatManualAuthInstructions(serverName, authorizationUrl) }],
+      details: { mode: "auth-start", server: serverName, authorizationUrl },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      content: [{ type: "text" as const, text: `Failed to start OAuth for "${serverName}": ${message}` }],
+      details: { mode: "auth-start", error: "auth_start_failed", server: serverName, message },
+    };
+  }
+}
+
+export async function executeAuthComplete(state: McpExtensionState, serverName: string, input: string): Promise<ProxyToolResult> {
+  if (!state.config.mcpServers[serverName]) {
+    return {
+      content: [{ type: "text" as const, text: `Server "${serverName}" not found. Use mcp({}) to see available servers.` }],
+      details: { mode: "auth-complete", error: "not_found", server: serverName },
+    };
+  }
+
+  try {
+    const status = await completeAuthFromInput(serverName, input);
+    if (status !== "authenticated") {
+      return {
+        content: [{ type: "text" as const, text: `OAuth authentication did not complete for "${serverName}".` }],
+        details: { mode: "auth-complete", error: "not_authenticated", server: serverName, status },
+      };
+    }
+
+    await state.manager.close(serverName);
+    state.failureTracker.delete(serverName);
+    updateStatusBar(state);
+    return {
+      content: [{ type: "text" as const, text: `OAuth authentication successful for "${serverName}". Run mcp({ connect: "${serverName}" }) to connect with the new token.` }],
+      details: { mode: "auth-complete", server: serverName, authenticated: true },
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      content: [{ type: "text" as const, text: `Failed to complete OAuth for "${serverName}": ${message}` }],
+      details: { mode: "auth-complete", error: "auth_complete_failed", server: serverName, message },
+    };
+  }
 }
 
 export function executeDescribe(state: McpExtensionState, toolName: string): ProxyToolResult {
@@ -813,6 +917,17 @@ export async function executeCall(
       details: { mode: "call", mcpResult: result, server: serverName, tool: toolMeta.originalName },
     };
   } catch (error) {
+    if (error instanceof UrlElicitationRequiredError) {
+      const action = await state.manager.handleUrlElicitationRequired(serverName, error);
+      const message = action === "accept"
+        ? "The original MCP tool did not run. Complete the opened browser interaction, then retry the tool."
+        : `The URL interaction was ${action === "decline" ? "declined" : "cancelled"}.`;
+      uiSession?.sendToolCancelled(message);
+      return {
+        content: [{ type: "text" as const, text: message }],
+        details: { mode: "call", error: "url_elicitation_required", server: serverName, action },
+      };
+    }
     const message = error instanceof Error ? error.message : String(error);
     uiSession?.sendToolCancelled(message);
 

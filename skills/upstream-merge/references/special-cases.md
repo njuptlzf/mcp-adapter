@@ -9,7 +9,7 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 | `index.ts` | `decoupled-wrapper` | D-04 backward-compat wrapper; preserves Pi `mcpAdapter(pi)` signature | `ours` |
 | `mcp-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; still imports `@earendil-works/pi-tui` (matchesKey/truncateToWidth/visibleWidth) | `assess` |
 | `mcp-setup-panel.ts` | `decoupled-wrapper` | DECOUPLE-06 follow-up; same `pi-tui` import residual as mcp-panel.ts | `assess` |
-| `panel-keys.ts` | `deleted-in-fork` | Present in upstream; fork removed it (legacy; unreferenced after D-04 Phase 3); do NOT `git checkout --theirs` | `ours` |
+| `panel-keys.ts` | `fork-only` | Added by upstream in v2.10.0 to support user keybindings in MCP panels (commit "honor user keybindings for navigation in MCP panels"). Restored in fork because `mcp-panel.ts`/`mcp-setup-panel.ts` depend on `createPanelKeys()` to wire `tui.select.*` bindings. Phase 14 retrospective had marked it `deleted-in-fork` — now superseded. | `theirs` |
 | `interfaces/agent-api.ts` | `decoupled-wrapper` | D-01..D-03 Capability Gate; AGENT_ADAPTERS simplified to `universal-mcp` + `pi` (Phase 12); legal JSDoc mentions of Pi types (not import coupling) | `manual` |
 | `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; removed createKiloResolver/createQoderResolver (Phase 12); createUniversalResolver added; Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |

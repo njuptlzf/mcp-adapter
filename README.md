@@ -230,6 +230,26 @@ Pi-specific files are the write targets for imported or shared global servers wh
 
 For pre-registered browser OAuth clients, set `oauth.redirectUri` to the exact callback registered with the provider, for example `"http://localhost:3118/callback"`. Dynamic clients normally omit it and use a lazy OS-assigned localhost callback port.
 
+### Remote/headless OAuth
+
+If Pi is running on a remote server and cannot open a local browser, start OAuth through the proxy tool:
+
+```js
+mcp({ action: "auth-start", server: "linear-server" })
+```
+
+Open the returned authorization URL in your local browser. After approval, your browser redirects to a localhost URL. On a remote server that local page may fail to load; copy the full URL from the browser address bar anyway and complete the flow in the same Pi session:
+
+```js
+mcp({
+  action: "auth-complete",
+  server: "linear-server",
+  args: '{"redirectUrl":"http://localhost:19876/callback?code=...&state=..."}'
+})
+```
+
+You can also pass only the `code` query parameter with `args: '{"code":"..."}'`. Treat authorization URLs and codes as sensitive; they can grant access to the MCP server until the flow expires or completes.
+
 ### Lifecycle Modes
 
 - **`lazy`** (default) — Don't connect at startup. Connect on first tool call. Disconnect after idle timeout. Cached metadata keeps search/list working without connections.
@@ -257,8 +277,7 @@ For pre-registered browser OAuth clients, set `oauth.redirectUri` to the exact c
 | `autoAuth` | Auto-run OAuth on `connect`/tool calls when a server needs auth, then retry once (default: false). |
 | `sampling` | Allow MCP servers to sample through Pi models, honoring `modelPreferences.hints` before current/default fallback (default: true when UI approval is available). |
 | `samplingAutoApprove` | Skip sampling confirmation prompts. Required for sampling in non-UI sessions (default: false). |
-| `elicitation` | Allow MCP servers to request user input through Pi UI forms/URL prompts (default: true when Pi UI form support is available). |
-| `elicitationAutoOpenUrls` | Automatically open URL elicitations without prompting first (default: false). |
+| `elicitation` | Allow MCP servers to request user input through Pi dialogs (default: true when Pi UI is available). |
 
 Per-server `idleTimeout` overrides the global setting.
 
@@ -433,6 +452,8 @@ Prefer `.mcp.json` for project-local shared MCP config. Use `.pi/mcp.json` only 
 | Call | `mcp({ tool: "...", args: '{"key": "value"}' })` |
 | Connect | `mcp({ connect: "server-name" })` |
 | UI messages | `mcp({ action: "ui-messages" })` |
+| Auth start | `mcp({ action: "auth-start", server: "name" })` |
+| Auth complete | `mcp({ action: "auth-complete", server: "name", args: '{"redirectUrl":"..."}' })` |
 
 MCP proxy and direct-tool results render compactly by default: long text shows the first three lines plus a `Ctrl+O to expand` hint, while the full result remains available when expanded and is still returned unchanged to the model.
 
@@ -457,155 +478,4 @@ The `/mcp` and `/mcp-auth` slash commands are Pi-specific UI shortcuts. On other
 
 If `settings.autoAuth` is `true`, `mcp({ connect: ... })`, `mcp({ tool: ... })`, and direct tool calls automatically run OAuth when needed and retry once.
 
-In Pi's interactive sessions, you can also authenticate from `/mcp` with `ctrl+a` or Enter on a server that needs auth. In non-interactive sessions, browser-based OAuth still requires `/mcp-auth <server>`. `/mcp-auth` without a server only opens a picker in the interactive UI.
-
-## Universal Adapter
-
-This package exposes a small, agent-agnostic surface so any coding agent can drive the same MCP machinery that powers the Pi integration. Pi is the first and most complete implementation; new agents plug in by implementing two interfaces and instantiating the MCP machinery through them.
-
-### The shape
-
-```typescript
-// interfaces/agent-api.ts (source of truth)
-export interface AgentAPI {
-  registerTool(tool: ToolRegistration): void;
-  registerCommand(name: string, config: CommandConfig): void;
-  registerFlag(name: string, config: FlagConfig): void;
-  on(event: string, handler: (...args: unknown[]) => void): void;
-  getAllTools(): ToolInfo[];
-  getFlag(name: string): string | undefined;
-  sendMessage(message: unknown, options?: unknown): void;
-  exec(command: string, args: string[]): Promise<unknown>;
-}
-
-export interface AgentContext {
-  cwd: string;
-  hasUI: boolean;
-  ui?: UISystem;
-  model?: string;
-  modelRegistry?: unknown;
-  signal?: AbortSignal;
-  reload?(): Promise<void>;
-}
-
-export interface UISystem {
-  notify(message: string, level: "info" | "warning" | "error"): void;
-  setStatus(key: string, value: string | undefined): void;
-  form?(config: FormConfig): Promise<FormResult>;
-  custom?(renderer: UIRenderer, options: UIOptions): void;
-  theme?: { fg(color: string, text: string): string };
-}
-```
-
-The Pi implementation lives in `adapters/pi-adapter.ts` (wraps `ExtensionAPI` from `@earendil-works/pi-coding-agent`) and ships an `adaptPiContext(ctx)` helper that maps a Pi `ExtensionContext` into an `AgentContext`. The full mapping table — every method, every field, every Pi call site — is in [`MAPPING.md`](./MAPPING.md).
-
-### Wiring a non-Pi agent
-
-The example below is a fully self-contained mock agent — no real LLM, no network — that exercises every `AgentAPI` method the adapter actually uses. Drop it into a scratch file to smoke-test the contract:
-
-```typescript
-// NOTE: `McpAdapter` is shown here as the future universal entry point.
-// At the time of writing, the canonical Pi entry is `mcpAdapter(pi)` from
-// index.ts. A `McpAdapter` constructor that takes (AgentAPI, AgentContext)
-// is the planned Phase-4+ surface; the rest of this snippet is the
-// intended end-state shape, not yet shipped.
-
-import type {
-  AgentAPI,
-  AgentContext,
-  AgentId,
-  AgentPathResolver,
-  ToolInfo,
-  ToolRegistration,
-  CommandConfig,
-  FlagConfig,
-  FormConfig,
-  FormResult,
-  UISystem,
-} from "./interfaces/agent-api";
-// In an external consumer, replace the path above with the published package
-// name (currently `pi-mcp-adapter`) once the type-only subpath export lands.
-
-class MockAgent implements AgentAPI {
-  private tools: ToolRegistration[] = [];
-  private flags: Record<string, string> = {};
-  private listeners = new Map<string, ((...args: unknown[]) => void)[]>();
-
-  registerTool(tool: ToolRegistration) {
-    this.tools.push(tool);
-  }
-  registerCommand(_name: string, _cfg: CommandConfig) {
-    /* host agent's own command surface */
-  }
-  registerFlag(name: string, _cfg: FlagConfig) {
-    /* declare a flag the adapter will read via getFlag() */
-    this.flags[name] = "";
-  }
-  on(event: string, handler: (...args: unknown[]) => void) {
-    const list = this.listeners.get(event) ?? [];
-    list.push(handler);
-    this.listeners.set(event, list);
-  }
-  getAllTools(): ToolInfo[] {
-    return this.tools as unknown as ToolInfo[];
-  }
-  getFlag(name: string) {
-    return this.flags[name];
-  }
-  sendMessage(message: unknown, _options?: unknown) {
-    console.log("[mock-agent] message:", message);
-  }
-  async exec(command: string, args: string[]): Promise<unknown> {
-    return { command, args, ts: Date.now() };
-  }
-}
-
-const mock = new MockAgent();
-const ctx: AgentContext = {
-  cwd: process.cwd(),
-  hasUI: false,
-};
-
-// Future Phase-4+ universal entry. Today: use `mcpAdapter(pi)` from index.ts.
-// new McpAdapter(mock, ctx).activate();
-
-// A custom path resolver for the mock agent:
-const resolver: AgentPathResolver = {
-  id: "mock" as AgentId,
-  globalConfigPath: () => "/tmp/mock-mcp.json",
-  projectConfigPath: () => ".mcp.json",
-  agentDir: () => "/tmp/mock-agent",
-  cachePath: () => "/tmp/mock-agent/mcp-cache.json",
-  authDir: () => "/tmp/mock-agent/mcp-oauth",
-};
-```
-
-### Path resolution across agents
-
-Config file lookup is itself pluggable. `interfaces/agent-paths.ts` defines `AgentPathResolver`; `createPiResolver()` is the default factory and `DEFAULT_AGENT_RESOLVER` is wired into `config.ts`. For a new agent, provide a resolver that returns the agent's global MCP config path, then thread it through `getConfigSources(resolver)`. The existing `getPiGlobalConfigPath()` wrapper is kept as a backward-compat shim around `resolveAgentGlobalConfigPath()` so Pi users see no behaviour change.
-
-### What you get
-
-- One `mcp` tool in context (~200 tokens) instead of hundreds
-- Lazy server connections, cached tool metadata, idle timeouts
-- Direct-tool promotion via `directTools`
-- MCP sampling / elicitation support, gated by the host agent's capabilities
-- Backward-compatible `mcpAdapter` default export — Pi users do not need to change anything
-- `piMcpAdapter` alias and re-exports of `PiAdapter`, `adaptPiContext`, `DEFAULT_AGENT_RESOLVER`, `createPiResolver`, `resolveAgentGlobalConfigPath`, `AgentPathResolver`, `AgentId`
-
-## How It Works
-
-- One `mcp` tool in context (~200 tokens) instead of hundreds
-- Servers are lazy by default — they connect on first tool call, not at startup
-- Tool metadata is cached to disk so search/list/describe work without live connections
-- Idle servers disconnect after 10 minutes (configurable), reconnect automatically on next use
-- npx-based servers resolve to direct binary paths, skipping the ~143 MB npm parent process
-- MCP server validates arguments, not the adapter
-- Keep-alive servers get health checks and auto-reconnect
-- Specific tools can be promoted from the proxy to first-class host-agent tools via `directTools` config, so the LLM sees them directly instead of having to search
-
-## Limitations
-
-- Cross-session server sharing not yet implemented (each agent session runs its own server processes)
-- Compact MCP result rendering summarizes text, but inline images are still controlled by the host agent's image display settings and may render below the compact text summary
-- MCP sampling support is text-only; context inclusion, tools, stop sequences, audio, and image content are rejected with explicit errors
+In interactive sessions, you can also authenticate from `/mcp` with `ctrl+a` or Enter on a server that needs auth. In remote/headless sessions, use the proxy tool's `auth-start` and `auth-complete` actions to copy the authorization URL locally and paste the redirect URL back into Pi. `/mcp-auth` without a server only opens a picker in the interactive UI.
