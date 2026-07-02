@@ -113,6 +113,25 @@ npx tsx scripts/upstream-divergence.ts --no-color
 
 Files NOT in the registry are resolved by the 12-category per-file default-resolution matrix inlined in §4.2 below — no need to add them to the registry.
 
+### 3.5 Conflict resolution: delegate to `resolve-conflicts` skill (v3.2)
+
+When `git merge upstream/main` produces conflicts, **do not resolve them manually with custom rules**. Instead, delegate to the `resolve-conflicts` skill:
+
+```
+Skill /resolve-conflicts
+```
+
+The `resolve-conflicts` skill provides a professional, plan-first conflict resolution framework with:
+- 7 conflict type patterns (imports, tests, generated files, config, code logic, structs, deleted-modified)
+- Structured resolution plan + user approval before executing
+- Decision tracking (remember user choices, apply to similar conflicts)
+- Validation scripts (`validate-conflicts.sh`, `handle-deleted-modified.sh`)
+- One-line explanation for every conflict resolved
+
+**upstream-merge's role**: After resolve-conflicts resolves the conflicts, run §4.1 Pi-coupling grep (advisory) + §5 Checklist to validate the merge result from a fork-specific perspective.
+
+> **Removed in v3.2** (2026-07-01): The previous §3.5 "Conflict hunk independence check" (awk-based 4-category classification + "保留两侧" conditions) and §4.4 "Same-function 5-step protocol" were custom conflict resolution rules that duplicated `resolve-conflicts` skill's functionality. They have been removed in favor of the professional skill.
+
 ## 4. Decision tree
 
 Walk these steps in order, branching on the manifest row for each changed file.
@@ -125,7 +144,7 @@ Walk these steps in order, branching on the manifest row for each changed file.
 |--------------------|--------|
 | `ours` | `git checkout --ours <path>`; mark "ours" in the merge commit body; jump to §5 Checklist |
 | `theirs` | `git checkout --theirs <path>`; run `npx tsc --noEmit`; jump to §5 Checklist |
-| `assess` | Run the §4.1 Pi-coupling marker grep; 0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow |
+| `assess` | **遇到冲突时委托给 `resolve-conflicts` skill** (§3.5). After conflicts are resolved, run §4.1 Pi-coupling grep (advisory only — record hit count in commit body, not blocking). |
 | `manual` | Open the editor; for each hunk, prefer upstream if generic, prefer ours if Pi-coupled; see §4.3 rule of thumb |
 
 **Fast-path summary by Category** (covers `ours` / `theirs` rows without grep):
@@ -203,26 +222,44 @@ The 12-category per-file default-resolution matrix (sourced from D-23; inlined h
 
 This matrix covers ~70% of files; the remaining ~10% are the special cases in `references/special-cases.md`. The §4.1 grep runs on `assess` rows before any `--theirs` decision.
 
-#### 4.2b 5-step follow-up flow (Pi-coupling re-introduction)
+#### 4.2b Pi-coupling soft follow-up (advisory, non-blocking) (v3.1)
 
-When the §4.1 grep returns ≥1 hit (in sub-commands 1-3, 5; or hits 4 with non-`ctx.ui` Pi-coupling source), the merge is **not** blocked. The follow-up flow extracts the Pi-coupling in a separate commit and tracks it with a labelled issue:
+When the §4.1 grep returns ≥1 hit in core source, the merge is **not blocked**. Best-effort follow-up:
 
-1. **Accept the upstream diff first.** `git checkout --theirs <path> && git add <path>`. Do **not** block the merge on the Pi-coupling; the merge commit lands cleanly.
-2. **Stage a follow-up commit** that refactors the Pi-coupling out. Use the Phase 5 DECOUPLE pattern: extract to an adapter (`adapters/<agent>/*`), wrap behind `AgentContext.ui`, or route through the generic `RenderOutput` interface (see D-04 / D-07).
-3. **Open a follow-up issue** with title prefix `pi-coupling-followup:` and label `pi-coupling-followup`. The issue body should reference the merge commit SHA and the offending file.
-4. **Reference the issue number in the merge commit body** (e.g., `Refs #N`). The follow-up commit's message should also include the issue reference.
-5. **Do not manually re-edit the upstream diff during merge.** Editing upstream hunks to "fix" the Pi-coupling creates more conflicts and obscures the audit trail; let the follow-up commit do the work in isolation.
+1. **Conflicts resolved by `resolve-conflicts` skill** (§3.5) — accept the resolution result.
+2. **Optionally open a follow-up issue** (best-effort, only if `gh` CLI authenticated). Skip if `gh` not authenticated.
+
+> **Removed from v1** (2026-07-01, Phase 13): steps "Stage a follow-up commit that refactors the Pi-coupling out", "Open a follow-up issue" (now optional), and "Reference the issue number in the merge commit body" are removed from the mandatory path. Rationale: fork is downstream, not adversarial. The adapter layer (`adapters/pi-adapter.ts`) provides runtime isolation; Pi-coupling in core is log-only. See `docs/upstream-merge-retrospective.md` §2.1.3 for the full rationale.
 
 ### 4.3 `manual` review rule of thumb
 
 For `manual` rows, accept upstream hunks unless they touch a function signature that generic code depends on — the canonical example is `createMcpAdapter(agentapi, ctx, config, cache)` in `adapters/entry.ts`; that signature is frozen per D-07 and any upstream change to it is rejected (`git checkout --ours`).
+
+### 4.4 Conflict resolution: delegate to `resolve-conflicts` skill (v3.2)
+
+When conflicts occur during `git merge upstream/main`, **delegate to the `resolve-conflicts` skill** instead of using custom resolution rules:
+
+```
+Skill /resolve-conflicts
+```
+
+The `resolve-conflicts` skill handles all conflict types professionally:
+- **Imports**: Merge all unique imports, group by module
+- **Tests**: Keep all tests unless identical, merge fixtures
+- **Generated files**: Regenerate from source
+- **Config**: Merge all keys, choose appropriate values
+- **Code logic**: Analyze intent, merge if orthogonal, choose one if conflicting
+- **Structs**: Include all fields from both branches
+- **Deleted-modified**: Backup, analyze, apply to new location
+
+> **Removed in v3.2**: The previous §4.4 "Same-function 5-step protocol" (extract ours/theirs → classify merge mode → document decision) was a custom conflict resolution rule. It has been removed in favor of `resolve-conflicts` skill's Step 4 "Execute Resolution Plan" which provides the same functionality with a more comprehensive framework (7 patterns, decision tracking, user approval flow).
 
 ## 5. Checklist
 
 Run all 7 checks before declaring the upstream-merge flow complete. Each is a single command the agent can execute and inspect. Steps (a)–(f) gate the Step 1 merge commit on `main`; step (g) gates the Step 2 propagation into the working branch. A merge is not done until every item is recorded with PASS / N/A / FAIL.
 
 - **(a) All conflicts resolved** — `git diff --name-only --diff-filter=U | wc -l` returns 0. If > 0, there are still unresolved hunks; re-walk the decision tree.
-- **(b) Pi-coupling markers = 0 in merged core code** — re-run the 5 sub-commands from §4.1 against the post-merge working tree; the only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones). For Scenario-2-style Pi-coupling re-introductions, this passes only **after** the §4.2b follow-up commit lands, not after the merge commit alone.
+- **(b) Pi-coupling markers advisory log (no longer blocking)** — re-run the 5 sub-commands from §4.1 against the post-merge working tree; record the total hit count in the merge commit body. The only acceptable hits are inside `adapters/`, `types/`, or `__tests__/` (legal coupling zones); any hit outside these zones is acceptable (advisory) but should be tracked for the next Pi-coupling reduction cycle. Per v3.1 Phase 13 policy change (2026-07-01), this check no longer blocks the merge — see §4.2b and `docs/upstream-merge-retrospective.md` §2.1.3.
 - **(c) TypeScript compiles** — `npx tsc --noEmit` exits 0.
 - **(d) Tests are green** — `npm test` (which runs `test:prebuild` then the full vitest suite) exits 0. The quick alternative is `npx vitest run __tests__/adapter-contract.test.ts` for the parametric adapter contract.
 - **(e) Divergence check passes — `npm run upstream:check` exits 0** (no stale registry entries; `diverged-but-not-registered` warnings are acceptable, see §4.2a category defaults). The cross-check script replaces the Phase 8 manifest-gap ≤ 10 check; per D-34, exit 1 means stale entries require registry cleanup before the merge commit.
@@ -230,3 +267,120 @@ Run all 7 checks before declaring the upstream-merge flow complete. Each is a si
 - **(g) Step 2 propagation complete (skipped if working branch is `main`)** — `git checkout <working-branch> && git merge main` succeeds as a fast-forward or a clean small merge. The working branch now contains the upstream changes from Step 1; if conflicts appear, they are fork-vs-fork, not upstream-vs-fork, and the resolution strategy is the fork's own (consult the relevant Phase plan, not the §4 decision tree). After Step 2, re-run (c) and (d) on the working branch to confirm the propagated state still builds and tests pass.
 
 When steps (a)–(f) PASS, push the merge branch and open a PR per the standard fork workflow (see `references/pi-coupling-markers.md` §"PR template" for the body). When step (g) also PASS, the upstream-merge flow is fully complete on both `main` and the working branch.
+
+## 6. Fork architecture principles (NEW, v3.1)
+
+> **Purpose**: Prevent future merge conflicts at the source, not just resolve them better.
+> Source: User insight 2026-07-01 ("fork 引入的代码，如果是独立的，应该独立成文件") + retrospective §3.2.1 L1/L2/L3 decision matrix.
+
+### 6.1 Core principle
+
+**When introducing fork-only code, ALWAYS prefer "独立文件" over "修改 upstream 文件".**
+
+The conflict resolution cost grows with granularity:
+
+| 粒度 | 冲突表现 | 解决成本 |
+|------|---------|---------|
+| 文件级 | 整个文件 conflict | 🟢 1 行 |
+| 段落级 | 文件内某段 conflict | 🟡 需 §4.4 5 步 |
+| 函数级 | 同一函数内 conflict | 🟠 需 §4.4 5 步 |
+| 行级大块 | 同一函数 343 行同时被改 | 🔴 灾难 |
+
+**Target: 把所有 fork 引入的独立代码推到"文件级"粒度。**
+
+### 6.2 L1/L2/L3 decision matrix (for current fork state)
+
+> Full matrix in `docs/upstream-merge-retrospective.md` §3.2.1.
+
+| Layer | Category | Action |
+|-------|----------|--------|
+| **L1** | REPLACEMENTS（9 个 Phase 3 抽象改造）| **接受冲突**——撤回 = 撤销 universal 目标 |
+| **L2** | ADDITIONS（8 个 fork 加 universal 段）| 大部分已优化（Phase 12 删除 per-agent）；剩余不值得抽 |
+| **L3** | TESTS（~10 个 fork universal 测试）| 按 Plan 14-04 拆 init-elicitation |
+
+### 6.3 Future-proofing rules (apply to all new fork code)
+
+When adding new fork-only functionality:
+
+1. **New agent adapter** → create `adapters/<new-agent>.ts`, NOT modify `adapters/entry.ts`
+2. **New test scenario** → create `__tests__/<new-scenario>.test.ts`, NOT extend existing `__tests__/init-*.test.ts`
+3. **New abstract type** → extend `interfaces/agent-api.ts`, NOT import Pi types directly in core
+4. **New universal helper** → create `adapters/<helper>.ts` or `utils/<helper>.ts`, NOT add as inline closure in `entry.ts`
+5. **New fork-only documentation** → create `docs/<new-topic>.md`, NOT extend `docs/upstream-merge-retrospective.md` in place (use references + cross-links)
+
+**Anti-pattern**: Adding a new `registerCommand` or `registerTool` call inline in `adapters/entry.ts` `createMcpAdapter` body. This creates future merge conflict at the function level (243-line function body).
+
+**Correct pattern**: Create a new file like `adapters/commands/<new-command>.ts` exporting a `setup<NewCommand>(agentapi, getState, getInitPromise)` function, then call that function from `createMcpAdapter`.
+
+### 6.4 Pre-commit guardrail (CI in Phase 15)
+
+Phase 15 P2-3 will add a CI check that runs:
+
+```bash
+# Count: new files vs modified files in this PR
+new_files=$(git diff --name-only --diff-filter=A origin/main...HEAD | wc -l)
+modified_files=$(git diff --name-only --diff-filter=M origin/main...HEAD | wc -l)
+
+# Warn if too many modifications relative to new files
+# (suggests inline additions rather than new file extractions)
+ratio=$(echo "scale=2; $modified_files / ($new_files + 1)" | bc)
+if (( $(echo "$ratio > 2.0" | bc -l) )); then
+  echo "⚠ High modify-to-new ratio: $ratio. Consider extracting independent code to new files."
+fi
+```
+
+**Target ratio**: ≤ 2.0 modifications per new file. If exceeded, PR review should consider whether fork code could be extracted to a new file.
+
+### 6.5 Cross-references
+
+- `docs/upstream-merge-retrospective.md` §3.2.1 — full L1/L2/L3 matrix with empirical data (249 fork-only commits, 278 diverged files)
+- `docs/upstream-merge-retrospective.md` §2.4 — multi-perspective reflection on conflict granularity
+- SKILL.md §1 — Two-step git merge flow (the merge strategy that this principle supports)
+
+### 6.6 Code structure optimization: how to reduce future conflicts (v3.2)
+
+Based on the 2026-07-01 first merge attempt (11 conflicts, 249 fork-only commits, 278 diverged files), the following code structure changes would reduce future conflict frequency:
+
+**1. Fork-only code in independent files (not modify upstream files)**
+
+When adding new fork-only functionality, create new files — do NOT add code to upstream files that upstream will also modify:
+
+- ✅ New agent adapter → `adapters/<new-agent>.ts` (not modify `adapters/entry.ts`)
+- ✅ New test scenario → `__tests__/<new-scenario>.test.ts` (not extend `__tests__/init-*.test.ts`)
+- ✅ New abstract type → extend `interfaces/agent-api.ts` (not import Pi types in core)
+- ✅ New universal helper → `adapters/<helper>.ts` or `utils/<helper>.ts` (not inline in `entry.ts`)
+- ✅ New fork-only doc → `docs/<new-topic>.md` (not extend `docs/upstream-merge-retrospective.md` in place)
+
+**2. Avoid large functions that both sides will modify** (REVISED 2026-07-02: heuristic, not absolute)
+
+The 2026-07-01 attempt showed `adapters/entry.ts` `createMcpAdapter` (324 lines) as the hardest conflict — both fork and upstream modify the same function body. Break large functions into smaller, independently-modifiable units:
+
+- ❌ One 324-line function → ✅ 4 small functions (~80 lines each) + thin orchestrator
+- ❌ Inline session lifecycle in `createMcpAdapter` → ✅ Extract to `setupSessionHandlers()`
+- ❌ Inline command registration → ✅ Extract to `registerCommands()`
+
+> **Heuristic, not absolute rule** (REVISED 2026-07-02): "Large function" is not well-defined — 30 lines of pure logic is large, but 300+ lines of YAML/JSON/case-statement config may be reasonable. Use `npm run check:large-functions` (default 300 lines) as a **heuristic indicator**, not an absolute threshold. A function being detected as "large" does NOT automatically mean it should be refactored — **refactor only if**:
+>
+> 1. The function is in a file that both fork and upstream actively modify (verify with `git log upstream/main..main -- <file>` + `git log main..upstream/main -- <file>`)
+> 2. AND the function has been the source of past merge conflicts (check retrospective)
+> 3. AND the function's body is "structurally simple" (not just long due to data tables/cases)
+>
+> If any of the above conditions is false, the line count is not a merge-conflict risk — leave it alone. **The root cause of merge conflicts is "both sides modify the same function", not "the function is long".**
+
+**3. Keep import sections stable**
+
+Import conflicts are the easiest to resolve but still cost time. Minimize import churn:
+
+- Use `interfaces/agent-api.ts` abstractions instead of direct Pi type imports (fork-specific imports don't conflict with upstream Pi imports)
+- Group imports consistently (std → external → internal → relative)
+- When adding a new dependency, add it in a new file, not in an existing core file
+
+**4. Separate fork-only config from upstream config**
+
+- ✅ Fork config in `.planning/` (fork-only, never conflicts)
+- ✅ Fork CI in `.github/workflows/` (fork-only, never conflicts)
+- ❌ Fork config inline in `package.json` or `tsconfig.json` (shared with upstream, will conflict)
+
+**5. Run `npm run upstream:check` before every PR**
+
+The `--json` mode (CI-02) provides machine-readable divergence data. Use it to detect new divergence early.

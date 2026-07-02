@@ -2,6 +2,8 @@
 
 ## Milestones
 
+- 🚧 **v3.2 upstream-merge 实战 (重试第一次 merge with v3.1 protocols)** — Phase 16 (planning 2026-07-01) — 1 phase / 0 plans. Source: SKILL.md §3.5 + §4.2b + §4.4 + §6 (shipped in v3.1). Goal: validate v3.1 protocols by re-running the first real `git merge upstream/main`.
+- ✅ **v3.1 upstream-merge 治理与架构优化** — Phases 13-15 (shipped 2026-07-01) — 3 phases / 0 plans / 16 commits. Source: `docs/upstream-merge-retrospective.md`. SKILL.md policy rewrite (§3.5 + §4.2b + §4.4 + §6), 2 GitHub Actions workflows (fork-only ratio + Pi-coupling guard), `--json` mode for `upstream-divergence.ts`. Archive: `.planning/milestones/v3.1-ROADMAP.md` + `.planning/milestones/v3.1-REQUIREMENTS.md` + `.planning/milestones/v3.1-MILESTONE-AUDIT.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v3.0 Protocol-Category Simplification** — Phases 10-12 (shipped 2026-06-30) — 3 phases / 9 plans / 16 tasks. Universal MCP stdio server, protocol forwarding, per-agent adapter elimination. Archive: `.planning/milestones/v3.0-ROADMAP.md`. Summary: `.planning/MILESTONES.md`.
 - ✅ **v2.0 Multi-Agent Adapter Completion** — Phases 1-9 (shipped 2026-06-23) — 9 phases / 25 plans / 17 tasks. Archive: `.planning/milestones/v2.0-ROADMAP.md` and `.planning/milestones/v2.0-REQUIREMENTS.md`. Summary: `.planning/MILESTONES.md`.
 
@@ -353,6 +355,95 @@ Plans:
 - [x] 12-03-PLAN.md — bin/mcp-server.ts universal server (reordered flow, inline AgentAPI, capability discovery, forwarder injection) + delete per-agent adapters/tests + update package.json/vitest.config.ts (D-04, D-05, D-09, D-10) ✅
 - [x] 12-04-PLAN.md — E2E tests + parametric test verification + full test suite (D-08, D-13) ✅
 - [x] 12-05-PLAN.md — SKILL.md simplification (Branch A + C only) + README + CHANGELOG + upstream-merge registry (D-03, D-08, D-10, D-12)
+
+### Phase 13: SKILL.md 改写 (P0 from retrospective) — ✅ COMPLETE
+
+**Goal:** Update `skills/upstream-merge/SKILL.md` so that the first real upstream-merge attempt in v3.2+ can resolve all 11 conflicts using policy + protocol, not on a case-by-case basis.
+**Requirements**: MERGE-01, MERGE-02, MERGE-03, MERGE-04
+**Depends on:** Phase 12
+**Plans:** 4/4 plans complete (13-01, 13-02, 13-03, 13-04) + 1 verification plan (13-05)
+**Status:** ✅ COMPLETE (5 atomic commits: ebb7ed8, d48bf3c, d5341af, 872e55a, 2a9da9b; SKILL.md +§3.5 +§4.2b +§4.4 +§5(b) updated; pi-coupling-markers.md advisory; 528/528 tests pass)
+
+Success criteria:
+
+1. ✅ SKILL.md §4.1 row for `assess` reads "Default `--theirs`" instead of "0 hits → `--theirs`; ≥1 hit → §4.2b follow-up flow"
+2. ✅ SKILL.md §4.2b reduces from 5-step mandatory to 2-step soft, with explicit "skip step 2 if `gh` not authenticated" branch
+3. ✅ New §3.5 "Conflict hunk independence check" exists with 4-category decision matrix and awk-based function-extraction script
+4. ✅ New §4.4 "Same-function conflict resolution protocol" exists with mandatory 5-step: extract ours/theirs → view function context → classify merge mode (append/replace/wrap) → document decision in commit body
+5. ✅ `references/pi-coupling-markers.md` updated to reflect advisory (not blocking) status of Pi-coupling hits
+6. ✅ Section numbering globally consistent (no orphan §3.4/§3.6/§4.5 references)
+7. ✅ `npm test` still PASS (528/528 tests, exit 0; markdown changes have zero test impact)
+
+### Phase 14: 大文件拆分 (P1 from retrospective) — REDESIGNED 2026-07-01 → COMPLETE (DOCS + CI)
+
+**Goal:** Decompose 4 large files (adapters/entry.ts 381, proxy-modes.ts 835, elicitation-handler.ts 286, __tests__/init-elicitation.test.ts 98) so that conflict hunk independence is at the FUNCTION or SECTION level, not line-within-function level. **NOTE**: retrospective's "index.ts 343 lines" target was outdated — Phase 5 entry-point refactor already made `index.ts` a 27-line thin wrapper; the real target is `adapters/entry.ts` `createMcpAdapter` (324 lines).
+**Requirements**: ARCH-02, ARCH-03, ARCH-04, ARCH-05, **ARCH-06 (new)**
+**Depends on:** Phase 13 (so new conflict-resolution protocols can be applied to subsequent merges)
+**Plans:** 1/4 plans + 1 docs deliverable + 2 CI workflows complete (CLOSED with policy + CI, no code refactor)
+**Status:** ✅ COMPLETE (4-deliverable approach: A L1/L2/L3 matrix in retrospective §3.2.1; B 8 L2 files per-file analysis in §12; C 2 CI workflows; D SKILL.md §6 architecture principles; L2 analysis confirmed 0 refactor needed; ARCH-01 retired, ARCH-06 added)
+
+Success criteria:
+
+1. ✅ L1/L2/L3 decision matrix documented in `docs/upstream-merge-retrospective.md` §3.2.1 + SKILL.md §6
+2. ✅ 8 L2 ADDITIONS per-file analysis (no refactor needed; documented in retrospective §12)
+3. ✅ Future-proofing rules enforced via 2 GitHub Actions workflows (fork-only ratio + Pi-coupling guard)
+4. ✅ All new files are < 350 lines (ARCH-05) — no violation found
+5. ✅ `npx tsc --noEmit` exit 0 (no type regressions)
+6. ✅ `npm test` exit 0 with 528/528 tests pass
+7. ✅ `npm run upstream:check` exit 0 (no new Pi-coupling leaks)
+8. ✅ Phase 15 partial (CI-01 + CI-03) shipped; CI-02 (`--json` mode for upstream-divergence.ts) deferred to v3.2
+
+**Final approach (user insight 2026-07-01)**: Instead of mechanical refactoring, Phase 14 closed via 4 deliverables:
+- A: L1/L2/L3 matrix in retrospective §3.2.1
+- B: 8 L2 files per-file analysis (0 refactor needed)
+- C: 2 CI workflows (.github/workflows/check-fork-only-ratio.yml + check-pi-coupling.yml)
+- D: SKILL.md §6 "Fork architecture principles" + 5 future-proofing rules
+
+**Rationale**: Empirical analysis of 249 fork-only commits + 278 diverged files shows:
+- 9 L1 REPLACEMENTS are core abstractions (Phase 3 — cannot be reversed)
+- 8 L2 ADDITIONS are already optimized (Phase 12 removed per-agent code; remaining +4 lines in agent-dir.ts not worth extracting)
+- 233 fork-only new files are already independent
+- Future protection via §6.3 rules + Phase 15 CI prevents regression
+
+### Phase 15: 防御性 CI (P2 from retrospective) — ✅ COMPLETE (2026-07-01)
+
+**Goal:** Add 3 layers of automated guardrails so the next upstream-merge surfaces conflicts earlier and detects architecture drift automatically.
+**Requirements**: CI-01, CI-02, CI-03
+**Depends on:** Phase 14 (so file-level architecture is stable)
+**Plans:** 3/3 CI deliverables shipped (CI-01 + CI-02 + CI-03)
+**Status:** ✅ COMPLETE (CI-01: .github/workflows/check-pi-coupling.yml; CI-02: scripts/upstream-divergence.ts --json mode + JSON Schema v1.0 documented in retrospective §13; CI-03: .github/workflows/check-fork-only-ratio.yml with modify-to-new ratio target ≤ 2.0)
+
+Success criteria:
+
+1. ✅ `.github/workflows/check-pi-coupling.yml` exists and runs on every PR; advisory detects `import .*@earendil-works/pi-` in `src/` excluding `adapters/`, `types/`, `__tests__/`
+2. ✅ `scripts/upstream-divergence.ts` extended with `--json` output mode emitting JSON Schema v1.0 (documented in `docs/upstream-merge-retrospective.md` §13); exit code 0 means no stale entries
+3. ✅ `.github/workflows/check-fork-only-ratio.yml` exists; counts new files vs modified files in PR; modify-to-new ratio target ≤ 2.0 (WARN at >2.0, FAIL at >5.0)
+
+### Phase 16: Upstream-merge 实战 (v3.1 protocols applied) — PLANNING
+
+**Goal:** Execute the first real `git merge upstream/main` using the v3.1 SKILL.md §3.5 + §4.2b + §4.4 protocols. Validate that conflict granularity moves from "line-level/function-level" (the 2026-07-01 first attempt) to "file-level/section-level" (per L1/L2/L3 classification in retrospective §3.2.1). Propagate to v1.0 working branch per §1 two-step flow. Push to origin. Tag new release.
+**Requirements**: TBD (will be derived from the actual conflicts in the merge attempt)
+**Depends on:** Phase 15 (so CI guardrails are in place to validate the merge result)
+**Plans:** 0/3 plans complete (planning)
+
+**3-plan structure** (planned, to be created via `gsd-plan-phase 16` after merge attempt):
+
+- **16-01-PLAN.md — Pre-merge preparation**: Fetch upstream, run `npm run upstream:check -- --json` to see live divergence. Compare with 2026-07-01 baseline (278 diverged files). Document expected conflicts based on v3.0/v3.1 fork-only commits.
+- **16-02-PLAN.md — Execute `git merge upstream/main`**: Resolve conflicts using new protocols (§3.5 classification + §4.4 5-step + §4.1 default `--theirs` + §4.2b soft follow-up). Commit with `upstream-merge:` prefix including merge-mode + pi-coupling-hits metadata.
+- **16-03-PLAN.md — Step 2 propagation + finalization**: `git checkout v1.0 && git merge main` per §1 two-step flow. Run tsc + npm test + npm run upstream:check. Push to origin. Tag new release. Open PR.
+
+Success criteria:
+
+1. ⏳ Pre-merge divergence count ≤ 278 (no new conflicts beyond v3.1 baseline)
+2. ⏳ All conflicts resolve via policy/protocol (not case-by-case reading)
+3. ⏳ Zero "function-level" conflicts (per §3.5 classification, all should be "different function" or "import region")
+4. ⏳ All `upstream-merge:` commits include `merge-mode` + `pi-coupling-hits` metadata in body
+5. ⏳ `npx tsc --noEmit` exit 0 after merge
+6. ⏳ `npm test` 528/528+ tests pass (no regressions)
+7. ⏳ `npm run upstream:check` exit 0 after merge
+8. ⏳ Step 2 propagation to v1.0 working branch clean
+9. ⏳ Tag v3.1.1-universal or v3.2.0-universal created (depending on conflict magnitude)
+10. ⏳ Retrospective update: `docs/upstream-merge-retrospective.md` §14 added with first-merge-v3.2 lessons
 
 ---
 

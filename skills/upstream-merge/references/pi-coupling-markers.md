@@ -27,12 +27,14 @@ These 7 markers identify direct Pi-coupling. Any hit in core MCP source
 | 6 | `PI_CODING_AGENT_DIR` | 3 (Env var) | Pi's env var; DECOUPLE-07 moved it to `AgentPathResolver`. | 0 outside `agent-dir.ts` (and even there only via the env reader). |
 | 7 | `@earendil-works/pi-(coding-agent\|ai\|tui)` + bare `earendil-works` token | 2 (Package) | Direct import from Pi packages; any leak into core is a follow-up. | The `types/pi-*.d.ts` declarations are excluded by the §4.1 grep via `grep -vE 'types/pi-(ai\|coding-agent\|tui)\.d\.ts:'`. |
 
-> **Blast radius if missed:** a HIGH-precision hit that slips past the
-> grep means Pi-coupling re-enters the core. The downstream effect: fork
-> can no longer be used with Qoder / future agents (D-07 violations
-> compound), and future upstream merges get harder. Always escalate a
-> HIGH-precision hit via the §4.2b follow-up flow, never silently
-> `git checkout --theirs`.
+> **Blast radius if missed (advisory as of v3.1, 2026-07-01):** a HIGH-precision hit
+> in `core MCP source` (init.ts, mcp-*.ts, proxy-modes.ts, etc.) signals
+> Pi-coupling re-entering the core. Per Phase 13 policy change, Pi-coupling
+> is now **advisory** — accept `--theirs` and optionally log a follow-up
+> issue. The blast radius is reduced because the adapter layer
+> (`adapters/pi-adapter.ts`) provides runtime isolation even when types
+> leak. See `docs/upstream-merge-retrospective.md` §2.1.3 for the full
+> rationale.
 
 ## MEDIUM-precision markers
 

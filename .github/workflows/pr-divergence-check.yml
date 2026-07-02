@@ -1,0 +1,76 @@
+name: PR Divergence Check
+
+# Implements Phase 15.5 CI-06 (v3.2): pr-divergence-check
+# Source: skills/upstream-merge/SKILL.md §6.6 rule 5
+# Date: 2026-07-02
+
+on:
+  pull_request:
+    branches: [main, v1.0]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pr-divergence-check:
+    name: Run upstream divergence check on PR
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for diff
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/nicobailon/pi-mcp-adapter.git || true
+
+      - name: Fetch upstream
+        run: git fetch upstream main 2>&1 || echo "::warning::upstream fetch failed; check skipped"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install tsx
+        run: npm install --no-save tsx
+
+      - name: Run upstream divergence check (--json)
+        if: env.SKIP_CHECK != 'true'
+        run: |
+          npx tsx scripts/upstream-divergence.ts --json --no-color > /tmp/divergence.json
+          cat /tmp/divergence.json
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && env.SKIP_CHECK != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('/tmp/divergence.json', 'utf8'));
+            const body = `## 📊 Pre-merge Divergence Report (v3.2)
+
+- **Pre-merge divergence count**: ${data.diverged_count} files
+- **Registered** (in special-cases.md): ${data.registered.length}
+- **Default-resolved by category** (§4.2a): ${data.diverged_but_not_registered.length}
+- **Stale entries** (must clean before merge): ${data.stale.length}
+- **Exit code**: ${data.exit_code} (0 = clean, 1 = stale entries)
+
+${
+              data.stale.length > 0
+                ? `> ⚠️ **Stale entries present.** Clean up \`skills/upstream-merge/references/special-cases.md\` before merging.`
+                : data.diverged_count > 0
+                ? `> ℹ️ ${data.diverged_count} diverged file(s) — review them in §3.5 before merging.`
+                : `> ✅ No divergence — safe to merge.`
+            }
+
+Per SKILL.md §6.6 rule 5: Run \`npm run upstream:check\` locally before merging.`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              body,
+            });

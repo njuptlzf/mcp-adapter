@@ -20,15 +20,31 @@ execute: 1. Copy `skills/mcp-adapter` to your agent's global skills directory 2.
 
 ### `upstream-merge` — Fork Sync & Conflict Resolution
 
-Fork-maintainer workflow for syncing upstream `pi-mcp-adapter` into this fork. Reads hand-curated special cases, runs live divergence check, applies per-file resolution matrix, and triggers follow-up issue flow when Pi-coupling is re-introduced.
+Fork-maintainer workflow for syncing upstream `pi-mcp-adapter` into this fork. Reads hand-curated special cases, runs live divergence check, applies per-file resolution matrix, and delegates conflict resolution to the `resolve-conflicts` skill.
 
 **Prompt**:
 
-execute: 1. Copy `skills/upstream-merge` to your agent's global skills directory 2. Run Skill `/upstream-merge`
+execute: 1. Copy `skills/upstream-merge` AND `skills/resolve-conflicts` to your agent's global skills directory 2. Run Skill `/upstream-merge`
 
-**Flow**: Run divergence check → Read special cases → Apply resolution matrix → Execute merge → Follow-up issues
+**Flow**: Run divergence check → Read special cases → Apply resolution matrix → Execute merge → Delegate conflicts to `/resolve-conflicts` → Validate with §5 Checklist
+
+**Dependencies**: Requires `skills/resolve-conflicts` (professional conflict resolution framework). Both skills must be copied together.
 
 **References**: `references/special-cases.md` (hand-curated file resolutions), `references/pi-coupling-markers.md` (Pi coupling detection patterns)
+
+---
+
+### `resolve-conflicts` — Professional Git Conflict Resolution
+
+Plan-first conflict resolution framework with 7 conflict type patterns (imports, tests, generated files, config, code logic, structs, deleted-modified), decision tracking, validation scripts, and user approval flow.
+
+**Prompt**:
+
+execute: 1. Copy `skills/resolve-conflicts` to your agent's global skills directory 2. Run Skill `/resolve-conflicts` when merge conflicts occur
+
+**Flow**: Assess conflicts → Create resolution plan → Get user approval → Execute resolution → Validate → Compile & test
+
+**References**: `references/patterns.md` (comprehensive conflict examples), `references/sample-plan.md` (example resolution plan), `scripts/handle-deleted-modified.sh`, `scripts/validate-conflicts.sh`
 
 ## Skill Usage Order
 
