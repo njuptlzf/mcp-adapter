@@ -1,0 +1,59 @@
+name: No Direct Main Push Detection (advisory)
+
+# Detects when commits are pushed directly to main, bypassing the PR workflow.
+# Enforces the rule: "绝对不允许直接提交到main分支" (2026-07-02)
+#
+# This is ADVISORY (does not fail the build) because:
+# - Single-owner fork repositories may legitimately need direct pushes for
+#   owner-driven hotfixes or repo migrations
+# - This workflow is for DETECTION and COMPLIANCE REPORTING
+#
+# For HARD enforcement, set up GitHub branch protection rules at
+# https://github.com/njuptlzf/mcp-adapter/settings/branches (require PR before merge)
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  detect-direct-push:
+    name: Check if push bypassed PR workflow
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for direct main push (advisory)
+        run: |
+          echo "## Direct Main Push Detection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ A commit was pushed directly to main." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Per fork policy (2026-07-02): '绝对不允许直接提交到main分支'**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All changes should go through a PR. If you are the repo owner and" >> $GITHUB_STEP_SUMMARY
+          echo "this is an intentional direct push (e.g., emergency hotfix), you can" >> $GITHUB_STEP_SUMMARY
+          echo "ignore this advisory." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Proper workflow:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# 1. Create a feature branch" >> $GITHUB_STEP_SUMMARY
+          echo "git checkout -b feat/<name>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 2. Push the feature branch" >> $GITHUB_STEP_SUMMARY
+          echo "git push -u origin feat/<name>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 3. Create a PR" >> $GITHUB_STEP_SUMMARY
+          echo "gh pr create --base main --head feat/<name>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# 4. After CI + review, merge the PR" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**For HARD enforcement**, set up GitHub branch protection:" >> $GITHUB_STEP_SUMMARY
+          echo "https://github.com/njuptlzf/mcp-adapter/settings/branches" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "(This workflow is ADVISORY only — it does not fail the build.)" >> $GITHUB_STEP_SUMMARY
