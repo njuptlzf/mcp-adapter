@@ -37,23 +37,39 @@ separately:
 
 **The merge is a deterministic two-step process:**
 
-1. **Switch to `main`** — `git checkout main`. All Step 1 work happens here.
-2. **Fetch upstream** — `git fetch upstream` (GnuTLS workaround per the §2
+0. **Create a feature branch from `main`** — `git checkout main && git checkout -b
+   upstream-merge/<upstream-version>`. **Never commit directly to `main`**
+   (enforced by `.githooks/pre-push` and the `no-direct-main-push` advisory CI —
+   see AGENTS.md "Branch Policy (HARD RULE)"). All Step 1 work happens on
+   this branch. The branch name MUST follow `upstream-merge/<upstream-version>`
+   (e.g., `upstream-merge/v2.10.0`) so the §5.5 PR template can auto-extract
+   the version.
+1. **Fetch upstream** — `git fetch upstream` (GnuTLS workaround per the §2
    note if needed).
-3. **Run pre-flight** — `npm run upstream:check` (§3) to see live divergence.
-4. **Step 1: `upstream/main` → `main`** — `git merge upstream/main`. Resolve
-   conflicts using the decision tree (§4). The merge commit lands on `main`.
-5. **Step 2: `main` → `<working-branch>`** — `git checkout <working-branch>
-   && git merge main`. Generally a fast-forward or small diff because the
-   working branch is already ahead of `main` with fork-specific work.
-6. **Short-circuit** — if `<working-branch> == main`, skip step 5. The flow
-   ends at Step 1.
+2. **Run pre-flight** — `npm run upstream:check` (§3) to see live divergence.
+3. **Step 1: `upstream/main` → `<feature-branch>`** — `git merge upstream/main`.
+   Resolve conflicts using the decision tree (§4). The merge commit lands on
+   the **feature branch, NOT on `main`**.
+4. **§5.5 PR flow** — push the feature branch → open PR → wait for CI → merge
+   → delete branch (per the §5.5 sub-flow at the end of this skill).
+5. **Step 2: `<feature-branch>` → `<working-branch>`** (post-PR-merge) — `git
+   checkout <working-branch> && git merge main`. Generally a fast-forward or
+   small diff because the working branch is already ahead of `main` with
+   fork-specific work. The merge is now from main (the merged PR) to the
+   working branch.
+6. **Short-circuit** — if `<working-branch> == main` and the §5.5 PR has
+   already merged to main, skip step 5. The flow ends at step 4.
 
 **Anti-pattern (do not):** Running `git merge upstream/main` directly on
 `<working-branch>`. This creates a large blast radius of conflicts between
 the long-diverged working branch and upstream — the working branch has
 hundreds of commits the upstream never saw. The two-step flow exists to
 confine the conflict surface to the smaller `main` branch.
+
+**Anti-pattern (do not):** Committing the merge directly to `main` (even if
+`pre-push` hook is somehow disabled). This bypasses the §5.5 PR flow, which
+means no `pr-divergence-check` CI, no review checkpoint, no squash-merge
+cleanup. The hook exists for a reason; respect it.
 
 ## 2. When to invoke
 
@@ -266,7 +282,91 @@ Run all 7 checks before declaring the upstream-merge flow complete. Each is a si
 - **(f) Commit message prefix is `upstream-merge:`** — e.g., `upstream-merge: sync v2.10.0 (N files, M conflicts resolved)`. The body should list `ours` / `theirs` / `assess` row counts and any `Refs #N` follow-up issue links.
 - **(g) Step 2 propagation complete (skipped if working branch is `main`)** — `git checkout <working-branch> && git merge main` succeeds as a fast-forward or a clean small merge. The working branch now contains the upstream changes from Step 1; if conflicts appear, they are fork-vs-fork, not upstream-vs-fork, and the resolution strategy is the fork's own (consult the relevant Phase plan, not the §4 decision tree). After Step 2, re-run (c) and (d) on the working branch to confirm the propagated state still builds and tests pass.
 
-When steps (a)–(f) PASS, push the merge branch and open a PR per the standard fork workflow (see `references/pi-coupling-markers.md` §"PR template" for the body). When step (g) also PASS, the upstream-merge flow is fully complete on both `main` and the working branch.
+When steps (a)–(f) PASS, the merge is locally complete on the feature branch. **Do NOT push directly to `main`** — proceed to the §5.5 PR sub-flow below. When step (g) also PASS (post-PR-merge), the upstream-merge flow is fully complete on both `main` and the working branch.
+
+## 5.5 PR sub-flow (mandatory — bridges local merge to merged `main`)
+
+Per the project-wide rule "**绝对不允许直接提交到main分支**" (enforced by `.githooks/pre-push` and `.github/workflows/no-direct-main-push.yml`, see AGENTS.md "Branch Policy (HARD RULE)"), every upstream-merge MUST go through a PR. This sub-flow replaces the previous single-line "push the merge branch and open a PR" instruction with a deterministic 5-step procedure.
+
+**Naming contract**: the feature branch MUST be `upstream-merge/<upstream-version>` (e.g., `upstream-merge/v2.10.0`). This is what the PR template and the `pr-divergence-check` CI match against. If you deviated from this naming in §1 step 0, rename with `git branch -M upstream-merge/<correct-version>` before continuing.
+
+### 5.5.1 Push the feature branch
+
+```bash
+git push -u origin upstream-merge/<version>
+```
+
+`pre-push` will NOT intercept (it only blocks `refs/heads/main`/`refs/heads/master`). If the hook fires anyway, you pushed the wrong ref — abort and re-check `git rev-parse --abbrev-ref HEAD`.
+
+### 5.5.2 Open the PR
+
+Use the body template at `references/pi-coupling-markers.md §"PR template"`. Auto-generate from §5 checklist values:
+
+```bash
+gh pr create \
+  --base main \
+  --head upstream-merge/<version> \
+  --title "upstream-merge: sync <version> (<N> commits, <M> files diverged)" \
+  --body "$(cat <<'EOF'
+## Upstream merge <short-sha>
+
+- Base ref: upstream/main @ <upstream-sha>
+- Files merged: <N> (ours: <a> / theirs: <b> / assess: <c> / manual: <d>)
+- Conflicts resolved: <M>
+- Pi-coupling re-introductions: <K>
+- Follow-up issues: #<N>, #<N>
+- Manifest staleness: |raw - manifest| = <Δ> (acceptable ≤ 10)
+- Checklist: 6/6 PASS
+
+Refs: <list of follow-up issues>
+EOF
+)"
+```
+
+If `gh` CLI is not authenticated, log in first: `gh auth login` (or use a Personal Access Token via `GH_TOKEN`). If `gh` is unavailable (some sandboxed environments), push the branch and create the PR manually via the GitHub web UI, citing the body template above.
+
+### 5.5.3 Wait for CI
+
+```bash
+gh pr checks --watch
+```
+
+Required CI workflows (per `.github/workflows/`):
+
+- `pr-divergence-check.yml` — runs `npm run upstream:check` on the PR. **MUST be green.**
+- `no-direct-main-push.yml` — advisory; should not fire on a PR (the merge happens via `gh pr merge`, not `git push`).
+
+If `pr-divergence-check` fails: it means the registry gained new stale entries between PR open and the check. Update `references/special-cases.md`, **amend the merge commit** on the feature branch (`git commit --amend --no-edit`), force-push (`git push --force-with-lease`), and re-run.
+
+If the check is still in progress after 5 minutes, do not panic — the script does its own `git fetch upstream` which can be slow. Re-run `gh pr checks` periodically.
+
+### 5.5.4 Merge the PR
+
+```bash
+gh pr merge --squash --delete-branch
+```
+
+- `--squash`: collapses the merge commit + any follow-up commits into a single commit on `main`. The squash commit message is auto-populated from the PR title; the body becomes the merge commit body (preserves the §5 checklist summary).
+- `--delete-branch`: removes both remote (`origin/upstream-merge/<version>`) and local feature branch (cleanup step).
+
+If the PR is a fast-forward (no merge commit on the feature branch — rare for upstream-merge but possible for tiny patches), use `--merge` or `--rebase` instead of `--squash`.
+
+If `gh pr merge` is blocked by branch protection (e.g., "Reviews required"), request a review first (`gh pr review --approve` if you have permission, or use the GitHub web UI).
+
+### 5.5.5 Verify and clean up
+
+```bash
+# Confirm main now has the merge
+git fetch origin && git log --oneline origin/main -5
+# Confirm local branch is gone (--delete-branch handles this)
+git branch | grep upstream-merge  # should be empty
+# Confirm working tree is clean
+git status
+```
+
+If anything looks wrong (missing commits, wrong files, CI failure surfaced post-merge), `git revert` the PR merge commit on `main` and investigate. **Do NOT push a fix commit directly to `main`** — branch, fix, and PR (per AGENTS.md Branch Policy).
+
+---
 
 ## 6. Fork architecture principles (NEW, v3.1)
 
