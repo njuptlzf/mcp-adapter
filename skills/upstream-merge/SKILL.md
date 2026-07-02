@@ -351,13 +351,21 @@ When adding new fork-only functionality, create new files — do NOT add code to
 - ✅ New universal helper → `adapters/<helper>.ts` or `utils/<helper>.ts` (not inline in `entry.ts`)
 - ✅ New fork-only doc → `docs/<new-topic>.md` (not extend `docs/upstream-merge-retrospective.md` in place)
 
-**2. Avoid large functions that both sides will modify**
+**2. Avoid large functions that both sides will modify** (REVISED 2026-07-02: heuristic, not absolute)
 
 The 2026-07-01 attempt showed `adapters/entry.ts` `createMcpAdapter` (324 lines) as the hardest conflict — both fork and upstream modify the same function body. Break large functions into smaller, independently-modifiable units:
 
 - ❌ One 324-line function → ✅ 4 small functions (~80 lines each) + thin orchestrator
 - ❌ Inline session lifecycle in `createMcpAdapter` → ✅ Extract to `setupSessionHandlers()`
 - ❌ Inline command registration → ✅ Extract to `registerCommands()`
+
+> **Heuristic, not absolute rule** (REVISED 2026-07-02): "Large function" is not well-defined — 30 lines of pure logic is large, but 300+ lines of YAML/JSON/case-statement config may be reasonable. Use `npm run check:large-functions` (default 300 lines) as a **heuristic indicator**, not an absolute threshold. A function being detected as "large" does NOT automatically mean it should be refactored — **refactor only if**:
+>
+> 1. The function is in a file that both fork and upstream actively modify (verify with `git log upstream/main..main -- <file>` + `git log main..upstream/main -- <file>`)
+> 2. AND the function has been the source of past merge conflicts (check retrospective)
+> 3. AND the function's body is "structurally simple" (not just long due to data tables/cases)
+>
+> If any of the above conditions is false, the line count is not a merge-conflict risk — leave it alone. **The root cause of merge conflicts is "both sides modify the same function", not "the function is long".**
 
 **3. Keep import sections stable**
 

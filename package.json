@@ -16,7 +16,9 @@
     "test:prebuild": "cd examples/interactive-visualizer && npm run build",
     "test:oauth-provider": "node --import tsx --test mcp-oauth-provider.test.ts",
     "upstream:check": "tsx scripts/upstream-divergence.ts",
-    "verify:deploy": "tsx scripts/deploy-verify.ts"
+    "verify:deploy": "tsx scripts/deploy-verify.ts",
+    "check:large-functions": "tsx scripts/check-large-functions.ts",
+    "check:import-region": "tsx scripts/check-import-region.ts --base origin/main"
   },
   "repository": {
     "type": "git",
