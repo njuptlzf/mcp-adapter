@@ -41,3 +41,50 @@ This project is indexed by GitNexus as **mcp-adapter** (2995 symbols, 6394 relat
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+## Branch Policy (HARD RULE)
+
+> **绝对不允许直接提交到main分支** (2026-07-02, enforced by `.githooks/pre-push`
+> and `.github/workflows/no-direct-main-push.yml`)
+
+Every change — including upstream-merge commits, hotfixes, follow-ups, and
+documentation edits — MUST go through a pull request. There are NO exceptions
+for trivial edits, single-line fixes, or "I'm the only owner" scenarios.
+
+### Standard PR workflow
+
+1. **Branch from `main`**: `git checkout main && git checkout -b <type>/<name>`
+   - Types: `feat/`, `fix/`, `chore/`, `docs/`, `refactor/`, `upstream-merge/`
+   - For upstream-merge: `upstream-merge/<version>` (e.g., `upstream-merge/v2.10.0`)
+2. **Push the branch**: `git push -u origin <branch>`
+3. **Open a PR**: `gh pr create --base main --head <branch>` (or use the
+   GitHub web UI if `gh` is unavailable)
+4. **Wait for CI**: `gh pr checks --watch`. The `pr-divergence-check` workflow
+   MUST be green for upstream-merge PRs.
+5. **Merge the PR**: `gh pr merge --squash --delete-branch` (or `--merge` for
+   fast-forward cases)
+6. **Verify**: `git fetch origin && git log --oneline origin/main -5`
+
+### Why this rule exists
+
+- **pre-push hook** (`.githooks/pre-push`) blocks `git push origin main` — this
+  is a hard client-side safety net for force-push mistakes and lost commits
+- **no-direct-main-push CI** (`.github/workflows/no-direct-main-push.yml`)
+  detects any direct push that bypasses the hook (e.g., via `--no-verify`)
+  and reports it as advisory
+- **pr-divergence-check CI** runs `npm run upstream:check` on every PR, catching
+  registry drift between PR open and merge
+
+### Emergency bypass
+
+`git push --no-verify origin main` — only for repo-owner emergencies (data
+loss recovery, repo migration). The `no-direct-main-push` CI will report this
+as an advisory warning. Document the reason in the merge commit body.
+
+### Cross-references
+
+- `.githooks/pre-push` — the actual hook script
+- `.github/workflows/no-direct-main-push.yml` — the CI detection
+- `skills/upstream-merge/SKILL.md §1` — Step 0 (feature branch creation) and
+  the "Anti-pattern: commit directly to main" note
+- `skills/upstream-merge/SKILL.md §5.5` — the full PR sub-flow for upstream-merge

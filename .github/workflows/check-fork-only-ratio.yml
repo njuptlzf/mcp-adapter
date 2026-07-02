@@ -51,6 +51,18 @@ jobs:
           echo "modified_files=$MODIFIED" >> $GITHUB_OUTPUT
           echo "deleted_files=$DELETED" >> $GITHUB_OUTPUT
 
+          # Skip ratio check for docs/config-only PRs (modifying existing .md
+          # files is the correct pattern, not an anti-pattern). The ratio check
+          # is designed for code changes — forking out doc edits into new files
+          # would create fake docs that don't replace the canonical sources.
+          # Also skip if the PR is a CI workflow fix (.yml/.yaml) without
+          # touching code — same rationale.
+          NON_DOC=$(git diff --name-only origin/main...HEAD 2>/dev/null | grep -vE '\.(md|yml|yaml|json|txt)$' | wc -l || echo "0")
+          if [ "$NON_DOC" -eq 0 ] && { [ "$MODIFIED" -gt 0 ] || [ "$NEW" -gt 0 ] || [ "$DELETED" -gt 0 ]; }; then
+            echo "docs_only=true" >> $GITHUB_OUTPUT
+            echo "::notice::PR is docs/config-only (no .ts/.js/.sh changes); skipping modify-to-new ratio check"
+          fi
+
           # Calculate ratio
           if [ "$NEW" -eq 0 ] && [ "$MODIFIED" -gt 0 ]; then
             echo "ratio=999" >> $GITHUB_OUTPUT
@@ -61,7 +73,7 @@ jobs:
           fi
 
       - name: Evaluate ratio
-        if: steps.count.outputs.skip != 'true'
+        if: steps.count.outputs.skip != 'true' && steps.count.outputs.docs_only != 'true'
         run: |
           RATIO="${{ steps.count.outputs.ratio }}"
           NEW="${{ steps.count.outputs.new_files }}"
