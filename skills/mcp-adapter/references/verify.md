@@ -1,9 +1,9 @@
 # Phase 3 Reference: Verify Deployment
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 3
-> **Path resolution**: See [resolver.md](resolver.md) — Host × Target matrix from `AGENT_ADAPTERS`
+> **Path resolution**: See [resolver.md](resolver.md) — agent discovery + Host × Target matrix
 
-Runs the full mcp-adapter integration test matrix against registered adapters.
+Runs the full mcp-adapter integration test matrix to confirm deployment works.
 
 ## Quick Verification
 
@@ -39,7 +39,7 @@ npx tsx tests/token-benchmark/run-adapter.ts
 npx tsx tests/token-benchmark/report.ts
 ```
 
-**Pass**: Proxy tool ≤ 300 tokens; 10-server savings ≥ 95%. 🟡 Baseline-bound.
+**Pass**: Proxy tool ≤ 300 tokens; 10-server savings ≥ 95%.
 
 ### Phase 3: Conversation Cost Simulation (Section 5B)
 
@@ -47,13 +47,13 @@ npx tsx tests/token-benchmark/report.ts
 npx tsx tests/token-benchmark/run-conversation-sim.ts
 ```
 
-Skip if file missing (conditional guard). 🟡 Baseline-bound.
+Skip if file missing (conditional guard).
 
 ### Phase 4: Per-Path Verification (Section 6)
 
 #### Step 0 — Capability Gate
 
-Uses the Host × Target matrix from [resolver.md](resolver.md#host--target-matrix-d-16):
+Uses the Host × Target matrix from [resolver.md](resolver.md#host--target-matrix):
 
 | `mcp` in host tools? | `^<server>_` prefix? | `^mcp_` SDK bridge? | Host mode |
 |----------------------|---------------------|---------------------|-----------|
@@ -89,28 +89,27 @@ npx vitest run tests/smoke/e2e-all-servers.test.ts --reporter=verbose
 
 **Pass**: 25/25.
 
-#### Step 5 — Protocol Forwarder Tests (Phase 12)
+#### Step 5 — Protocol Forwarder Tests
 
 ```bash
-# ProtocolSamplingForwarder unit tests (D-06: sampling forwarding via server.createMessage)
+# ProtocolSamplingForwarder unit tests (sampling forwarding via server.createMessage)
 npx vitest run __tests__/protocol-sampling-forwarder.test.ts --reporter=verbose
 
-# ProtocolElicitationForwarder unit tests (D-07: elicitation forwarding via server.elicitInput)
+# ProtocolElicitationForwarder unit tests (elicitation forwarding via server.elicitInput)
 npx vitest run __tests__/protocol-elicitation-forwarder.test.ts --reporter=verbose
 
-# Universal MCP server E2E tests (D-13: subprocess + real MCP Client)
-# Note: mcp-server-e2e.test.ts is created in Plan 12-04
+# Universal MCP server E2E tests (subprocess + real MCP Client)
 npx vitest run __tests__/mcp-server-e2e.test.ts --reporter=verbose
 ```
 
 #### Step 6 — Adapter Integration Tests (Host × Target × Mode)
 
-The three dimensions are independent (D-16):
+The three dimensions are independent:
 
 | Dimension | Values | Default |
 |-----------|--------|---------|
-| Host | Pi, Universal MCP, … | Current agent |
-| Target | pi, universal-mcp | All AGENT_ADAPTERS |
+| Host | Current agent, Universal MCP, … | Current agent |
+| Target | universal-mcp | universal-mcp |
 | Mode | in-process / spawn / mock | in-process |
 
 **Step 6a — Discover adapters**:
@@ -150,7 +149,7 @@ Section 5B (Conversation):    ✅/⚠️/SKIP
 Proxy Unit Tests:             ✅ N/N
 DirectTools Unit+Integration: ✅ 24/24
 Section 6 (E2E):              ✅ 25/25
-Protocol Forwarders:           ✅ N/N
+Protocol Forwarders:          ✅ N/N
 Adapter Integration (Step 6): ✅ N/N
 Capability Gate:              Host=<current> × Target=<selected>
 

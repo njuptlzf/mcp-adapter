@@ -1,30 +1,24 @@
 # Phase 1 Reference: Generate MCP Config
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 1
-> **Migrated from**: `skills/generate-mcp-config/SKILL.md` (deleted in Phase 11)
-> **Path resolution**: See [resolver.md](resolver.md) — use `AGENT_ADAPTERS[i].resolverFactory()`
+> **Path resolution**: See [resolver.md](resolver.md) — agent discovery protocol
 
-Generates correct `mcp.json` files for any mcp-adapter compatible agent.
+Generates correct `mcp.json` files for the target agent.
 
-## Agent Path Map
+## Agent Config Paths
 
-Each registered adapter provides an `AgentPathResolver` factory in `AGENT_ADAPTERS`.
-Resolve dynamically:
-
-```bash
-echo "=== Discovered adapters ==="
-grep -B1 -A5 "id:" interfaces/agent-api.ts | grep -E "(id:|displayName:|resolverFactory:)" | head -40
-```
-
-Concrete defaults (auto-discovered, do NOT hardcode):
+The target agent's config path was discovered in Phase 0. Common paths:
 
 | Agent | Global Config Path | Project Config |
 |-------|-------------------|----------------|
-| Pi | `~/.pi/agent/mcp.json` | `.mcp.json` (`.pi/mcp.json` override) |
 | Qoder | `~/.qoder/agent/mcp.json` | `.mcp.json` |
+| Claude Code | `~/.claude/agent/mcp.json` | `.mcp.json` |
+| Cursor | `~/.cursor/mcp.json` | `.mcp.json` |
 | Kilo | `~/.kilo/mcp.json` | `.mcp.json` |
+| (universal fallback) | `~/.config/mcp/mcp.json` | `.mcp.json` |
 
-Override: `MCP_AGENT_DIR` env var for any agent. See [resolver.md](resolver.md) for full precedence.
+Override: `MCP_AGENT_DIR` env var for any agent. See [resolver.md](resolver.md) for
+the full discovery protocol.
 
 ## Config Structure
 
@@ -100,20 +94,19 @@ Override: `MCP_AGENT_DIR` env var for any agent. See [resolver.md](resolver.md) 
 
 ## Generation Workflow
 
-### Step 1: Determine Agent (from Phase 0)
+### Step 1: Determine agent and config path (from Phase 0)
 
-The target agent was already chosen in Phase 0 of the main skill. Use its `resolverFactory()`
-to determine the config path.
+The target agent and its config path were already discovered in Phase 0.
+Use the discovered path based on the scope chosen in Step 1.1:
 
-### Step 2: Determine Scope
-
-- **Global**: Agent global path (e.g. `~/.kilo/mcp.json`)
-- **Project**: `.mcp.json` in project root
+- **Global**: Write to the agent's global config path
+- **Project**: Write to `.mcp.json` in project root
 - **Both**: Shared servers globally, project-specific locally
 
-### Step 3: Collect Server Definitions
+### Step 2: Collect server definitions
 
 For each MCP server:
+
 1. **Transport**: stdio (local command) or HTTP (remote URL)
 2. **Command/URL**: executable or endpoint
 3. **Auth**: None, Bearer token, or OAuth
@@ -121,7 +114,7 @@ For each MCP server:
 5. **DirectTools**: whether to promote tools (default: `false`)
 6. **Env vars**: any environment variables needed
 
-### Step 4: Generate JSON
+### Step 3: Generate JSON
 
 Rules:
 - Server names use kebab-case
@@ -130,8 +123,9 @@ Rules:
 - `args` is JSON string in proxy calls, array in config
 - `directTools: true` = all tools; `directTools: ["a","b"]` = selected
 - `excludeTools` matches original and prefixed names
+- No comments — mcp.json is strict JSON
 
-### Step 5: Validate
+### Step 4: Validate
 
 1. Valid JSON (no trailing commas, no comments)
 2. At least one server in `mcpServers`

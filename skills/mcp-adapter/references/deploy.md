@@ -1,50 +1,32 @@
 # Phase 2 Reference: Deploy Adapter
 
 > **Called from**: `skills/mcp-adapter/SKILL.md` Phase 2
-> **Path resolution**: See [resolver.md](resolver.md) — universal config path discovery (D-02)
+> **Path resolution**: See [resolver.md](resolver.md) — universal config path discovery
 
 Deploys mcp-adapter into the target agent's runtime. This skill runs INSIDE the deployer
 agent; the target agent is the recipient.
 
 ## Prerequisites
 
-- Phase 1 complete (mcp.json exists at a discoverable config path)
+- Phase 0 complete (target agent identified, MCP compatibility confirmed)
+- Phase 1 complete (mcp.json exists at the discovered config path)
 - Target agent CLI/SDK available on the deployer's machine
 
-## Branch Decision
+## Deployment: Universal MCP (MCP stdio server)
 
-Phase 0 determines the branch — there is no package.json inspection needed (D-12):
-
-| User answers | Branch | Agent |
-|--------------|--------|-------|
-| "Pi" | Branch A | Pi (native extension) |
-| "Other MCP-compatible agent" | Branch C | Any MCP-compatible agent |
-
-> The legacy SDK bridge approach was removed in Phase 12 and is no longer documented.
-
----
-
-## Branch A: Pi (Native Extension)
+### Step 1: Ensure mcp-server is available
 
 ```bash
-pi install npm:pi-mcp-adapter
-# Restart Pi — mcp proxy tool, /mcp command, /mcp-auth command available
+# Check if mcp-server is in PATH
+which mcp-server
+
+# If not installed globally, install the package
+npm install -g pi-mcp-adapter
 ```
 
-Branch A provides:
-- Full TUI panel (`/mcp`, `/mcp setup`, `/mcp tools`, `/mcp reconnect`)
-- Custom renderers (ANSI TUI rendering)
-- In-process sampling via `PiSamplingProvider`
-- Elicitation forms and URL prompts
+### Step 2: Register in target agent's MCP config
 
----
-
-## Branch C: Universal MCP (MCP stdio server)
-
-### Step C1: Register in agent's MCP config
-
-In the target agent's `mcpServers` config (project `.mcp.json` or global
-`~/.config/mcp/mcp.json`):
+The mcp.json was already generated in Phase 1. Verify the `mcp-adapter` entry exists:
 
 ```json
 {
@@ -56,30 +38,27 @@ In the target agent's `mcpServers` config (project `.mcp.json` or global
 }
 ```
 
-> The `mcp-server` bin entry is agent-agnostic (D-05). It speaks MCP protocol and
+> The `mcp-server` bin entry is agent-agnostic. It speaks MCP protocol and
 > discovers client capabilities at runtime via `server.getClientCapabilities()`.
 > No agent-specific configuration is needed.
 
-### Step C2: Restart agent
+### Step 3: Restart target agent
 
 The MCP client auto-discovers the server via stdio. The `mcp` proxy tool is now
 available in every session.
 
-### What Branch C provides (D-08)
+### What the adapter provides
 
-Branch C is a **complete implementation** within the MCP protocol's scope:
+The adapter is a **complete implementation** within the MCP protocol's scope:
 
 - ✅ `mcp` proxy tool (~200 tokens) — always available
 - ✅ Sampling — forwarded via MCP `sampling/createMessage` reverse call when the
-  agent declares `sampling` capability (pure forwarding, D-11)
+  agent declares `sampling` capability
 - ✅ Elicitation — forwarded via MCP `elicitation/create` reverse call when the
-  agent declares `elicitation.form` capability (pure forwarding, D-11)
+  agent declares `elicitation.form` capability
 - ✅ Status and panel — via tool actions (`executeStatus`) and content blocks
 
-What Pi Branch A provides extra is richer UI (TUI rendering with ANSI codes), which
-is a **presentation enhancement**, not a capability difference (D-08).
-
-### Config path discovery (D-02)
+### Config path discovery
 
 The `mcp-server` discovers config using the universal chain:
 
@@ -103,7 +82,8 @@ Or run Phase 3 of the main skill for full integration testing.
 ## Common Issues
 
 | Problem | Solution |
-|---------|----------|
+|---------|---------|
 | "mcp tool not found" | Restart target agent; ensure `mcp-server` is registered in mcpServers config |
 | "No servers connected" | Check mcp.json path; servers are lazy — call `mcp({ connect: "name" })` |
 | "TypeScript import errors" | Verify `pi-mcp-adapter` installed; check tsconfig `moduleResolution` |
+| "mcp-server not in PATH" | `npm install -g pi-mcp-adapter` to install the bin globally |
