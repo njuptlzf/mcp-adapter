@@ -1,64 +1,54 @@
 ---
 name: mcp-adapter
 description: >
-  Universal mcp-adapter skill — single entry point for integrating MCP into any coding agent.
-  Handles config generation (Phase 1), adapter deployment (Phase 2), and verification (Phase 3).
-  Replaces the deleted deploy-mcp-adapter, generate-mcp-config, and mcp-adapter-test skills.
-  Use when user says "integrate agent", "deploy mcp-adapter", "install mcp-adapter",
-  "add new agent", "generate mcp config", "create mcp.json", "configure MCP servers",
-  "verify mcp-adapter", "test mcp-adapter", or any phrase
-  about integrating mcp-adapter into an agent.
+  Universal mcp-adapter skill — deploys mcp-adapter into any MCP-compatible coding agent.
+  Handles agent discovery (Phase 0), config generation (Phase 1), adapter deployment
+  (Phase 2), and verification (Phase 3). Use when user says "integrate agent",
+  "deploy mcp-adapter", "install mcp-adapter", "add new agent", "generate mcp config",
+  "create mcp.json", "configure MCP servers", "verify mcp-adapter", "test mcp-adapter",
+  or any phrase about integrating mcp-adapter into an agent.
 ---
 
 # MCP Adapter — Universal Agent Integration
 
-Single entry point for all mcp-adapter workflows. What used to be three separate skills
-(`deploy-mcp-adapter`, `generate-mcp-config`, `mcp-adapter-test`) is now one unified
-skill with three phases. Each phase can run independently.
+Single entry point for deploying mcp-adapter into target coding agents. The adapter
+registers a single `mcp` proxy tool (~200 tokens) that consolidates hundreds of MCP
+tool definitions into one, dramatically reducing token overhead.
 
-The old skill directories have been physically removed (Phase 11). This is the only
-mcp-adapter skill.
+> **Pi users**: Pi is the origin agent for this package. Just run
+> `pi install npm:pi-mcp-adapter` — no skill needed. This skill is for deploying
+> into OTHER MCP-compatible agents.
 
-## Architecture: Branch A + Branch C
+## How It Works
 
-There are exactly **two integration branches** (D-12):
+mcp-adapter runs as an MCP stdio server (`mcp-server` bin). Register it in the target
+agent's MCP config, and the agent's MCP client auto-discovers it via stdio. The server
+is agent-agnostic — it speaks MCP protocol and discovers client capabilities at runtime.
 
-- **Branch A (Pi)** — Native Pi extension. Install `pi-mcp-adapter` as a Pi extension.
-  Provides full TUI panel, custom renderers, and in-process sampling via PiSamplingProvider.
-  Pi is the only agent that uses Branch A (D-03).
-
-- **Branch C (Universal MCP)** — Register the `mcp-server` bin entry in any
-  MCP-compatible agent's config. The server is agent-agnostic — it speaks MCP protocol
-  and discovers client capabilities at runtime. Sampling and elicitation are forwarded
-  via MCP Server→Client reverse calls (`sampling/createMessage`, `elicitation/create`)
-  when the agent declares those capabilities.
-
-**Branch C is a COMPLETE implementation within the MCP protocol's scope** (D-08) — it is
-NOT "lesser" than Branch A. Tool actions (`executeStatus`) and content
-blocks provide equivalent functionality. What Pi Branch A provides extra is richer UI
-(TUI rendering with ANSI codes), which is a presentation enhancement, not a capability
-difference.
-
-> The legacy SDK bridge approach was removed entirely in Phase 12 and is no longer documented.
+Capabilities (runtime-discovered via MCP protocol):
+- ✅ `mcp` proxy tool (~200 tokens) — always available
+- ℹ️ Sampling — forwarded if agent declares `sampling` capability
+- ℹ️ Elicitation — forwarded if agent declares `elicitation` capability
+- ℹ️ Status/panel — via tool actions (`executeStatus`) and content blocks
 
 ## Quick Decision: Which Phase Do You Need?
-
-**The Entry Gate (Step E1) asks this question automatically.** This table is for
-reference when the user's intent is already clear from their message.
 
 | User intent | Phase to run | Skip others? |
 |-------------|-------------|--------------|
 | "Integrate agent / deploy mcp-adapter" | Phase 0 → 1 → 2 → 3 | Full pipeline |
 | "Generate mcp.json config" | Phase 1 only | Yes |
-| "Verify mcp-adapter deployment" | Phase 3 | Yes |
+| "Verify existing mcp-adapter deployment" | Phase 3 | Yes |
 
 ## Workflow Checklist
 
 ```
 Progress:
 - [ ] Entry Gate: Confirm user intent (deploy? config? verify?)
-- [ ] Phase 0: Identify target agent (Pi or other MCP-compatible?)
-- [ ] Phase 1: Generate mcp.json config
+- [ ] Phase 0.1: Collect target agent input (user-supplied name or path)
+- [ ] Phase 0.2: Collect scope (Global / Project / Both)
+- [ ] Phase 0.3: Discover MCP config + verify compatibility
+- [ ] Phase 0.4: Present discovery summary
+- [ ] Phase 1: Generate mcp.json config (scope already set in 0.2)
 - [ ] Phase 2: Deploy adapter into target agent
 - [ ] Phase 3: Verify deployment
 ```
@@ -80,59 +70,112 @@ Use `AskUserQuestion` with these options:
 If the user's original message already states a clear intent (e.g. "deploy to my agent",
 "generate mcp config", "verify deployment"), skip this question and route directly.
 
-Only after the user confirms they want to **integrate an agent** should Phase 0 begin.
-
 ---
 
-## Phase 0: Identify Target Agent
+## Phase 0: Identify Target Agent + Collect Scope + Verify MCP Compatibility
 
-**Runs only when the user wants to integrate an agent.** Asks a single question to
-determine the integration branch (D-12).
+**Runs only when the user wants to integrate an agent.** Collects the target
+agent's identity (Step 0.1) and the config scope (Step 0.2), then discovers
+the MCP config location (Step 0.3) and verifies MCP protocol support.
 
-### Step 0.1: Ask "Pi or other MCP-compatible agent?"
+### Step 0.1: Ask "Which agent do you want to deploy to?"
+
+Use `AskUserQuestion` with these options. **Do NOT hardcode any specific
+agent name as a Label** — options describe how the user wants to identify
+the target, and the user supplies the name/path themselves.
+
+- **"By agent name"** — User provides the agent's identifier
+  (e.g. qoder, claude, cursor, kilo, cline, opencode). The host agent
+  looks up the config path from the table in Step 0.3.
+- **"By binary path"** — User provides the full path to the agent's
+  executable (e.g. `/usr/local/bin/qodercli`). The host agent verifies the
+  binary exists and is executable.
+- **"Generic MCP-compatible"** — User does not know the name. The host
+  agent falls back to the universal config (`~/.config/mcp/mcp.json`).
+
+> The user should only need to name the agent — they should NOT need to know
+> the agent's MCP config path or integration mode. The host agent discovers
+> that automatically in Step 0.3.
+>
+> If the user specifies a binary path, verify the binary exists and is
+> executable before proceeding.
+
+### Step 0.2: Ask scope — global or project?
+
+Immediately after Step 0.1 (same Phase 0, no other steps in between),
+collect the configuration scope. This is the second deployment-intent
+dimension and must be gathered alongside the agent identity.
 
 Use `AskUserQuestion` with these options:
 
-- **"Pi"** → Branch A (native extension install via `pi install npm:pi-mcp-adapter`)
-- **"Other MCP-compatible agent"** → Branch C (register `mcp-server` in the agent's MCP config)
+- **"Global"** — Write to the agent's global config path (available across
+  all projects)
+- **"Project"** — Write to `.mcp.json` in current project root (scoped to
+  this project)
+- **"Both"** — Shared servers globally, project-specific ones locally
 
-> **No registry reading, no static capability matrix.** Capabilities are discovered at
-> runtime when the Agent connects as MCP Client (D-12). There is no need to inspect
-> `AGENT_ADAPTERS` or `package.json` bin patterns — the user's answer alone determines
-> the branch.
+> Both Step 0.1 (agent) and Step 0.2 (scope) are deployment-intent
+> dimensions. Collecting them back-to-back avoids a context switch later.
+> The config path itself is resolved in Step 0.3 using the agent name from
+> Step 0.1 plus the scope from Step 0.2.
 
-### Step 0.2: Present branch summary
+### Step 0.3: Discover agent's MCP config and verify compatibility
 
-Display the determined branch and what to expect:
+Based on the user's answers from Step 0.1 (agent identity) and Step 0.2
+(scope), the host agent investigates the target agent:
 
-**If Branch A (Pi):**
+**1. Check known config paths** for the named agent:
+
+| Agent | Global Config Path | Project Config |
+|-------|-------------------|----------------|
+| Qoder | `~/.qoder/agent/mcp.json` | `.mcp.json` |
+| Claude Code | `~/.claude/agent/mcp.json` | `.mcp.json` |
+| Cursor | `~/.cursor/mcp.json` | `.mcp.json` |
+| Kilo | `~/.kilo/mcp.json` | `.mcp.json` |
+| (universal fallback) | `~/.config/mcp/mcp.json` | `.mcp.json` |
+
+Override: `MCP_AGENT_DIR` env var for any agent.
+
+> If the user-selected name from Step 0.1 does not match any row above,
+> fall back to the universal row. The scope from Step 0.2 determines which
+> column (Global vs Project vs Both) is written in Phase 1.
+
+**2. Check if the agent binary exists**:
+
+```bash
+which <agent-name> 2>/dev/null || which <agent-binary> 2>/dev/null
 ```
-Agent: Pi
-Integration mode: Branch A (native Pi extension)
-Capabilities:
-  ✅ mcp proxy tool (~200 tokens)
-  ✅ Interactive TUI panel (/mcp, /mcp setup)
-  ✅ In-process sampling (PiSamplingProvider)
-  ✅ Custom renderers (ANSI TUI)
-  ✅ Elicitation forms + URL prompts
+
+**3. Check if the agent supports MCP protocol**:
+
+- Look for `mcpServers` key in the agent's existing config file
+- Check if the agent's config directory exists
+- If the agent has no MCP support → **STOP and inform the user**:
+
+```
+Agent "<name>" does not appear to support MCP protocol.
+mcp-adapter requires the target agent to support MCP servers (mcpServers config).
+Deployment aborted.
 ```
 
-**If Branch C (Universal MCP):**
-```
-Agent: <user-named or "any MCP-compatible agent">
-Integration mode: Branch C (universal MCP stdio server via mcp-server)
-Capabilities (runtime-discovered via MCP protocol):
-  ✅ mcp proxy tool (~200 tokens)
-  ℹ️ Sampling — forwarded if agent declares `sampling` capability
-  ℹ️ Elicitation — forwarded if agent declares `elicitation` capability
-  ℹ️ Status/panel — via tool actions (executeStatus) and content blocks
+> **Do NOT guess.** If MCP support cannot be confirmed from config files or
+> documentation, ask the user to confirm: "Does <agent> support MCP servers
+> (mcpServers in its config)? If yes, where is its config file?"
 
-Branch C is a complete implementation. Capabilities are discovered at
-runtime when the agent connects as MCP Client — no static matrix needed.
+### Step 0.4: Present discovery summary
+
+Display what was found so the user knows what to expect:
+
+```
+Agent: <name>
+MCP support: ✅ Confirmed (mcpServers config found at <path>)
+Config path: <global-path> (global) / .mcp.json (project)
+Scope: <Global | Project | Both>  (from Step 0.2)
+Binary: <path or "not found in PATH — user must ensure mcp-server is accessible">
 ```
 
-**Never terminate** — both branches support the `mcp` proxy tool. Always display the
-branch summary so the user knows what to expect.
+**Never proceed without confirming MCP compatibility.** If the check is inconclusive,
+ask the user to verify manually.
 
 ---
 
@@ -140,76 +183,104 @@ branch summary so the user knows what to expect.
 
 Creates the `mcp.json` configuration file for the target agent.
 
-**When to run this phase alone**: User says "generate mcp config", "create mcp.json", "configure MCP servers".
+**When to run this phase alone**: User says "generate mcp config", "create mcp.json".
 
 **When to run as part of full pipeline**: Phase 0 → 1 → 2 → 3 (config must exist before deploy).
 
-### Step 1.1: Determine config path
+> The config scope (Global / Project / Both) was already collected in
+> Phase 0 Step 0.2. Do NOT re-ask here. Use that scope to determine the
+> write path.
 
-The config path discovery chain is **universal** (D-02) — it does not depend on which
-agent is being configured:
+### Step 1.1: Collect server definitions
 
-| Precedence | Source | Example |
-|------------|--------|---------|
-| 1 (highest) | `--config` flag | `mcp-server --config /path/to/mcp.json` |
-| 2 | `MCP_CONFIG_PATH` env var | `export MCP_CONFIG_PATH=/path/to/mcp.json` |
-| 3 | `.mcp.json` in current working directory | `./.mcp.json` |
-| 4 (lowest) | Shared global config | `~/.config/mcp/mcp.json` |
+For each MCP server the user wants to configure:
 
-> For Branch A (Pi), Pi also reads Pi-owned override files:
-> `~/.pi/agent/mcp.json` (global) and `.pi/mcp.json` (project).
-> For Branch C, the universal chain above is the only discovery path.
+1. **Transport**: stdio (local command) or HTTP (remote URL)
+2. **Command/URL**: executable or endpoint
+3. **Auth**: None, Bearer token, or OAuth
+4. **Lifecycle**: `lazy` (default), `eager`, or `keep-alive`
+5. **DirectTools**: whether to promote tools (default: `false`)
+6. **Env vars**: any environment variables needed
 
-### Step 1.2: Determine scope
+See [references/generate.md](references/generate.md) for the full config schema.
 
-- **Global**: Write to `~/.config/mcp/mcp.json` (available across all projects)
-- **Project**: Write to `.mcp.json` in project root (scoped to current project)
-- **Both**: Shared servers globally, project-specific ones locally
+### Step 1.2: Generate JSON and write to config path
 
-### Step 1.3: Collect server definitions and generate JSON
+Write the config to the path determined by Phase 0 Step 0.1 (agent identity)
++ Phase 0 Step 0.2 (scope):
 
-See [references/generate.md](references/generate.md) for the full config generation workflow
-(Step 3-5 of the legacy generate-mcp-config skill).
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "mcp-server"
+    }
+  }
+}
+```
 
-### Step 1.4: Validate
+Rules:
+- Server names use kebab-case
+- `env` values support `${VAR}` interpolation
+- `directTools: true` = all tools; `directTools: ["a","b"]` = selected
+- `idleTimeout: 0` = disable
+- No comments — mcp.json is strict JSON
 
-Check the generated config is valid JSON, has at least one server, and follows
-the schema rules. See [references/generate.md](references/generate.md) for validation checklist.
+### Step 1.3: Validate
+
+1. Valid JSON (no trailing commas, no comments)
+2. At least one server in `mcpServers`
+3. Each server has `command` (stdio) or `url` (HTTP), not both
+4. `oauth` only on HTTP servers with `auth: "oauth"`
+
+See [references/generate.md](references/generate.md) for validation checklist.
 
 ---
 
 ## Phase 2: Deploy Adapter
 
-Deploys mcp-adapter into the target agent's runtime so it gets a single `mcp` proxy tool.
+Registers `mcp-server` in the target agent's MCP config so the agent gets a single
+`mcp` proxy tool.
 
 **Prerequisite**: Phase 1 must complete first (mcp.json must exist).
 
-### Step 2.1: Confirm deployment branch (already determined in Phase 0)
-
-The integration mode was already determined in Step 0.1. Proceed to execution:
-
-| Branch | Agent | Command |
-|--------|-------|---------|
-| Branch A (native install) | Pi | `pi install npm:pi-mcp-adapter` |
-| Branch C (universal MCP stdio) | Any MCP-compatible agent | Register `mcp-server` in agent's MCP config |
-
-### Step 2.2: Execute branch-specific deployment
-
-See [references/deploy.md](references/deploy.md) for complete deployment code templates per branch:
-
-- **Branch A (Pi)**: `pi install npm:pi-mcp-adapter` — provides TUI panel, custom renderers, in-process sampling
-- **Branch C (Universal MCP)**: Register `mcp-server` in the agent's `mcpServers` config. The server discovers client capabilities at runtime and forwards sampling/elicitation via MCP protocol reverse calls when supported.
-
-### Step 2.3: Verify deployment
-
-Universal check that works for any registered adapter:
+### Step 2.1: Ensure mcp-server is available
 
 ```bash
-# The mcp proxy tool must be registered
+# Check if mcp-server is in PATH
+which mcp-server
+
+# If not installed globally, install the package
+npm install -g pi-mcp-adapter
+```
+
+### Step 2.2: Register mcp-adapter in target agent's config
+
+Ensure the `mcp-adapter` entry exists in the target agent's `mcpServers` config
+(written in Phase 1):
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "mcp-server"
+    }
+  }
+}
+```
+
+> The `mcp-server` bin is agent-agnostic. It speaks MCP protocol and discovers
+> client capabilities at runtime. No agent-specific configuration is needed.
+
+### Step 2.3: Quick deployment verification
+
+```bash
 npm run verify:deploy -- --agent universal-mcp
 ```
 
 For runtime confirmation, restart the target agent and look for the `mcp` tool.
+
+See [references/deploy.md](references/deploy.md) for deployment details.
 
 ---
 
@@ -237,18 +308,18 @@ MockAgent compatibility, token benchmarks, E2E validation, and protocol forwarde
 ## Common Issues
 
 | Problem | Solution |
-|---------|----------|
-| "Which skill do I use?" | Use this skill (`/mcp-adapter`). It's the only one you need. |
-| "mcp tool not found" | Ensure Phase 2 deployment completed; restart target agent; run Phase 3 verification |
+|---------|---------|
+| "mcp tool not found" | Restart target agent; ensure `mcp-server` is registered in mcpServers config |
 | "No mcp.json found" | Run Phase 1 first, then return to Phase 2 |
-| "Agent not MCP-compatible?" | Branch C works with any agent that speaks MCP protocol. Register `mcp-server` in the agent's MCP config. |
+| "Agent not MCP-compatible?" | Check if the agent has `mcpServers` config support. If not, it cannot use mcp-adapter. |
+| "mcp-server not in PATH" | `npm install -g pi-mcp-adapter` to install the bin globally |
 
 ## References
 
 | File | Content |
 |------|---------|
-| [references/resolver.md](references/resolver.md) | Universal path resolution + capability matrix (Pi + Universal MCP) |
+| [references/resolver.md](references/resolver.md) | Config path resolution + agent discovery |
 | [references/generate.md](references/generate.md) | Phase 1 config generation workflow |
-| [references/deploy.md](references/deploy.md) | Phase 2 deployment code templates (Branch A + Branch C) |
+| [references/deploy.md](references/deploy.md) | Phase 2 deployment details |
 | [references/verify.md](references/verify.md) | Phase 3 verification workflow |
-| [references/deploy-examples.md](references/deploy-examples.md) | Complete code templates (preserved from legacy) |
+| [references/deploy-examples.md](references/deploy-examples.md) | Complete code templates |

@@ -6,15 +6,15 @@ Project-level Agent Skills. Copy a skill to your agent's skills discovery direct
 
 ### `mcp-adapter` — Universal Agent Integration
 
-Single entry point for all mcp-adapter workflows: config generation (Phase 1), adapter deployment (Phase 2), and verification (Phase 3). Replaces the deleted `deploy-mcp-adapter`, `generate-mcp-config`, and `mcp-adapter-test` skills.
+Single entry point for deploying mcp-adapter into any MCP-compatible coding agent: agent discovery (Phase 0), config generation (Phase 1), adapter deployment (Phase 2), and verification (Phase 3). Replaces the deleted `deploy-mcp-adapter`, `generate-mcp-config`, and `mcp-adapter-test` skills.
 
 **Prompt**:
 
 execute: 1. Copy `skills/mcp-adapter` to your agent's global skills directory 2. Run Skill `/mcp-adapter`
 
-**Flow**: Identify agent + capability-gate → Generate mcp.json → Deploy adapter → Verify
+**Flow**: Discover target agent + verify MCP compatibility → Generate mcp.json (global or project) → Deploy adapter → Verify
 
-**References**: `references/resolver.md` (dynamic path resolution), `references/generate.md` (config), `references/deploy.md` (deployment), `references/verify.md` (testing), `references/deploy-examples.md` (code templates)
+**References**: `references/resolver.md` (agent discovery + config path resolution), `references/generate.md` (config), `references/deploy.md` (deployment), `references/verify.md` (testing), `references/deploy-examples.md` (code templates)
 
 ---
 
@@ -50,8 +50,8 @@ execute: 1. Copy `skills/resolve-conflicts` to your agent's global skills direct
 
 ```
 /mcp-adapter
-  Phase 0: Identify agent + capability-gate
-  Phase 1: Generate mcp.json config
+  Phase 0: Discover target agent + verify MCP compatibility
+  Phase 1: Generate mcp.json config (global or project scope)
   Phase 2: Deploy adapter into target agent
   Phase 3: Verify deployment
 ```
