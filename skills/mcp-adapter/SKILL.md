@@ -80,25 +80,30 @@ the MCP config location (Step 0.3) and verifies MCP protocol support.
 
 ### Step 0.1: Ask "Which agent do you want to deploy to?"
 
-Use `AskUserQuestion` with these options. **Do NOT hardcode any specific
-agent name as a Label** — options describe how the user wants to identify
-the target, and the user supplies the name/path themselves.
+Use `AskUserQuestion` with **exactly 2 options**. Options classify by **target type**
+(current vs. other), not by input form. The user supplies the name or path via
+the "Other" input on option B — never as a separate option.
 
-- **"By agent name"** — User provides the agent's identifier
-  (e.g. qoder, claude, cursor, kilo, cline, opencode). The host agent
-  looks up the config path from the table in Step 0.3.
-- **"By binary path"** — User provides the full path to the agent's
-  executable (e.g. `/usr/local/bin/qodercli`). The host agent verifies the
-  binary exists and is executable.
-- **"Generic MCP-compatible"** — User does not know the name. The host
-  agent falls back to the universal config (`~/.config/mcp/mcp.json`).
+- **"Current agent"** — Deploy to the host agent that is currently executing
+  this skill (e.g. Qoder running this skill → Qoder). The host agent
+  auto-identifies itself from runtime context, then looks up its config
+  path from the table in Step 0.3.
+- **"Other agent"** — Deploy to a different agent. User supplies the
+  agent's identifier (e.g. `qoder`, `claude-code`, `cursor`, `kilo`,
+  `cline`, `opencode`) OR the full path to its executable
+  (e.g. `/usr/local/bin/qodercli`) via the Other input. The host agent
+  verifies the path is executable when given.
 
-> The user should only need to name the agent — they should NOT need to know
-> the agent's MCP config path or integration mode. The host agent discovers
-> that automatically in Step 0.3.
+> The user should only need to say *which* agent — they should NOT need
+> to know the agent's MCP config path, integration mode, or whether to
+> supply a name vs. a path. The host agent resolves all of that in
+> Step 0.3.
 >
-> If the user specifies a binary path, verify the binary exists and is
-> executable before proceeding.
+> **Generic fallback is automatic, not a user choice**: if option B
+> resolves to a name that does not match any row in Step 0.3's table,
+> the host agent silently falls back to the universal config
+> (`~/.config/mcp/mcp.json`). No separate "Generic MCP-compatible"
+> option is exposed.
 
 ### Step 0.2: Ask scope — global or project?
 
@@ -136,9 +141,11 @@ Based on the user's answers from Step 0.1 (agent identity) and Step 0.2
 
 Override: `MCP_AGENT_DIR` env var for any agent.
 
-> If the user-selected name from Step 0.1 does not match any row above,
-> fall back to the universal row. The scope from Step 0.2 determines which
-> column (Global vs Project vs Both) is written in Phase 1.
+> If the agent identified in Step 0.1 does not match any row above
+> (e.g. user-supplied name with no known config path), the host agent
+> silently falls back to the universal row. The scope from Step 0.2
+> determines which column (Global vs Project vs Both) is written in
+> Phase 1.
 
 **2. Check if the agent binary exists**:
 
