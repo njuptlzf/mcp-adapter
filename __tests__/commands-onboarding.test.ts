@@ -66,7 +66,7 @@ describe("commands onboarding", () => {
       manager: { getConnection: () => null },
       toolMetadata: new Map(),
       failureTracker: new Map(),
-    } as any, { getFlag: () => undefined } as any, { hasUI: true, ui } as any);
+    } as any, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui } as any);
 
     expect(mocks.createMcpSetupPanel).toHaveBeenCalled();
     expect(mocks.createMcpPanel).not.toHaveBeenCalled();
@@ -94,12 +94,69 @@ describe("commands onboarding", () => {
       manager: { getConnection: () => null },
       toolMetadata: new Map(),
       failureTracker: new Map(),
-    } as any, { getFlag: () => undefined } as any, { hasUI: true, ui } as any);
+    } as any, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui } as any);
 
     expect(mocks.createMcpPanel).toHaveBeenCalled();
     const options = mocks.createMcpPanel.mock.calls[0]?.[6];
     expect(options.noticeLines[0]).toContain("Using standard MCP config");
     expect(loadOnboardingState().sharedConfigHintShown).toBe(true);
+  });
+
+  it("does not inspect host-specific configs when opening the MCP panel", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-commands-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-commands-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    writeJson(join(home, ".config", "mcp", "mcp.json"), {
+      mcpServers: { sharedServer: { command: "shared" } },
+    });
+    writeFileSync(join(home, ".claude.json"), "{ malformed", "utf-8");
+    mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(join(home, ".config", "opencode", "opencode.json"), "{ malformed", "utf-8");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const ui = createUi();
+    const { loadMcpConfig } = await import("../config.ts");
+    const { openMcpPanel } = await import("../commands.ts");
+
+    await openMcpPanel({
+      config: loadMcpConfig(),
+      manager: { getConnection: () => null },
+      toolMetadata: new Map(),
+      failureTracker: new Map(),
+    } as any, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui, cwd: process.cwd() } as any);
+
+    expect(mocks.createMcpPanel).toHaveBeenCalled();
+    expect(warning).not.toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it("does not inspect host-specific configs when /mcp opens empty setup", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-commands-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-commands-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    writeFileSync(join(home, ".claude.json"), "{ malformed", "utf-8");
+    mkdirSync(join(home, ".config", "opencode"), { recursive: true });
+    writeFileSync(join(home, ".config", "opencode", "opencode.json"), "{ malformed", "utf-8");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const ui = createUi();
+    const { openMcpPanel } = await import("../commands.ts");
+
+    await openMcpPanel({
+      config: { mcpServers: {} },
+      manager: { getConnection: () => null },
+      toolMetadata: new Map(),
+      failureTracker: new Map(),
+    } as any, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui, cwd: process.cwd() } as any);
+
+    expect(mocks.createMcpSetupPanel).toHaveBeenCalled();
+    const discovery = mocks.createMcpSetupPanel.mock.calls[0]?.[0];
+    expect(discovery.imports).toEqual([]);
+    expect(discovery.hostConfigs).toEqual([]);
+    expect(warning).not.toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   it("clears OAuth credentials, cancels pending auth, and closes the server on logout", async () => {
@@ -120,7 +177,7 @@ describe("commands onboarding", () => {
       manager: { close },
       toolMetadata: new Map(),
       failureTracker: new Map(),
-    } as any, { hasUI: true, ui } as any);
+    } as any, { hasUI: true, mode: "tui", ui } as any);
 
     await pendingCallbackRejection;
     expect(result.ok).toBe(true);
@@ -148,10 +205,54 @@ describe("commands onboarding", () => {
       manager: { getConnection: () => null },
       toolMetadata: new Map(),
       failureTracker: new Map(),
-    } as any, { getFlag: () => undefined } as any, { hasUI: true, ui } as any);
+    } as any, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui } as any);
 
     const callbacks = mocks.createMcpPanel.mock.calls[0]?.[3];
     expect(callbacks.getConnectionStatus("legacy")).toBe("needs-auth");
     expect(callbacks.getConnectionStatus("stale")).toBe("needs-auth");
+  });
+
+  it("panel reconnect force-clears stale needs-auth state", async () => {
+    process.env.HOME = mkdtempSync(join(tmpdir(), "pi-mcp-commands-reconnect-"));
+    const ui = createUi();
+    const { updateTokens } = await import("../mcp-auth.ts");
+    updateTokens("notion", { accessToken: "token" }, "https://mcp.notion.com/mcp");
+    let currentConnection: any = { status: "needs-auth" };
+    const close = vi.fn(async () => {
+      currentConnection = null;
+    });
+    const connect = vi.fn(async () => {
+      currentConnection = {
+        status: "connected",
+        tools: [{ name: "search", description: "Search" }],
+        resources: [],
+      };
+      return currentConnection;
+    });
+    const state = {
+      config: { mcpServers: { notion: { url: "https://mcp.notion.com/mcp", auth: "oauth" } } },
+      manager: {
+        close,
+        connect,
+        getConnection: vi.fn(() => currentConnection),
+        getAllConnections: vi.fn(() => new Map(currentConnection?.status === "connected" ? [["notion", currentConnection]] : [])),
+      },
+      toolMetadata: new Map(),
+      serverInstructions: new Map(),
+      failureTracker: new Map([["notion", Date.now()]]),
+      lifecycle: { markKeepAlive: vi.fn() },
+    } as any;
+    const { openMcpPanel } = await import("../commands.ts");
+
+    await openMcpPanel(state, { getFlag: () => undefined } as any, { hasUI: true, mode: "tui", ui } as any);
+
+    const callbacks = mocks.createMcpPanel.mock.calls[0]?.[3];
+    await expect(callbacks.reconnect("notion")).resolves.toBe(true);
+
+    expect(close).toHaveBeenCalledWith("notion");
+    expect(connect).toHaveBeenCalledWith("notion", state.config.mcpServers.notion);
+    expect(state.failureTracker.has("notion")).toBe(false);
+    expect(state.toolMetadata.get("notion")?.[0]?.name).toBe("notion_search");
+    expect(callbacks.getConnectionStatus("notion")).toBe("connected");
   });
 });

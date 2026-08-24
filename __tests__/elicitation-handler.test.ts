@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ElicitRequest } from "@modelcontextprotocol/sdk/types.js";
+import type { ElicitRequest } from "@modelcontextprotocol/client";
+import type { ElicitationUIContext } from "../elicitation-handler.ts";
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(async () => undefined),
@@ -7,213 +8,362 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("open", () => ({ default: mocks.open }));
 
-function formRequest(params: ElicitRequest["params"]): ElicitRequest {
+function request(params: ElicitRequest["params"]): ElicitRequest {
   return { method: "elicitation/create", params } as ElicitRequest;
 }
 
-describe("elicitation handler", () => {
+type TestElicitationUI = ElicitationUIContext & {
+  select: ReturnType<typeof vi.fn>;
+  input: ReturnType<typeof vi.fn>;
+  notify: ReturnType<typeof vi.fn>;
+};
+
+function createUi(overrides: Partial<TestElicitationUI> = {}): TestElicitationUI {
+  return {
+    select: vi.fn(),
+    input: vi.fn(),
+    notify: vi.fn(),
+    ...overrides,
+  };
+}
+
+describe("MCP elicitation", () => {
   beforeEach(() => {
-    mocks.open.mockClear();
+    mocks.open.mockReset();
+    mocks.open.mockResolvedValue(undefined);
   });
 
-  it("converts form elicitation schemas to Pi forms and returns accepted content", async () => {
+  it("collects a form with stock Pi dialogs and lets the user review it before sending", async () => {
     const { handleElicitationRequest } = await import("../elicitation-handler.ts");
-    const ui = {
-      form: vi.fn(async () => ({
-        action: "submit",
-        values: {
-          title: "Bug in auth flow",
-          priority: "medium",
-          assignToMe: true,
-        },
-      })),
-    };
+    const ui = createUi({
+      select: vi.fn()
+        .mockResolvedValueOnce("Continue")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Submit"),
+      input: vi.fn().mockResolvedValueOnce("octocat"),
+      notify: vi.fn(),
+    });
 
     const result = await handleElicitationRequest(
-      { serverName: "github", ui: ui as any, autoOpenUrls: false },
-      formRequest({
+      { serverName: "github", ui, allowUrl: true },
+      request({
         mode: "form",
-        message: "Create a new issue",
+        message: "Please provide your GitHub username",
         requestedSchema: {
           type: "object",
           properties: {
-            title: {
-              type: "string",
-              title: "Title",
-              description: "Issue title",
-              minLength: 1,
-            },
-            priority: {
-              type: "string",
-              title: "Priority",
-              enum: ["low", "medium", "high"],
-              default: "medium",
-            },
-            assignToMe: {
-              type: "boolean",
-              title: "Assign to me",
-              default: false,
-            },
+            username: { type: "string", title: "GitHub username", minLength: 1 },
           },
-          required: ["title"],
+          required: ["username"],
         },
       }),
     );
 
-    expect(ui.form).toHaveBeenCalledWith({
-      title: "MCP Input Request",
-      message: "Server: github\n\nCreate a new issue",
-      submitLabel: "Submit",
-      secondaryLabel: "Decline",
-      cancelLabel: "Cancel",
-      fields: [
-        {
-          type: "text",
-          name: "title",
-          label: "Title",
-          description: "Issue title",
-          required: true,
-          minLength: 1,
-        },
-        {
-          type: "select",
-          name: "priority",
-          label: "Priority",
-          required: false,
-          options: [
-            { value: "low" },
-            { value: "medium" },
-            { value: "high" },
-          ],
-          default: "medium",
-        },
-        {
-          type: "boolean",
-          name: "assignToMe",
-          label: "Assign to me",
-          default: false,
-        },
-      ],
-    });
-    expect(result).toEqual({
-      action: "accept",
-      content: {
-        title: "Bug in auth flow",
-        priority: "medium",
-        assignToMe: true,
-      },
-    });
+    expect(ui.select.mock.calls[0]).toEqual([
+      "MCP Input Request\nServer: github\n\nPlease provide your GitHub username",
+      ["Continue", "Decline"],
+    ]);
+    expect(ui.input).toHaveBeenCalledWith("GitHub username (required)", undefined);
+    expect(ui.select.mock.calls[2][0]).toContain("GitHub username: octocat");
+    expect(result).toEqual({ action: "accept", content: { username: "octocat" } });
   });
 
-  it("shows URL elicitations as a Pi form and opens accepted URLs", async () => {
+  it("lets the user edit a value from the review screen", async () => {
     const { handleElicitationRequest } = await import("../elicitation-handler.ts");
-    const ui = {
-      form: vi.fn(async () => ({ action: "submit", values: {} })),
+    const ui = createUi({
+      select: vi.fn()
+        .mockResolvedValueOnce("Continue")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Edit")
+        .mockResolvedValueOnce("Name (name)")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Submit"),
+      input: vi.fn().mockResolvedValueOnce("Old").mockResolvedValueOnce("New"),
       notify: vi.fn(),
-    };
+    });
 
     const result = await handleElicitationRequest(
-      { serverName: "stripe", ui: ui as any, autoOpenUrls: false },
-      formRequest({
-        mode: "url",
-        message: "Confirm payment authorization",
-        elicitationId: "elicit_123",
-        url: "https://checkout.stripe.com/c/pay/cs_test_123",
+      { serverName: "demo", ui, allowUrl: true },
+      request({
+        mode: "form",
+        message: "Choose a name",
+        requestedSchema: {
+          type: "object",
+          properties: { name: { type: "string", title: "Name" } },
+        },
       }),
     );
 
-    expect(ui.form).toHaveBeenCalledWith({
-      title: "MCP Browser Request",
-      message: [
-        "Server: stripe",
-        "",
-        "Confirm payment authorization",
-        "",
-        "Domain: checkout.stripe.com",
-        "URL: https://checkout.stripe.com/c/pay/cs_test_123",
-        "",
-        "Open this URL in your browser?",
-      ].join("\n"),
-      fields: [],
-      submitLabel: "Open",
-      secondaryLabel: "Decline",
-      cancelLabel: "Cancel",
+    expect(ui.input.mock.calls[1]).toEqual(["Name", "Old"]);
+    expect(result).toEqual({ action: "accept", content: { name: "New" } });
+  });
+
+  it("validates form values and lets the user correct invalid input", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const ui = createUi({
+      select: vi.fn()
+        .mockResolvedValueOnce("Continue")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Submit"),
+      input: vi.fn()
+        .mockResolvedValueOnce("not-an-email")
+        .mockResolvedValueOnce("octocat@example.com"),
+      notify: vi.fn(),
     });
-    expect(mocks.open).toHaveBeenCalledWith("https://checkout.stripe.com/c/pay/cs_test_123");
-    expect(ui.notify).toHaveBeenCalledWith("Opened browser for MCP elicitation.", "info");
+
+    const result = await handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: true },
+      request({
+        mode: "form",
+        message: "Contact details",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            email: { type: "string", format: "email" },
+          },
+          required: ["email"],
+        },
+      }),
+    );
+
+    expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("email"), "error");
+    expect(result).toEqual({ action: "accept", content: { email: "octocat@example.com" } });
+  });
+
+  it.each([
+    ["number", false],
+    ["number", true],
+    ["integer", false],
+    ["integer", true],
+  ] as const)("rejects blank %s input and reprompts when required=%s", async (type, required) => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const ui = createUi({
+      select: vi.fn()
+        .mockResolvedValueOnce("Continue")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Submit"),
+      input: vi.fn().mockResolvedValueOnce("   ").mockResolvedValueOnce("7"),
+      notify: vi.fn(),
+    });
+
+    const result = await handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: false },
+      request({
+        mode: "form",
+        message: "Choose a quantity",
+        requestedSchema: {
+          type: "object",
+          properties: { quantity: { type } },
+          ...(required ? { required: ["quantity"] } : {}),
+        },
+      }),
+    );
+
+    expect(ui.notify).toHaveBeenCalledWith("Elicitation field quantity must be a number", "error");
+    expect(ui.input).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ action: "accept", content: { quantity: 7 } });
+  });
+
+  it("uses one confirmation dialog for an empty form", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const params = request({
+      mode: "form",
+      message: "Confirm the operation",
+      requestedSchema: { type: "object", properties: {} },
+    });
+
+    for (const [selection, expected] of [
+      ["Continue", { action: "accept", content: {} }],
+      ["Decline", { action: "decline" }],
+      [undefined, { action: "cancel" }],
+    ]) {
+      const select = vi.fn().mockResolvedValue(selection);
+      await expect(handleElicitationRequest({
+        serverName: "demo",
+        ui: createUi({ select }),
+        allowUrl: true,
+      }, params)).resolves.toEqual(expected);
+      expect(select).toHaveBeenCalledOnce();
+      expect(select).toHaveBeenCalledWith(
+        "MCP Input Request\nServer: demo\n\nConfirm the operation",
+        ["Continue", "Decline"],
+      );
+    }
+  });
+
+  it("does not open URL elicitations that are declined or dismissed", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const params = request({
+      mode: "url",
+      message: "Authorize",
+      elicitationId: "auth-1",
+      url: "https://example.com/authorize",
+    });
+
+    await expect(handleElicitationRequest({
+      serverName: "demo",
+      ui: createUi({ select: vi.fn().mockResolvedValue("Decline") }),
+      allowUrl: true,
+    }, params)).resolves.toEqual({ action: "decline" });
+    await expect(handleElicitationRequest({
+      serverName: "demo",
+      ui: createUi({ select: vi.fn().mockResolvedValue(undefined) }),
+      allowUrl: true,
+    }, params)).resolves.toEqual({ action: "cancel" });
+    expect(mocks.open).not.toHaveBeenCalled();
+  });
+
+  it("shows the server, host, and full URL before opening an accepted URL elicitation", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const onUrlAccepted = vi.fn();
+    const ui = createUi({
+      select: vi.fn().mockResolvedValueOnce("Open"),
+      input: vi.fn(),
+      notify: vi.fn(),
+    });
+    const url = "https://checkout.example.com/authorize?state=a%2Fb";
+
+    const result = await handleElicitationRequest(
+      { serverName: "payments", ui, allowUrl: true, onUrlAccepted },
+      request({
+        mode: "url",
+        message: "Authorize the payment provider",
+        elicitationId: "payment-1",
+        url,
+      }),
+    );
+
+    expect(ui.select).toHaveBeenCalledWith([
+      "MCP Browser Request",
+      "Server: payments",
+      "",
+      "Authorize the payment provider",
+      "",
+      "Host: checkout.example.com",
+      `Full URL: ${url}`,
+      "",
+      "Open this URL in your browser?",
+    ].join("\n"), ["Open", "Decline"]);
+    expect(mocks.open).toHaveBeenCalledWith(url);
+    expect(onUrlAccepted).toHaveBeenCalledWith("payment-1");
     expect(result).toEqual({ action: "accept" });
   });
 
-  it("rejects non-browser URL elicitation schemes before prompting or opening", async () => {
+  it("rejects URL mode when the client advertised form-only support", async () => {
     const { handleElicitationRequest } = await import("../elicitation-handler.ts");
-    const ui = {
-      form: vi.fn(async () => ({ action: "submit", values: {} })),
-      notify: vi.fn(),
-    };
+    const ui = createUi();
 
-    await expect(
-      handleElicitationRequest(
-        { serverName: "demo", ui: ui as any, autoOpenUrls: true },
-        formRequest({
-          mode: "url",
-          message: "Open local file",
-          elicitationId: "elicit_file",
-          url: "file:///etc/passwd",
-        }),
-      ),
-    ).rejects.toThrow("MCP URL elicitation only supports http/https URLs: file:");
+    await expect(handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: false },
+      request({
+        mode: "url",
+        message: "Authorize",
+        elicitationId: "auth-1",
+        url: "https://example.com/authorize",
+      }),
+    )).rejects.toMatchObject({ code: -32602 });
+    expect(ui.select).not.toHaveBeenCalled();
+  });
 
-    expect(ui.form).not.toHaveBeenCalled();
+  it("rejects URL schemes that cannot be opened safely in a browser", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const ui = createUi();
+
+    await expect(handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: true },
+      request({
+        mode: "url",
+        message: "Open a file",
+        elicitationId: "file-1",
+        url: "file:///etc/passwd",
+      }),
+    )).rejects.toMatchObject({ code: -32602 });
+    expect(ui.select).not.toHaveBeenCalled();
     expect(mocks.open).not.toHaveBeenCalled();
-    expect(ui.notify).not.toHaveBeenCalled();
   });
 
-  it("preserves empty strings for string fields unless schema constraints reject them", async () => {
-    const { coerceAndValidateFormValues } = await import("../elicitation-handler.ts");
-    const params = {
-      mode: "form",
-      message: "Collect note",
-      requestedSchema: {
-        type: "object",
-        properties: {
-          note: { type: "string", title: "Note" },
-          summary: { type: "string", title: "Summary", minLength: 1 },
-        },
-        required: ["note"],
-      },
-    } as const;
-
-    expect(coerceAndValidateFormValues(params, { note: "", summary: "ok" })).toEqual({
-      note: "",
-      summary: "ok",
-    });
-    expect(() => coerceAndValidateFormValues(params, { note: "ok", summary: "" })).toThrow(
-      "Elicitation field summary is shorter than minimum length 1",
-    );
-  });
-
-  it("maps Pi secondary and cancel form actions to MCP decline and cancel", async () => {
+  it("cancels URL elicitation when the browser cannot be opened", async () => {
     const { handleElicitationRequest } = await import("../elicitation-handler.ts");
-    const makeRequest = () =>
-      formRequest({
+    mocks.open.mockRejectedValueOnce(new Error("no browser"));
+    const ui = createUi({
+      select: vi.fn().mockResolvedValueOnce("Open"),
+      input: vi.fn(),
+      notify: vi.fn(),
+    });
+
+    const result = await handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: true },
+      request({
+        mode: "url",
+        message: "Authorize",
+        elicitationId: "auth-1",
+        url: "https://example.com/authorize",
+      }),
+    );
+
+    expect(result).toEqual({ action: "cancel" });
+    expect(ui.notify).toHaveBeenCalledWith(expect.stringContaining("no browser"), "error");
+  });
+
+  it("supports every primitive form field, defaults, and omission", async () => {
+    const { handleElicitationRequest } = await import("../elicitation-handler.ts");
+    const ui = createUi({
+      select: vi.fn()
+        .mockResolvedValueOnce("Continue")
+        .mockResolvedValueOnce("Use default")
+        .mockResolvedValueOnce("Medium (medium)")
+        .mockResolvedValueOnce("No")
+        .mockResolvedValueOnce("Enter value")
+        .mockResolvedValueOnce("Choose values")
+        .mockResolvedValueOnce("Red")
+        .mockResolvedValueOnce("Done")
+        .mockResolvedValueOnce("Omit")
+        .mockResolvedValueOnce("Submit"),
+      input: vi.fn().mockResolvedValueOnce("42"),
+      notify: vi.fn(),
+    });
+
+    const result = await handleElicitationRequest(
+      { serverName: "demo", ui, allowUrl: true },
+      request({
         mode: "form",
-        message: "Continue?",
+        message: "Configure the operation",
         requestedSchema: {
           type: "object",
           properties: {
-            reason: { type: "string", title: "Reason" },
+            title: { type: "string", default: "Untitled" },
+            priority: {
+              type: "string",
+              oneOf: [
+                { const: "low", title: "Low" },
+                { const: "medium", title: "Medium" },
+              ],
+            },
+            enabled: { type: "boolean" },
+            count: { type: "integer", minimum: 1, maximum: 100 },
+            colors: {
+              type: "array",
+              items: { type: "string", enum: ["Red", "Blue"] },
+              minItems: 1,
+            },
+            note: { type: "string" },
           },
+          required: ["priority", "enabled", "count", "colors"],
         },
-      });
+      }),
+    );
 
-    const declineUi = { form: vi.fn(async () => ({ action: "secondary" })) };
-    const cancelUi = { form: vi.fn(async () => ({ action: "cancel" })) };
-
-    await expect(
-      handleElicitationRequest({ serverName: "demo", ui: declineUi as any, autoOpenUrls: false }, makeRequest()),
-    ).resolves.toEqual({ action: "decline" });
-    await expect(
-      handleElicitationRequest({ serverName: "demo", ui: cancelUi as any, autoOpenUrls: false }, makeRequest()),
-    ).resolves.toEqual({ action: "cancel" });
+    expect(result).toEqual({
+      action: "accept",
+      content: {
+        title: "Untitled",
+        priority: "medium",
+        enabled: false,
+        count: 42,
+        colors: ["Red"],
+      },
+    });
   });
 });

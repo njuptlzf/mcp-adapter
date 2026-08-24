@@ -5,6 +5,9 @@
 import { describe, it, beforeEach, afterEach } from "node:test"
 import assert from "node:assert"
 import { createServer } from "node:http"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   ensureCallbackServer,
   waitForCallback,
@@ -126,7 +129,7 @@ describe("mcp-callback-server", () => {
       const callbackPromise = waitForCallback("custom-state")
       const response = await fetch(`http://127.0.0.1:${port}/custom/callback?code=ok&state=custom-state`)
       assert.strictEqual(response.status, 200)
-      assert.strictEqual(await callbackPromise, "ok")
+      assert.strictEqual((await callbackPromise).code, "ok")
     })
 
     it("should reject an occupied explicit strict port", async () => {
@@ -177,7 +180,7 @@ describe("mcp-callback-server", () => {
         const callbackPromise = waitForCallback(state)
         const response = await fetch(`http://localhost:${callbackPort}/callback?code=ok&state=${state}`)
         assert.strictEqual(response.status, 200)
-        assert.strictEqual(await callbackPromise, "ok")
+        assert.strictEqual((await callbackPromise).code, "ok")
 
         await assert.rejects(
           async () => await ensureCallbackServer({ strictPort: true }),
@@ -211,8 +214,30 @@ describe("mcp-callback-server", () => {
       assert.ok(html.includes("Authorization Successful"))
 
       // Callback promise should resolve
-      const code = await callbackPromise
-      assert.strictEqual(code, expectedCode)
+      const result = await callbackPromise
+      assert.strictEqual(result.code, expectedCode)
+      assert.strictEqual(result.iss, undefined)
+    })
+
+    it("should propagate the RFC 9207 iss parameter when present", async () => {
+      await ensureCallbackServer()
+
+      const state = "test-state-iss"
+      const expectedCode = "auth-code-iss"
+      const expectedIss = "https://auth.example.com"
+
+      const callbackPromise = waitForCallback(state)
+
+      const callbackPort = getOAuthCallbackPort()
+      const response = await fetch(
+        `http://localhost:${callbackPort}/callback?code=${expectedCode}&state=${state}&iss=${encodeURIComponent(expectedIss)}`
+      )
+      assert.strictEqual(response.status, 200)
+      await response.text()
+
+      const result = await callbackPromise
+      assert.strictEqual(result.code, expectedCode)
+      assert.strictEqual(result.iss, expectedIss)
     })
 
     it("should reject on error parameter", async () => {
@@ -222,6 +247,7 @@ describe("mcp-callback-server", () => {
       const errorMsg = "access_denied"
 
       const callbackPromise = waitForCallback(state)
+      const rejection = assert.rejects(callbackPromise, /access_denied/)
 
       // Simulate error callback
       const callbackPort = getOAuthCallbackPort()
@@ -234,7 +260,7 @@ describe("mcp-callback-server", () => {
       assert.ok(html.includes("Authorization Failed"))
 
       // Callback promise should reject
-      await assert.rejects(callbackPromise, /access_denied/)
+      await rejection
     })
 
     it("should escape provider-controlled OAuth error details", async () => {
@@ -242,6 +268,7 @@ describe("mcp-callback-server", () => {
 
       const state = "test-state-error-escaping"
       const callbackPromise = waitForCallback(state)
+      const rejection = assert.rejects(callbackPromise, /<script>alert\("x"\)<\/script>&reason=bad/)
       const callbackPort = getOAuthCallbackPort()
       const description = `<script>alert("x")</script>&reason=bad`
       const response = await fetch(
@@ -252,7 +279,7 @@ describe("mcp-callback-server", () => {
       const html = await response.text()
       assert.ok(!html.includes("<script>"))
       assert.ok(html.includes("&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;reason=bad"))
-      await assert.rejects(callbackPromise, /<script>alert\("x"\)<\/script>&reason=bad/)
+      await rejection
     })
 
     it("should not reflect OAuth error details for invalid state", async () => {
@@ -412,5 +439,59 @@ describe("mcp-callback-server", () => {
       await assert.rejects(promise2, /Authorization cancelled/)
       await assert.rejects(promise3, /Authorization cancelled/)
     })
+  })
+})
+
+describe("callback page branding", () => {
+  const originalPackageDir = process.env.PI_PACKAGE_DIR
+  const packageDirs: string[] = []
+
+  function brandedPackageDir(name?: string): string {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-callback-brand-"))
+    packageDirs.push(dir)
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify(name ? { name: "pi", piConfig: { name } } : { name: "pi" }),
+    )
+    return dir
+  }
+
+  /** Drive a real callback request and read the HTML the browser would get. */
+  async function fetchCallbackHtml(): Promise<string> {
+    await ensureCallbackServer()
+    const state = "brandingteststate"
+    const pending = waitForCallback(state)
+    const url = `http://localhost:${getOAuthCallbackPort()}${getOAuthCallbackPath()}?state=${state}&code=abc123`
+    const response = await fetch(url)
+    const html = await response.text()
+    await pending
+    return html
+  }
+
+  afterEach(async () => {
+    if (originalPackageDir === undefined) delete process.env.PI_PACKAGE_DIR
+    else process.env.PI_PACKAGE_DIR = originalPackageDir
+    for (const dir of packageDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+    await stopCallbackServer()
+  })
+
+  it("names the host app rather than hardcoding Pi", async () => {
+    process.env.PI_PACKAGE_DIR = brandedPackageDir("arc")
+    const html = await fetchCallbackHtml()
+    assert.match(html, /return to <span class="app">arc<\/span>/)
+    assert.match(html, /<title>arc — Authorization Successful<\/title>/)
+    assert.doesNotMatch(html, /return to <span class="app">Pi<\/span>/)
+  })
+
+  it("falls back to pi when the host is not rebranded", async () => {
+    process.env.PI_PACKAGE_DIR = brandedPackageDir()
+    const html = await fetchCallbackHtml()
+    assert.match(html, /return to <span class="app">pi<\/span>/)
+  })
+
+  it("serves a self-contained page — no external assets", async () => {
+    delete process.env.PI_PACKAGE_DIR
+    const html = await fetchCallbackHtml()
+    assert.doesNotMatch(html, /https?:\/\//)
   })
 })

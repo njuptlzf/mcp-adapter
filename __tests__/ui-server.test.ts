@@ -3,7 +3,8 @@ import http from "node:http";
 import { startUiServer, type UiServerOptions, type UiServerHandle } from "../ui-server.ts";
 import type { McpServerManager } from "../server-manager.ts";
 import type { ConsentManager } from "../consent-manager.ts";
-import type { UiResourceContent } from "../types.ts";
+import type { McpConfig, UiResourceContent } from "../types.ts";
+import type { McpExtensionState } from "../state.ts";
 
 // Helper to make HTTP requests to the server
 async function request(
@@ -116,11 +117,13 @@ function createMockManager(overrides: Partial<McpServerManager> = {}): McpServer
       client: {
         callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "result" }] }),
       },
+      tools: [{ name: "some_tool" }],
     }),
     touch: vi.fn(),
     incrementInFlight: vi.fn(),
     decrementInFlight: vi.fn(),
     readResource: vi.fn(),
+    getRequestOptions: vi.fn().mockReturnValue(undefined),
     ...overrides,
   } as unknown as McpServerManager;
 }
@@ -159,6 +162,15 @@ function createServerOptions(overrides: Partial<UiServerOptions> = {}): UiServer
   };
 }
 
+async function getUiAppUrl(handle: UiServerHandle): Promise<string> {
+  const host = await request(handle.url);
+  const match = typeof host.body === "string"
+    ? host.body.match(/const UI_RESOURCE_TOKEN = "([^"]+)";/)
+    : null;
+  if (!match?.[1]) throw new Error("UI resource token missing from host page");
+  return `http://localhost:${handle.port}/ui-app?resource=${encodeURIComponent(match[1])}`;
+}
+
 describe("UiServer", () => {
   let handle: UiServerHandle | null = null;
 
@@ -170,10 +182,11 @@ describe("UiServer", () => {
   });
 
   describe("startUiServer", () => {
-    it("starts server on random port", async () => {
+    it("starts server on a Moshi-discoverable low port by default", async () => {
       handle = await startUiServer(createServerOptions());
 
-      expect(handle.port).toBeGreaterThan(0);
+      expect(handle.port).toBeGreaterThanOrEqual(8377);
+      expect(handle.port).toBeLessThanOrEqual(8396);
       expect(handle.url).toContain(`http://localhost:${handle.port}`);
       expect(handle.sessionToken).toBeTruthy();
     });
@@ -232,13 +245,167 @@ describe("UiServer", () => {
       expect(res.body).toEqual({ ok: false, error: "Invalid session" });
     });
 
-    it("rejects missing session token", async () => {
+    it("serves a tokenless Moshi landing page without disclosing the session", async () => {
       handle = await startUiServer(createServerOptions());
       const url = `http://localhost:${handle.port}/`;
 
       const res = await request(url);
 
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/html");
+      expect(res.body).toContain("Open the authenticated MCP UI URL shown by Pi");
+      expect(res.body).not.toContain("location.replace");
+      expect(res.body).not.toContain(handle.sessionToken);
+      expect(res.body).not.toContain(encodeURIComponent(handle.sessionToken));
+    });
+
+    it("answers HEAD discovery probes without a session token", async () => {
+      handle = await startUiServer(createServerOptions());
+      const url = `http://localhost:${handle.port}/`;
+
+      const res = await request(url, { method: "HEAD" });
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/html");
+      expect(res.body).toBe("");
+    });
+
+    it("rejects non-loopback Host headers before serving tokenless landing", async () => {
+      handle = await startUiServer(createServerOptions());
+      const url = `http://localhost:${handle.port}/`;
+
+      const res = await request(url, { headers: { Host: "attacker.example" } });
+
       expect(res.status).toBe(403);
+      expect(res.body).toBe("Invalid host");
+    });
+
+    it("accepts bracketed IPv6 loopback Host headers", async () => {
+      handle = await startUiServer(createServerOptions());
+      const url = `http://localhost:${handle.port}/`;
+
+      const res = await request(url, { headers: { Host: `[::1]:${handle.port}` } });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toContain("Open the authenticated MCP UI URL shown by Pi");
+      expect(res.body).not.toContain(handle.sessionToken);
+    });
+  });
+
+  describe("GET /ui-app", () => {
+    it("does not accept the app resource token on privileged proxy routes", async () => {
+      const manager = createMockManager();
+      handle = await startUiServer(createServerOptions({ manager }));
+      const appUrl = new URL(await getUiAppUrl(handle));
+      const resourceToken = appUrl.searchParams.get("resource");
+
+      expect(resourceToken).toBeTruthy();
+      expect(resourceToken).not.toBe(handle.sessionToken);
+      expect((await request(`http://localhost:${handle.port}/ui-app?session=${handle.sessionToken}`)).status).toBe(403);
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { token: resourceToken, params: { name: "some_tool", arguments: {} } },
+      });
+
+      expect(res.status).toBe(403);
+      expect(manager.getConnection).not.toHaveBeenCalled();
+    });
+
+    it("enforces metadata CSP and response-level sandboxing while preserving app HTML", async () => {
+      const appHtml = `<!-- decoy <head><meta http-equiv="Content-Security-Policy" content="default-src *"></head> -->
+<!doctype html>
+<html>
+<head>
+  <meta http-equiv="Content-Security-Policy" content="img-src https://images.example.com">
+  <style>body { margin: 0; }</style>
+</head>
+<body>
+  <script type="module">import "https://esm.sh/example";</script>
+</body>
+</html>`;
+      handle = await startUiServer(createServerOptions({
+        resource: createMockResource({
+          html: appHtml,
+          meta: {
+            permissions: [],
+            csp: {
+              resourceDomains: ["https://esm.sh"],
+              connectDomains: ["https://api.excalidraw.com"],
+            },
+          },
+        }),
+      }));
+      const url = await getUiAppUrl(handle);
+
+      const res = await request(url);
+      const cspHeader = res.headers["content-security-policy"];
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/html");
+      expect(cspHeader).toContain("default-src 'none'");
+      expect(cspHeader).toContain("sandbox allow-scripts allow-forms allow-modals allow-popups allow-downloads");
+      expect(cspHeader).not.toContain("allow-popups-to-escape-sandbox");
+      expect(cspHeader).not.toContain("allow-same-origin");
+      expect(cspHeader).toContain("script-src 'self' 'unsafe-inline' https://esm.sh");
+      expect(cspHeader).toContain("style-src 'self' 'unsafe-inline' https://esm.sh");
+      expect(cspHeader).toContain("connect-src https://api.excalidraw.com");
+      expect(res.body).toBe(appHtml);
+    });
+
+    it("rejects malformed CSP metadata before writing the response header", async () => {
+      const appHtml = "<h1>Original App</h1>";
+      handle = await startUiServer(createServerOptions({
+        resource: createMockResource({
+          html: appHtml,
+          meta: {
+            permissions: [],
+            csp: {
+              resourceDomains: [
+                "https://safe.example.com",
+                "https://c1.example.com\x80img-src",
+                "https://emoji.example.com/😀",
+              ],
+            },
+          },
+        }),
+      }));
+
+      const res = await request(await getUiAppUrl(handle));
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-security-policy"]).toContain("https://safe.example.com");
+      expect(res.headers["content-security-policy"]).not.toContain("https://c1.example.com\x80img-src");
+      expect(res.headers["content-security-policy"]).not.toContain("https://emoji.example.com/😀");
+      expect(res.body).toBe(appHtml);
+    });
+
+    it("emits trusted default CSP headers for an empty normalized CSP", async () => {
+      const appHtml = "<h1>Original App</h1>";
+      handle = await startUiServer(createServerOptions({
+        resource: createMockResource({
+          html: appHtml,
+          meta: { permissions: [], csp: {} },
+        }),
+      }));
+
+      const res = await request(await getUiAppUrl(handle));
+
+      expect(res.status).toBe(200);
+      expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
+      expect(res.headers["content-security-policy"]).toContain("script-src 'self' 'unsafe-inline'");
+      expect(res.body).toBe(appHtml);
+    });
+
+    it("emits restrictive default CSP when metadata is undefined", async () => {
+      handle = await startUiServer(createServerOptions());
+      const url = await getUiAppUrl(handle);
+
+      const res = await request(url);
+
+      expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
+      expect(res.headers["content-security-policy"]).toContain("connect-src 'none'");
+      expect(res.body).toBe("<h1>Test App</h1>");
     });
   });
 
@@ -433,8 +600,14 @@ describe("UiServer", () => {
       const mockClient = {
         callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "tool result" }] }),
       };
+      const requestOptions = { timeout: 4321 };
       const manager = createMockManager({
-        getConnection: vi.fn().mockReturnValue({ status: "connected", client: mockClient }),
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [{ name: "some_tool" }],
+        }),
+        getRequestOptions: vi.fn().mockReturnValue(requestOptions),
       });
       handle = await startUiServer(createServerOptions({ manager }));
 
@@ -451,10 +624,269 @@ describe("UiServer", () => {
         ok: true,
         result: { content: [{ type: "text", text: "tool result" }] },
       });
+      expect(manager.getRequestOptions).toHaveBeenCalledWith("test-server");
       expect(mockClient.callTool).toHaveBeenCalledWith({
         name: "some_tool",
         arguments: { arg1: "value1" },
+      }, requestOptions);
+    });
+
+    it("parses JSON-string arguments without dropping quoted fields", async () => {
+      const mockClient = {
+        callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "tool result" }] }),
+      };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [{ name: "some_tool" }],
+        }),
       });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "some_tool", arguments: '{"body":"He said \\"hi\\""}' },
+        },
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockClient.callTool).toHaveBeenCalledWith({
+        name: "some_tool",
+        arguments: { body: 'He said "hi"' },
+      }, undefined);
+    });
+
+    it("rejects invalid app tool arguments as a boundary error", async () => {
+      const mockClient = { callTool: vi.fn() };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [{ name: "some_tool" }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "some_tool", arguments: [] },
+        },
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ ok: false, error: 'tool "some_tool" arguments: expected a JSON object, got array' });
+      expect(mockClient.callTool).not.toHaveBeenCalled();
+    });
+
+    it("executes app-only tools without recording their synthetic call intent", async () => {
+      const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "app result" }] });
+      const onMessage = vi.fn();
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [{ name: "app_only", _meta: { ui: { visibility: ["app"] } } }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager, onMessage }));
+
+      const call = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "app_only", arguments: { value: 1 } },
+        },
+      });
+      const message = await request(`http://localhost:${handle.port}/proxy/ui/generated-tool-call-intent`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { tool: "app_only", arguments: { value: 1 }, isError: false },
+        },
+      });
+
+      expect(call.body).toEqual({ ok: true, result: { content: [{ type: "text", text: "app result" }] } });
+      expect(callTool).toHaveBeenCalledWith({ name: "app_only", arguments: { value: 1 } }, undefined);
+      expect(message.body).toEqual({ ok: true, result: {} });
+      expect(handle.getSessionMessages().intents).toEqual([]);
+      expect(onMessage).not.toHaveBeenCalled();
+    });
+
+    it("keeps app-authored call_tool intents for app-only tools", async () => {
+      const onMessage = vi.fn();
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool: vi.fn() },
+          tools: [{ name: "app_only", _meta: { ui: { visibility: ["app"] } } }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager, onMessage }));
+      const params = {
+        type: "intent",
+        intent: "call_tool",
+        _piGeneratedToolCallIntent: true,
+        params: { tool: "app_only", reason: "user-requested" },
+      };
+
+      await request(`http://localhost:${handle.port}/proxy/ui/message`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params },
+      });
+
+      expect(handle.getSessionMessages().intents).toEqual([
+        { intent: "call_tool", params: { tool: "app_only", reason: "user-requested" } },
+      ]);
+      expect(onMessage).toHaveBeenCalledWith(params);
+    });
+
+    it("uses app-callable siblings for iframe approval collisions", async () => {
+      const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] });
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [
+            { name: "search-records", _meta: { ui: { visibility: ["app"] } } },
+            { name: "search_records", _meta: { ui: { visibility: ["app"] } } },
+          ],
+        }),
+      });
+      const config: McpConfig = {
+        settings: { approveTools: ["demo_search_records"] },
+        mcpServers: { demo: { command: "demo" } },
+      };
+      const state = { config, approvedToolCalls: new Map(), toolMetadata: new Map() } as unknown as McpExtensionState;
+      handle = await startUiServer(createServerOptions({ manager, config, state, serverName: "demo" }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params: { name: "search-records", arguments: {} } },
+      });
+
+      expect(res.body).toEqual({ ok: true, result: { content: [{ type: "text", text: "called" }] } });
+      expect(callTool).toHaveBeenCalledOnce();
+    });
+
+    it("uses live resources for iframe approval collisions", async () => {
+      const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] });
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [{ name: "read-records", _meta: { ui: { visibility: ["app"] } } }],
+          resources: [{ name: "records", uri: "file://records" }],
+        }),
+      });
+      const config: McpConfig = {
+        settings: { approveTools: ["demo_read_records"] },
+        mcpServers: { demo: { command: "demo" } },
+      };
+      const state = { config, approvedToolCalls: new Map(), toolMetadata: new Map() } as unknown as McpExtensionState;
+      handle = await startUiServer(createServerOptions({ manager, config, state, serverName: "demo" }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params: { name: "read-records", arguments: {} } },
+      });
+
+      expect(res.body).toEqual({ ok: true, result: { content: [{ type: "text", text: "called" }] } });
+      expect(callTool).toHaveBeenCalledOnce();
+    });
+
+    it("uses other-server metadata for iframe approval collisions", async () => {
+      const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] });
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [{ name: "search-records", _meta: { ui: { visibility: ["app"] } } }],
+        }),
+      });
+      const config: McpConfig = {
+        settings: { approveTools: ["search_records"] },
+        mcpServers: { "my-server": { command: "demo" }, other: { command: "other" } },
+      };
+      const state = {
+        config,
+        approvedToolCalls: new Map(),
+        toolMetadata: new Map([["other", [{ name: "other_search_records", originalName: "search_records", description: "Other" }]]]),
+      } as unknown as McpExtensionState;
+      handle = await startUiServer(createServerOptions({ manager, config, state, serverName: "my-server" }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params: { name: "search-records", arguments: {} } },
+      });
+
+      expect(res.body).toEqual({ ok: true, result: { content: [{ type: "text", text: "called" }] } });
+      expect(callTool).toHaveBeenCalledOnce();
+    });
+
+    it("gates stateless iframe calls with safe legacy global approval selectors", async () => {
+      const callTool = vi.fn();
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [{ name: "search-records", _meta: { ui: { visibility: ["app"] } } }],
+        }),
+      });
+      const config: McpConfig = {
+        settings: { approveTools: ["demo_search_records"] },
+        mcpServers: { demo: { command: "demo" } },
+      };
+      handle = await startUiServer(createServerOptions({ manager, config, serverName: "demo" }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params: { name: "search-records", arguments: {} } },
+      });
+
+      expect(res.body).toMatchObject({ ok: true, result: { details: { error: "approval_required", tool: "search-records" } } });
+      expect(callTool).not.toHaveBeenCalled();
+    });
+
+    it("returns a gated iframe call as an approval_denied tool result", async () => {
+      const mockClient = { callTool: vi.fn() };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [{ name: "some_tool" }],
+        }),
+      });
+      const config: McpConfig = {
+        mcpServers: { "test-server": { command: "demo", approveTools: true } },
+      };
+      const state = {
+        config,
+        approvedToolCalls: new Map(),
+        ui: { select: vi.fn().mockResolvedValue("Deny") },
+      } as unknown as McpExtensionState;
+      handle = await startUiServer(createServerOptions({ manager, config, state }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "some_tool", arguments: { dangerous: true } },
+        },
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        ok: true,
+        result: {
+          details: { error: "approval_denied", server: "test-server", tool: "some_tool" },
+        },
+      });
+      expect(mockClient.callTool).not.toHaveBeenCalled();
     });
 
     it("checks consent before calling tool", async () => {
@@ -495,6 +927,78 @@ describe("UiServer", () => {
       expect((res.body as { error: string }).error).toContain("not connected");
     });
 
+    it("rejects app calls to tools that omit app visibility", async () => {
+      const mockClient = { callTool: vi.fn() };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [{ name: "model_only", _meta: { ui: { visibility: ["model"] } } }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "model_only", arguments: {} },
+        },
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ ok: false, error: 'MCP tool "model_only" is not callable by apps' });
+      expect(mockClient.callTool).not.toHaveBeenCalled();
+    });
+
+    it("rejects app calls when the tool definition is unavailable", async () => {
+      const mockClient = { callTool: vi.fn() };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: [],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "unlisted", arguments: {} },
+        },
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ ok: false, error: 'MCP tool "unlisted" is not callable by apps' });
+      expect(mockClient.callTool).not.toHaveBeenCalled();
+    });
+
+    it("rejects app calls when the tool list is unavailable", async () => {
+      const mockClient = { callTool: vi.fn() };
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: mockClient,
+          tools: undefined,
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { name: "unknown", arguments: {} },
+        },
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.body).toEqual({ ok: false, error: 'MCP tool "unknown" is not callable by apps' });
+      expect(mockClient.callTool).not.toHaveBeenCalled();
+    });
+
     it("returns 400 for invalid params", async () => {
       handle = await startUiServer(createServerOptions());
 
@@ -523,6 +1027,26 @@ describe("UiServer", () => {
       expect(res.status).toBe(403);
     });
 
+    it("rejects anonymous tool calls", async () => {
+      const callTool = vi.fn();
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool },
+          tools: [{ name: "some_tool" }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/tools/call`, {
+        method: "POST",
+        body: { params: { name: "some_tool", arguments: {} } },
+      });
+
+      expect(res.status).toBe(403);
+      expect(callTool).not.toHaveBeenCalled();
+    });
+
     it("tracks in-flight requests", async () => {
       const manager = createMockManager();
       handle = await startUiServer(createServerOptions({ manager }));
@@ -542,6 +1066,19 @@ describe("UiServer", () => {
   });
 
   describe("POST /proxy/ui/consent", () => {
+    it("rejects anonymous approval", async () => {
+      const consentManager = createMockConsentManager();
+      handle = await startUiServer(createServerOptions({ consentManager }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/ui/consent`, {
+        method: "POST",
+        body: { params: { approved: true } },
+      });
+
+      expect(res.status).toBe(403);
+      expect(consentManager.registerDecision).not.toHaveBeenCalled();
+    });
+
     it("registers approval", async () => {
       const consentManager = createMockConsentManager();
       handle = await startUiServer(createServerOptions({ consentManager }));
@@ -578,6 +1115,20 @@ describe("UiServer", () => {
   });
 
   describe("POST /proxy/ui/message", () => {
+    it("rejects anonymous messages", async () => {
+      const onMessage = vi.fn();
+      handle = await startUiServer(createServerOptions({ onMessage }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/ui/message`, {
+        method: "POST",
+        body: { params: { type: "prompt", prompt: "Injected" } },
+      });
+
+      expect(res.status).toBe(403);
+      expect(handle.getSessionMessages().prompts).toEqual([]);
+      expect(onMessage).not.toHaveBeenCalled();
+    });
+
     it("tracks prompt messages", async () => {
       const onMessage = vi.fn();
       handle = await startUiServer(createServerOptions({ onMessage }));
@@ -595,19 +1146,39 @@ describe("UiServer", () => {
       expect(onMessage).toHaveBeenCalled();
     });
 
-    it("tracks intent messages", async () => {
-      handle = await startUiServer(createServerOptions());
+    it("tracks and forwards call_tool intents that do not name an app-only tool", async () => {
+      const onMessage = vi.fn();
+      handle = await startUiServer(createServerOptions({ onMessage }));
+      const params = { type: "intent", intent: "call_tool", params: { tool: "business_action" } };
 
       await request(`http://localhost:${handle.port}/proxy/ui/message`, {
         method: "POST",
-        body: {
-          token: handle.sessionToken,
-          params: { type: "intent", intent: "navigate", params: { to: "/home" } },
-        },
+        body: { token: handle.sessionToken, params },
       });
 
-      const messages = handle.getSessionMessages();
-      expect(messages.intents).toEqual([{ intent: "navigate", params: { to: "/home" } }]);
+      expect(handle.getSessionMessages().intents).toEqual([{ intent: "call_tool", params: { tool: "business_action" } }]);
+      expect(onMessage).toHaveBeenCalledWith(params);
+    });
+
+    it("tracks and forwards generated call intents for tools visible to both app and model", async () => {
+      const onMessage = vi.fn();
+      const manager = createMockManager({
+        getConnection: vi.fn().mockReturnValue({
+          status: "connected",
+          client: { callTool: vi.fn() },
+          tools: [{ name: "both", _meta: { ui: { visibility: ["model", "app"] } } }],
+        }),
+      });
+      handle = await startUiServer(createServerOptions({ manager, onMessage }));
+      const expected = { type: "intent", intent: "call_tool", params: { tool: "both", isError: false } };
+
+      await request(`http://localhost:${handle.port}/proxy/ui/generated-tool-call-intent`, {
+        method: "POST",
+        body: { token: handle.sessionToken, params: { tool: "both", isError: false } },
+      });
+
+      expect(handle.getSessionMessages().intents).toEqual([{ intent: "call_tool", params: { tool: "both", isError: false } }]);
+      expect(onMessage).toHaveBeenCalledWith(expected);
     });
 
     it("tracks notification messages", async () => {
@@ -832,7 +1403,28 @@ describe("UiServer", () => {
   });
 
   describe("POST /proxy/ui/context", () => {
-    it("forwards context to callback", async () => {
+    it("stores and forwards context updates", async () => {
+      const onContextUpdate = vi.fn();
+      handle = await startUiServer(createServerOptions({ onContextUpdate }));
+
+      const res = await request(`http://localhost:${handle.port}/proxy/ui/context`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { content: [{ type: "text", text: "some context data" }] },
+        },
+      });
+
+      expect(res.status).toBe(200);
+      expect(onContextUpdate).toHaveBeenCalledWith({ content: [{ type: "text", text: "some context data" }] });
+      expect(handle.getSessionMessages().contexts).toEqual([{
+        payload: { content: [{ type: "text", text: "some context data" }] },
+        summary: '{"content":[{"type":"text","text":"some context data"}]}',
+        truncated: false,
+      }]);
+    });
+
+    it("rejects malformed context updates", async () => {
       const onContextUpdate = vi.fn();
       handle = await startUiServer(createServerOptions({ onContextUpdate }));
 
@@ -844,8 +1436,27 @@ describe("UiServer", () => {
         },
       });
 
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({ ok: false, error: "Invalid update-model-context params" });
+      expect(onContextUpdate).not.toHaveBeenCalled();
+      expect(handle.getSessionMessages().contexts).toEqual([]);
+    });
+
+    it("bounds oversized context updates", async () => {
+      handle = await startUiServer(createServerOptions());
+
+      const res = await request(`http://localhost:${handle.port}/proxy/ui/context`, {
+        method: "POST",
+        body: {
+          token: handle.sessionToken,
+          params: { content: [{ type: "text", text: "x".repeat(12_100) }] },
+        },
+      });
+
       expect(res.status).toBe(200);
-      expect(onContextUpdate).toHaveBeenCalledWith({ content: "some context data" });
+      expect(handle.getSessionMessages().contexts[0]).toMatchObject({ truncated: true });
+      expect(handle.getSessionMessages().contexts[0].summary.length).toBeLessThanOrEqual(12_000);
+      expect(handle.getSessionMessages().contexts[0].payload).toBeUndefined();
     });
   });
 
