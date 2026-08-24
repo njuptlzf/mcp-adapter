@@ -19,10 +19,11 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LOG_PREFIX = "[divergence-check]";
 const REGISTRY_PATH = resolve(
-  dirname(new URL(import.meta.url).pathname),
+  dirname(fileURLToPath(import.meta.url)),
   "../skills/upstream-merge/references/special-cases.md",
 );
 const argv = process.argv.slice(2);
