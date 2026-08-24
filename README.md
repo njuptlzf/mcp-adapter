@@ -89,6 +89,47 @@ Any MCP-compatible agent can use the universal `mcp-server` bin entry. Register 
 }
 ```
 
+`mcp-server` auto-discovers its config (`.mcp.json` in the CWD, or `~/.config/mcp/mcp.json`). To point it at an explicit config file, pass `--config`:
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "mcp-server",
+      "args": ["--config", "/path/to/config.json"]
+    }
+  }
+}
+```
+
+For a standalone deployment that needs no `node_modules` (e.g. side-loading a single file onto another machine), build `bin/mcp-server.ts` into one self-contained `.mjs` bundle:
+
+```bash
+npx esbuild bin/mcp-server.ts --bundle --platform=node --format=esm \
+  --outfile=mcp-server.mjs
+```
+
+The bundle inlines all dependencies (MCP SDK, Zod, adapters), so the single `.mjs` runs on any machine with just Node.js.
+
+Then register it with `node` and the `--config` flag pointing at the file that lists the servers to proxy:
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "node",
+      "args": [
+        "/home/.local/lib/mcp-server/mcp-server.mjs",
+        "--config",
+        "/home/.local/lib/mcp-server/config.json"
+      ]
+    }
+  }
+}
+```
+
+Config discovery order for `--config` is: `--config` flag → `MCP_CONFIG_PATH` env var → `.mcp.json` in the CWD → `~/.config/mcp/mcp.json`.
+
 The server is agent-agnostic — it speaks MCP protocol and discovers client capabilities at runtime. Sampling and elicitation are forwarded via MCP Server→Client reverse calls when the agent declares those capabilities. See [Universal Adapter](#universal-adapter) for the `AgentAPI` / `UISystem` interface details.
 
 ## What happens on first run (Pi)

@@ -200,9 +200,15 @@ export function loadMcpConfig(overridePath?: string, cwd = process.cwd(), mcpCon
 }
 
 function getConfigSources(overridePath?: string, cwd = process.cwd(), resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER, mcpConfigPath?: string): ConfigSourceSpec[] {
-  const userPath = mcpConfigPath
-    ? resolve(mcpConfigPath)
-    : resolveAgentGlobalConfigPath(resolver, overridePath);
+  // Priority: explicit --config override > agent/universal mcpConfigPath > resolver default.
+  // Before this fix, `overridePath` (--config) was ignored whenever `mcpConfigPath`
+  // was also supplied — which bin/mcp-server.ts always does — so `mcp-server --config`
+  // silently fell back to discovery instead of loading the requested file.
+  const userPath = overridePath
+    ? resolve(overridePath)
+    : mcpConfigPath
+      ? resolve(mcpConfigPath)
+      : resolveAgentGlobalConfigPath(resolver);
   const projectPath = getProjectConfigPath(cwd);
   const projectPiConfigName = resolver.projectConfigName?.() ?? PROJECT_PI_CONFIG_NAME;
   const projectPiPath = resolve(cwd, projectPiConfigName);
