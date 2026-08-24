@@ -283,6 +283,36 @@ describe("config discovery", () => {
     expect(sharedPreview.diffText).toContain('+     "repoprompt": {');
   });
 
+  it("honors --config override when mcpConfigPath is also supplied (bin/mcp-server path)", async () => {
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-override-project-"));
+    process.chdir(project);
+
+    // mcpConfigPath (as passed by bin/mcp-server.ts) with a same-named server.
+    const genericConfigPath = join(project, "generic-mcp.json");
+    writeJson(genericConfigPath, {
+      mcpServers: {
+        target: { command: "generic" },
+      },
+    });
+
+    // Explicit --config target — same server name to prove the override wins.
+    const explicitConfigPath = join(project, "explicit-mcp.json");
+    writeJson(explicitConfigPath, {
+      mcpServers: {
+        target: { command: "explicit" },
+        explicitOnly: { command: "explicit-only" },
+      },
+    });
+
+    // Mirrors bin/mcp-server.ts, which passes BOTH overridePath and mcpConfigPath.
+    // Before the fix, overridePath was ignored and `target` resolved to "generic".
+    const { loadMcpConfig } = await import("../config.ts");
+    const config = loadMcpConfig(explicitConfigPath, project, genericConfigPath);
+
+    expect(config.mcpServers.target).toMatchObject({ command: "explicit" });
+    expect(config.mcpServers.explicitOnly).toMatchObject({ command: "explicit-only" });
+  });
+
   it("writes selected compatibility imports and a starter project config", async () => {
     const home = mkdtempSync(join(tmpdir(), "pi-mcp-setup-home-"));
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-setup-project-"));
