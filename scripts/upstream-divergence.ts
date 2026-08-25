@@ -51,9 +51,10 @@ function runGit(args: string[], envOverride?: Record<string, string>): string {
   });
 }
 
-function fetchUpstream(): void {
+function fetchUpstream(): boolean {
   try {
     runGit(["fetch", "upstream"]);
+    return true;
   } catch (err) {
     // IF-03: log the first fetch error before attempting the GnuTLS workaround,
     // so the original error context is preserved if the workaround also fails.
@@ -62,9 +63,10 @@ function fetchUpstream(): void {
     //   GIT_SSL_NO_VERIFY=1 git -c http.sslVerify=false fetch upstream --tags
     try {
       runGit(["-c", "http.sslVerify=false", "fetch", "upstream", "--tags"], { GIT_SSL_NO_VERIFY: "1" });
+      return true;
     } catch (err2) {
-      console.error(`${LOG_PREFIX} FATAL: GnuTLS workaround also failed: ${(err2 as Error).message}`);
-      process.exit(2);
+      console.error(`${LOG_PREFIX} upstream unreachable (plain + GnuTLS workaround both failed): ${(err2 as Error).message}`);
+      return false;
     }
   }
 }
@@ -121,7 +123,28 @@ function classify(diffPaths: string[], registry: Set<string>): {
 }
 
 function main(): void {
-  fetchUpstream();
+  if (!fetchUpstream()) {
+    // Upstream unreachable (runner network) — the workflow's own intent is to
+    // skip the check in this case (see pr-divergence-check.yml "check skipped").
+    // Emit valid, machine-readable output and exit 0 so the CI comment step
+    // does not JSON.parse() an empty file.
+    if (jsonMode) {
+      console.log(JSON.stringify({
+        upstream_ref: baseRef,
+        skipped: true,
+        reason: "upstream fetch failed (env network); check skipped",
+        diverged_count: 0,
+        registered: [],
+        diverged_but_not_registered: [],
+        stale: [],
+        default_resolved_by_category: 0,
+        exit_code: 0,
+      }, null, 2));
+    } else {
+      console.log(`${LOG_PREFIX} upstream unreachable — skipping divergence check (exit 0)`);
+    }
+    process.exit(0);
+  }
   const diff = parseDiff(runGit(DIFF_ARGS));
   const registry = parseRegistry();
   const { registered, divergedButNotRegistered, stale } = classify(diff, registry);
