@@ -24,8 +24,12 @@ import type {
 import type {
 	ElicitRequestFormParams,
 	ElicitResult,
-} from "@modelcontextprotocol/sdk/types.js";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+} from "@modelcontextprotocol/client";
+
+/** Minimal Server→Client reverse-call surface the forwarder needs. */
+type ElicitationForwardTarget = {
+	elicitInput(params: ElicitRequestFormParams): Promise<ElicitResult>;
+};
 
 /**
  * Convert a `FormField` to a JSON Schema property definition.
@@ -112,7 +116,7 @@ export function convertFieldToSchema(field: FormField): Record<string, unknown> 
  *   ElicitResult.action "cancel"  → FormResult.action "cancel"
  */
 export class ProtocolElicitationForwarder {
-	constructor(private readonly server: Server) {}
+	constructor(private readonly server: ElicitationForwardTarget) {}
 
 	/**
 	 * Convert `FormConfig` to `ElicitRequestFormParams` and forward to

@@ -7,7 +7,7 @@
 
 import { complete, type Api, type AssistantMessage, type Message, type Model, type TextContent } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { ModelPreferences, SamplingMessage as McpSamplingMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { ModelPreferences, SamplingMessage as McpSamplingMessage } from "@modelcontextprotocol/client";
 import type {
 	SamplingModel,
 	SamplingProvider,

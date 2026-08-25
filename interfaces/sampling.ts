@@ -6,7 +6,7 @@
  *  - SamplingProvider is injected by the agent-specific adapter.
  */
 
-import type { ModelPreferences } from "@modelcontextprotocol/sdk/types.js";
+import type { ModelPreferences } from "@modelcontextprotocol/client";
 
 /** A generic sampling model with no agent-specific generics. */
 export interface SamplingModel {
