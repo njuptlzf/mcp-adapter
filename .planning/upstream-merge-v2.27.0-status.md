@@ -40,16 +40,29 @@
 - 这些是 upstream 代码针对 Pi Host 运行时提供的 pi-tui（值导出 + imperative API）编写，
   与 npm 发布物（type-only + 旧 Component 接口）的差异。**与本次合并无关**。
 
-### 待办（按优先级）
-1. [ ] 实现 facade：新建 `adapters/pi-extension-facade.ts`（ExtensionAPI 兼容，包裹 AgentAPI）；
-   扩展 `interfaces/agent-api.ts` 的 UISystem 契约（从 `form` 合成 `select`/`input`）。
-2. [ ] 迁移 fork 残留 MCP SDK v1→v2：`bin/mcp-server.ts`、`adapters/protocol-sampling-forwarder.ts`、
-   `adapters/protocol-elicitation-forwarder.ts`、`adapters/pi-sampling-provider.ts`、`interfaces/sampling.ts`、`examples/interactive-visualizer/src/server.ts` + 测试/演示 fixtures。
-3. [ ] 修复 A 类 19 个 facade 边界错误。
-4. [ ] 处理 B 类 38 个 pi-* 错误：可选方案 —— (a) `declare module` 类型 shim 桥接 host API；
-   (b) 接受 tsc 不全绿，以 `upstream:check`（exit 0）+ vitest 作 gate；(c) 等 upstream 发布匹配的 pi-* 版本。
-5. [ ] vitest run + `npm run upstream:check`（exit 0）。
-6. [ ] §5.5 PR：推送分支 + 开 PR。
+### 待办（按优先级）— 2026-08 更新
+1. [x] A 类 19 个 facade 边界错误 → 已修（提交 `6444942`）：`interfaces/agent-api.ts` 契约放宽
+   （ToolRegistration 可调用字段改 `(...args: any[])`、UISystem/AgentContext/FormResult 显式可选 `| undefined`）、
+   `adapters/entry.ts`（buildProxyDescription 改 1 参 + `ui?.`/`reload?.()` 守卫）、`adapters/pi-sampling-provider.ts` 注解。
+2. [x] B 类 38 个 pi-* 错误 → 已修：新建 `types/pi-host-shims.d.ts`（`declare module` 补齐 Component/OverlayHandle/KeyId/
+   ProviderHeaders/copyToClipboard/ExtensionCommandContext + Text.render/invalidate，共 13 个「缺失导出」）；
+   另 25 个 TS7006 隐式 any 无法用 shim 覆盖（根因是 ExtensionAPI/ExtensionContext/ExtensionUIContext 经坏 `.ts` re-export
+   整体退化为 `any`，declare module 不可覆盖），改用 4 个 upstream 文件内的最小 `: any` 注解（commands/index/mcp-code/sampling-handler）。
+3. [~] 迁移 fork 残留 MCP SDK v1→v2：进行中（子代理处理）。
+4. [x] tsc --noEmit = **0 错误**（`node node_modules/typescript/bin/tsc --noEmit`）。
+5. [x] `npm run upstream:check` = **exit 0**（260 diverged / 0 stale）。
+6. [x] vitest run：19 fail / 106 pass files；94 fail / 1417 pass / 13 skip。
+   - 迁移相关 15 个：package-manifest(断言 sdk 应为 undefined、client/core=2.0.0)、elicitation-sdk-integration(10)、
+     prompts-sdk-integration(1)、interactive-visualizer-server(2) → 随 v1→v2 迁移变绿。
+   - Windows 基线 ~79 个：config(42)、cli(12)、unix-socket EACCES、文件 mode、taskkill、path 解析等 → 环境性，非回归。
+   - 我方改动（facade/shim/注解）**零新增失败**（无 adapters/interfaces 测试在失败清单）。
+7. [ ] §5.5 PR：推送分支 + 开 PR（gh 未装 → 用 GitHub API）。
+
+## 5. 根因终判（pi-* publish bug）
+- pi-*@0.84.x 发布的 `.d.ts` 用 `.ts` 扩展名 re-export（`from "./tui.ts"`、`from "./utils/clipboard.ts"`），
+  但 tarball 不含 `.ts` 源（只有 `.d.ts`+`.js`）。NodeNext 下断链，`skipLibCheck` 吞掉内部错误，
+  导致 type-only 导出变「no exported member」、若干接口整体退化为 `any`（衍生 TS7006）。
+- 这是 upstream 针对 Pi Host 的 pi-* 运行时 API 与 npm 发布物不匹配，**非合并引入**；v2.27.0 标签自身同样如此。
 
 ## 4. 关键依赖事实
 - npm pi-* 三个包 `latest` 均为 0.84.3，`legacy-node20` 为 0.74.2；只有这两个 dist-tag，无 beta/canary。
