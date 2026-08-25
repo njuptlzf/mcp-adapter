@@ -48,7 +48,12 @@
    ProviderHeaders/copyToClipboard/ExtensionCommandContext + Text.render/invalidate，共 13 个「缺失导出」）；
    另 25 个 TS7006 隐式 any 无法用 shim 覆盖（根因是 ExtensionAPI/ExtensionContext/ExtensionUIContext 经坏 `.ts` re-export
    整体退化为 `any`，declare module 不可覆盖），改用 4 个 upstream 文件内的最小 `: any` 注解（commands/index/mcp-code/sampling-handler）。
-3. [~] 迁移 fork 残留 MCP SDK v1→v2：进行中（子代理处理）。
+3. [x] 迁移 fork 残留 MCP SDK v1→v2（**生产层已迁移**，提交 `16e4d45`）：`interfaces/sampling.ts`、
+   `adapters/pi-sampling-provider.ts`、`adapters/protocol-sampling-forwarder.ts`、`adapters/protocol-elicitation-forwarder.ts`
+   的类型导入从 `@modelcontextprotocol/sdk` → `@modelcontextprotocol/client`；v1 `Server` 换成最小结构化反向调用类型
+   （createMessage/elicitInput）。`@modelcontextprotocol/sdk` 移入 devDependencies、`typebox` 移出 dependencies（upstream 视为可选 peer）。
+   package-manifest.test.ts 5/5 通过。**剩余 v1 仅在 dev/test 独立 server 侧**（`bin/mcp-server.ts`、`examples/`、10 个
+   `tests/demo-servers/*`、smoke、fixture）：v2 无 `@modelcontextprotocol/server` 包且 package-manifest 明确禁止其入 devDeps，故保留 v1 devDependency。
 4. [x] tsc --noEmit = **0 错误**（`node node_modules/typescript/bin/tsc --noEmit`）。
 5. [x] `npm run upstream:check` = **exit 0**（260 diverged / 0 stale）。
 6. [x] vitest run：19 fail / 106 pass files；94 fail / 1417 pass / 13 skip。
@@ -56,7 +61,7 @@
      prompts-sdk-integration(1)、interactive-visualizer-server(2) → 随 v1→v2 迁移变绿。
    - Windows 基线 ~79 个：config(42)、cli(12)、unix-socket EACCES、文件 mode、taskkill、path 解析等 → 环境性，非回归。
    - 我方改动（facade/shim/注解）**零新增失败**（无 adapters/interfaces 测试在失败清单）。
-7. [ ] §5.5 PR：推送分支 + 开 PR（gh 未装 → 用 GitHub API）。
+7. [~] §5.5 PR：推送分支 + 开 PR（gh 未装 → 用 GitHub API）。
 
 ## 5. 根因终判（pi-* publish bug）
 - pi-*@0.84.x 发布的 `.d.ts` 用 `.ts` 扩展名 re-export（`from "./tui.ts"`、`from "./utils/clipboard.ts"`），
