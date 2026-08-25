@@ -4,7 +4,7 @@
 
 import { describe, it, before, after } from "node:test"
 import assert from "node:assert"
-import { existsSync, rmSync, mkdirSync } from "fs"
+import { existsSync, rmSync, mkdirSync, mkdtempSync, writeFileSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
 import { randomBytes } from "crypto"
@@ -21,9 +21,9 @@ import {
   setOAuthCallbackPort,
   type McpOAuthConfig,
 } from "./mcp-oauth-provider.ts"
-import { getAuthForUrl, saveAuthEntry, updateOAuthState } from "./mcp-auth.ts"
-import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js"
-import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js"
+import { getAuthForUrl, saveAuthEntry } from "./mcp-auth.ts"
+import { UnauthorizedError } from "@modelcontextprotocol/client"
+import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/client"
 
 describe("McpOAuthProvider", () => {
   const serverName = "test-server"
@@ -97,6 +97,18 @@ describe("McpOAuthProvider", () => {
   })
 
   describe("clientMetadata", () => {
+    // client_name now follows the host app, so these assertions must not read
+    // whatever PI_PACKAGE_DIR the developer's shell happens to export.
+    const inheritedPackageDir = process.env.PI_PACKAGE_DIR
+    const packageDirs: string[] = []
+    before(() => {
+      delete process.env.PI_PACKAGE_DIR
+    })
+    after(() => {
+      if (inheritedPackageDir !== undefined) process.env.PI_PACKAGE_DIR = inheritedPackageDir
+      for (const dir of packageDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+    })
+
     it("should return correct metadata for public client", () => {
       const provider = createProvider()
       const metadata = provider.clientMetadata
@@ -107,6 +119,71 @@ describe("McpOAuthProvider", () => {
       assert.deepStrictEqual(metadata.grant_types, ["authorization_code", "refresh_token"])
       assert.deepStrictEqual(metadata.response_types, ["code"])
       assert.strictEqual(metadata.token_endpoint_auth_method, "none")
+    })
+
+    it("should register under the host app name when pi is rebranded", () => {
+      const original = process.env.PI_PACKAGE_DIR
+      const dir = mkdtempSync(join(tmpdir(), "oauth-brand-"))
+      packageDirs.push(dir)
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "pi", piConfig: { name: "arc" } }))
+      process.env.PI_PACKAGE_DIR = dir
+      try {
+        assert.strictEqual(createProvider().clientMetadata.client_name, "arc")
+      } finally {
+        if (original === undefined) delete process.env.PI_PACKAGE_DIR
+        else process.env.PI_PACKAGE_DIR = original
+      }
+    })
+
+    it("should keep the historical client name on stock pi", () => {
+      const original = process.env.PI_PACKAGE_DIR
+      delete process.env.PI_PACKAGE_DIR
+      try {
+        assert.strictEqual(createProvider().clientMetadata.client_name, "Pi Coding Agent")
+      } finally {
+        if (original !== undefined) process.env.PI_PACKAGE_DIR = original
+      }
+    })
+
+    it("should omit client_uri under a rebranded host rather than name the adapter", () => {
+      const original = process.env.PI_PACKAGE_DIR
+      const dir = mkdtempSync(join(tmpdir(), "oauth-brand-uri-"))
+      packageDirs.push(dir)
+      writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "pi", piConfig: { name: "arc" } }))
+      process.env.PI_PACKAGE_DIR = dir
+      try {
+        // The client is arc; advertising the adapter's repo would misidentify it.
+        assert.ok(!("client_uri" in createProvider().clientMetadata))
+        // A host that declares its own homepage gets it advertised.
+        const declaring = mkdtempSync(join(tmpdir(), "oauth-brand-declared-"))
+        packageDirs.push(declaring)
+        writeFileSync(
+          join(declaring, "package.json"),
+          JSON.stringify({ name: "pi", piConfig: { name: "arc", clientUri: "https://arc.workos.tools" } }),
+        )
+        process.env.PI_PACKAGE_DIR = declaring
+        assert.strictEqual(createProvider().clientMetadata.client_uri, "https://arc.workos.tools")
+        process.env.PI_PACKAGE_DIR = dir
+
+        // An explicit config still wins.
+        assert.strictEqual(
+          createProvider({ clientUri: "https://arc.example" }).clientMetadata.client_uri,
+          "https://arc.example",
+        )
+      } finally {
+        if (original === undefined) delete process.env.PI_PACKAGE_DIR
+        else process.env.PI_PACKAGE_DIR = original
+      }
+    })
+
+    it("should omit logo_uri when unset", () => {
+      const provider = createProvider()
+      assert.ok(!("logo_uri" in provider.clientMetadata))
+    })
+
+    it("should advertise logo_uri when configured", () => {
+      const provider = createProvider({ logoUri: "https://example.com/logo.png" })
+      assert.strictEqual(provider.clientMetadata.logo_uri, "https://example.com/logo.png")
     })
 
     it("should return correct metadata for confidential client", () => {
@@ -203,6 +280,51 @@ describe("McpOAuthProvider", () => {
       assert.strictEqual(info, undefined)
     })
 
+    it("should not serve a config-pre-registered stub when no config clientId is present", async () => {
+      // Stub written by the config-clientId path of saveClientInformation
+      // (SEP-2352 stamp-and-resave): {clientId, issuer} with the marker.
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "config-client",
+          issuer: "https://auth.example.com",
+          configPreRegistered: true,
+        },
+        serverUrl,
+      }, serverUrl)
+
+      assert.strictEqual(await provider.clientInformation(), undefined)
+    })
+
+    it("should not serve a legacy unmarked {clientId, issuer} stub when no config clientId is present", async () => {
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "config-client",
+          issuer: "https://auth.example.com",
+        },
+        serverUrl,
+      }, serverUrl)
+
+      assert.strictEqual(await provider.clientInformation(), undefined)
+    })
+
+    it("should still serve a dynamically-registered public client (no secret) with registration metadata", async () => {
+      const provider = createProvider()
+      saveAuthEntry(serverName, {
+        clientInfo: {
+          clientId: "public-client",
+          clientIdIssuedAt: Math.floor(Date.now() / 1000),
+          redirectUris: ["http://localhost:19876/callback"],
+        },
+        serverUrl,
+      }, serverUrl)
+
+      const info = await provider.clientInformation()
+      assert.strictEqual(info?.client_id, "public-client")
+      assert.strictEqual(info?.client_secret, undefined)
+    })
+
     it("should prefer config over stored", async () => {
       const provider = createProvider({ clientId: "config-client" })
       
@@ -293,7 +415,6 @@ describe("McpOAuthProvider", () => {
 
     it("should calculate expires_in from stored expiresAt", async () => {
       const provider = createProvider()
-      const futureTime = Math.floor(Date.now() / 1000) + 3600
 
       await provider.saveTokens({
         access_token: "access",
@@ -329,8 +450,7 @@ describe("McpOAuthProvider", () => {
         onRedirect: async (url) => {
           redirectCaptured = url
         },
-      })
-      await updateOAuthState("redirect-with-state", "state-abc", serverUrl)
+      }, {}, undefined, "state-abc")
       const testUrl = new URL("https://example.com/auth")
 
       await provider.redirectToAuthorization(testUrl)
@@ -379,7 +499,7 @@ describe("McpOAuthProvider", () => {
 
       const verifier = await provider.codeVerifier()
       assert.strictEqual(verifier, "verifier-abc-123")
-      assert.strictEqual(getAuthForUrl("code-verifier-test", serverUrl)?.codeVerifier, "verifier-abc-123")
+      assert.strictEqual(getAuthForUrl("code-verifier-test", serverUrl), undefined)
     })
 
     it("should throw when no code verifier", async () => {
@@ -419,7 +539,7 @@ describe("McpOAuthProvider", () => {
 
       const state = await provider.state()
       assert.strictEqual(state, "state-xyz-789")
-      assert.strictEqual(getAuthForUrl("state-test-save", serverUrl)?.oauthState, "state-xyz-789")
+      assert.strictEqual(getAuthForUrl("state-test-save", serverUrl), undefined)
     })
 
     it("should throw UnauthorizedError when no state is saved", async () => {
@@ -469,7 +589,7 @@ describe("McpOAuthProvider", () => {
       assert.strictEqual(await provider.clientInformation(), undefined)
     })
 
-    it("should only remove tokens when type is 'tokens'", async () => {
+    it("should invalidate tokens only for the current provider", async () => {
       const provider = createProvider()
       const futureTime = Math.floor(Date.now() / 1000) + 3600
 
@@ -490,9 +610,70 @@ describe("McpOAuthProvider", () => {
       assert.strictEqual(await provider.tokens(), undefined)
       const clientInfo = await provider.clientInformation()
       assert.strictEqual(clientInfo?.client_id, "client")
+
+      const otherProvider = createProvider()
+      assert.strictEqual((await otherProvider.tokens())?.access_token, "token")
     })
 
-    it("should only remove client info when type is 'client'", async () => {
+    it("should adopt tokens replaced by another process", async () => {
+      const staleProvider = createProvider()
+      await staleProvider.saveTokens({
+        access_token: "stale-token",
+        token_type: "Bearer",
+      })
+      assert.strictEqual((await staleProvider.tokens())?.access_token, "stale-token")
+
+      // A separate process completes re-authentication after this provider has
+      // already observed and cached the old token.
+      saveAuthEntry(serverName, {
+        tokens: { accessToken: "replacement-token" },
+        serverUrl,
+      }, serverUrl)
+
+      await staleProvider.invalidateCredentials("tokens")
+
+      assert.strictEqual((await staleProvider.tokens())?.access_token, "replacement-token")
+    })
+
+    it("should not invalidate a token saved after the failing token was observed", async () => {
+      const provider = createProvider()
+      await provider.saveTokens({
+        access_token: "old-token",
+        token_type: "Bearer",
+      })
+      assert.strictEqual((await provider.tokens({ issuer: "https://issuer.example" }))?.access_token, "old-token")
+
+      await provider.saveTokens({
+        access_token: "new-token",
+        token_type: "Bearer",
+      })
+      await provider.invalidateCredentials("tokens")
+
+      assert.strictEqual((await provider.tokens())?.access_token, "new-token")
+    })
+
+    it("should invalidate the token observed by the latest auth read", async () => {
+      const provider = createProvider()
+      await provider.saveTokens({
+        access_token: "first-token",
+        token_type: "Bearer",
+      })
+      assert.strictEqual((await provider.tokens({ issuer: "https://issuer.example" }))?.access_token, "first-token")
+
+      await provider.saveTokens({
+        access_token: "second-token",
+        token_type: "Bearer",
+      })
+      assert.strictEqual((await provider.tokens({ issuer: "https://issuer.example" }))?.access_token, "second-token")
+
+      await provider.invalidateCredentials("tokens")
+
+      assert.strictEqual(await provider.tokens(), undefined)
+      const otherProvider = createProvider()
+      assert.strictEqual((await otherProvider.tokens())?.access_token, "second-token")
+    })
+
+    it("should invalidate client info only for the current provider", async () => {
       const provider = createProvider()
       const futureTime = Math.floor(Date.now() / 1000) + 3600
 
@@ -513,6 +694,38 @@ describe("McpOAuthProvider", () => {
       const tokens = await provider.tokens()
       assert.strictEqual(tokens?.access_token, "token")
       assert.strictEqual(await provider.clientInformation(), undefined)
+
+      const otherProvider = createProvider()
+      assert.strictEqual((await otherProvider.clientInformation())?.client_id, "client")
+    })
+
+    it("should adopt client information replaced by another process", async () => {
+      const staleProvider = createProvider()
+      await staleProvider.saveTokens({
+        access_token: "replacement-token",
+        token_type: "Bearer",
+      })
+      await staleProvider.saveClientInformation({
+        client_id: "stale-client",
+        client_secret: "stale-secret",
+        redirect_uris: ["http://localhost/callback"],
+      })
+      assert.strictEqual((await staleProvider.clientInformation())?.client_id, "stale-client")
+
+      saveAuthEntry(serverName, {
+        tokens: { accessToken: "replacement-token" },
+        clientInfo: {
+          clientId: "replacement-client",
+          clientSecret: "replacement-secret",
+          redirectUris: ["http://localhost/callback"],
+        },
+        serverUrl,
+      }, serverUrl)
+
+      await staleProvider.invalidateCredentials("client")
+
+      assert.strictEqual((await staleProvider.clientInformation())?.client_id, "replacement-client")
+      assert.strictEqual((await staleProvider.tokens())?.access_token, "replacement-token")
     })
   })
 })

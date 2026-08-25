@@ -22,10 +22,15 @@ import type {
 	SamplingResponse,
 } from "../interfaces/sampling.ts";
 import type {
+	CreateMessageRequestParams,
 	CreateMessageResult,
 	ModelPreferences,
-} from "@modelcontextprotocol/sdk/types.js";
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+} from "@modelcontextprotocol/client";
+
+/** Minimal Server→Client reverse-call surface the forwarder needs. */
+type SamplingForwardTarget = {
+	createMessage(params: CreateMessageRequestParams): Promise<CreateMessageResult>;
+};
 
 /**
  * Forwards MCP sampling requests to the Agent Client via
@@ -35,7 +40,7 @@ import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
  * when the connecting Agent Client declares `sampling` capability.
  */
 export class ProtocolSamplingForwarder implements SamplingProvider {
-	constructor(private readonly server: Server) {}
+	constructor(private readonly server: SamplingForwardTarget) {}
 
 	/**
 	 * Returns a placeholder model. In pure forwarding mode (D-11), the Agent

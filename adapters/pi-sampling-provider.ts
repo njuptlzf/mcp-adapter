@@ -7,7 +7,7 @@
 
 import { complete, type Api, type AssistantMessage, type Message, type Model, type TextContent } from "@earendil-works/pi-ai";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { ModelPreferences, SamplingMessage as McpSamplingMessage } from "@modelcontextprotocol/sdk/types.js";
+import type { ModelPreferences, SamplingMessage as McpSamplingMessage } from "@modelcontextprotocol/client";
 import type {
 	SamplingModel,
 	SamplingProvider,
@@ -158,12 +158,12 @@ function convertAssistantResult(message: AssistantMessage): SamplingResponse {
 	}
 
 	const text = message.content
-		.map((block) => {
+		.map((block: { type: string; text?: string }) => {
 			if (block.type === "text") return block.text;
 			if (block.type === "thinking") return undefined;
 			throw new Error(`MCP sampling result ${block.type} content is not supported`);
 		})
-		.filter((value): value is string => value !== undefined)
+		.filter((value: string | undefined): value is string => value !== undefined)
 		.join("\n\n")
 		.trim();
 

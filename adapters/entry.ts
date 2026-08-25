@@ -207,12 +207,12 @@ export function createMcpAdapter(
 					state = await initPromise;
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					if (cmdCtxTyped.hasUI) cmdCtxTyped.ui.notify(`MCP initialization failed: ${message}`, "error");
+					cmdCtxTyped.ui?.notify(`MCP initialization failed: ${message}`, "error");
 					return;
 				}
 			}
 			if (!state) {
-				if (cmdCtxTyped.hasUI) cmdCtxTyped.ui.notify("MCP not initialized", "error");
+				cmdCtxTyped.ui?.notify("MCP not initialized", "error");
 				return;
 			}
 
@@ -231,7 +231,7 @@ export function createMcpAdapter(
 				case "setup": {
 					const result = await openMcpSetup(state, agentapi, cmdCtxTyped, getConfigPathFromArgv(), "setup");
 					if (result?.configChanged) {
-						await cmdCtxTyped.reload();
+						await cmdCtxTyped.reload?.();
 						return;
 					}
 					break;
@@ -239,7 +239,7 @@ export function createMcpAdapter(
 				case "logout": {
 					const serverName = rest;
 					if (!serverName) {
-						if (cmdCtxTyped.hasUI) cmdCtxTyped.ui.notify("Usage: /mcp logout <server>", "error");
+						cmdCtxTyped.ui?.notify("Usage: /mcp logout <server>", "error");
 						return;
 					}
 					await logoutServer(serverName, state, cmdCtxTyped);
@@ -251,7 +251,7 @@ export function createMcpAdapter(
 					if (cmdCtxTyped.hasUI) {
 						const result = await openMcpPanel(state, agentapi, cmdCtxTyped, getConfigPathFromArgv());
 						if (result?.configChanged) {
-							await cmdCtxTyped.reload();
+							await cmdCtxTyped.reload?.();
 							return;
 						}
 					} else {
@@ -276,12 +276,12 @@ export function createMcpAdapter(
 					state = await initPromise;
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
-					if (cmdCtxTyped.hasUI) cmdCtxTyped.ui.notify(`MCP initialization failed: ${message}`, "error");
+					cmdCtxTyped.ui?.notify(`MCP initialization failed: ${message}`, "error");
 					return;
 				}
 			}
 			if (!state) {
-				if (cmdCtxTyped.hasUI) cmdCtxTyped.ui.notify("MCP not initialized", "error");
+				cmdCtxTyped.ui?.notify("MCP not initialized", "error");
 				return;
 			}
 
@@ -298,7 +298,7 @@ export function createMcpAdapter(
 		agentapi.registerTool({
 			name: "mcp",
 			label: "MCP",
-			description: buildProxyDescription(config, cache, directSpecs),
+			description: buildProxyDescription(config),
 			promptSnippet: "MCP gateway - connect to MCP servers and call their tools",
 			renderCall: renderMcpProxyToolCall,
 			parameters: Type.Object({

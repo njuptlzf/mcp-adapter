@@ -1,286 +1,348 @@
-import type { UISystem, FormConfig, FormResult, FormField } from "./interfaces/agent-api.ts";
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { Client } from "@modelcontextprotocol/client";
 import {
-  ElicitRequestSchema,
+  ProtocolError,
+  ProtocolErrorCode,
   type ElicitRequest,
   type ElicitRequestFormParams,
   type ElicitRequestURLParams,
   type ElicitResult,
-} from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/client";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/client/validators/ajv";
+import type { JsonSchemaType } from "@modelcontextprotocol/client";
 import open from "open";
 
-export type ExtensionUIFormValue = string | number | boolean | string[] | undefined;
+export type ElicitationValue = string | number | boolean | string[] | undefined;
+type FormProperty = ElicitRequestFormParams["requestedSchema"]["properties"][string];
+type FieldCollectionResult = { status: "cancelled" } | { status: "collected"; value: ElicitationValue };
 
-export interface ExtensionUIFormSelectOption {
-  value: string;
-  label?: string;
-  description?: string;
-}
+export type ElicitationUIContext = Pick<ExtensionUIContext, "select" | "input" | "notify">;
 
 export interface ElicitationHandlerOptions {
   serverName: string;
-  ui: UISystem;
-  autoOpenUrls: boolean;
+  ui: ElicitationUIContext;
+  allowUrl: boolean;
+  onUrlAccepted?: (elicitationId: string) => void;
 }
 
-export type ServerElicitationConfig = Omit<ElicitationHandlerOptions, "serverName">;
+export type ServerElicitationConfig = Omit<ElicitationHandlerOptions, "serverName" | "onUrlAccepted">;
 
 export function registerElicitationHandler(client: Client, options: ElicitationHandlerOptions): void {
-  client.setRequestHandler(ElicitRequestSchema, (request) => {
-    return handleElicitationRequest(options, request as ElicitRequest);
-  });
+  client.setRequestHandler("elicitation/create", request =>
+    handleElicitationRequest(options, request));
 }
 
 export async function handleElicitationRequest(
   options: ElicitationHandlerOptions,
   request: ElicitRequest,
 ): Promise<ElicitResult> {
-  const params = request.params;
-  if (params.mode === "url") {
-    return handleUrlElicitation(options, params);
-  }
-  return handleFormElicitation(options, params);
+  return request.params.mode === "url"
+    ? handleUrlElicitation(options, request.params)
+    : handleFormElicitation(options, request.params);
 }
 
 export async function handleFormElicitation(
   options: ElicitationHandlerOptions,
   params: ElicitRequestFormParams,
 ): Promise<ElicitResult> {
-  const form = convertMcpSchemaToPiForm(options.serverName, params);
-  const result = await options.ui.form!(form);
-  if (result.action !== "submit") {
-    return convertPiFormResultToMcpResult(result);
+  const properties = Object.entries(params.requestedSchema.properties);
+  const decision = await options.ui.select(
+    `MCP Input Request\nServer: ${options.serverName}\n\n${params.message}`,
+    ["Continue", "Decline"],
+  );
+  if (decision === undefined) return { action: "cancel" };
+  if (decision === "Decline") return { action: "decline" };
+  if (properties.length === 0) return { action: "accept", content: {} };
+
+  const values: Record<string, ElicitationValue> = {};
+  for (const [name, schema] of properties) {
+    const value = await collectValidField(options.ui, params, name, schema);
+    if (value.status === "cancelled") return { action: "cancel" };
+    values[name] = value.value;
   }
-  return {
-    action: "accept",
-    content: coerceAndValidateFormValues(params, result.values as Record<string, ExtensionUIFormValue>),
-  };
+
+  while (true) {
+    const content = coerceAndValidateFormValues(params, values);
+    const action = await options.ui.select(
+      formatReview(options.serverName, properties, content),
+      ["Submit", "Edit", "Decline"],
+    );
+    if (action === undefined) return { action: "cancel" };
+    if (action === "Decline") return { action: "decline" };
+    if (action === "Submit") return { action: "accept", content };
+
+    const labels = properties.map(([name, schema]) => `${schema.title ?? humanizeName(name)} (${name})`);
+    const selected = await options.ui.select("Choose a field to edit", labels);
+    if (selected === undefined) return { action: "cancel" };
+    const property = properties[labels.indexOf(selected)];
+    if (!property) continue;
+    const [name, schema] = property;
+    const value = await collectValidField(options.ui, params, name, schema, values[name]);
+    if (value.status === "cancelled") return { action: "cancel" };
+    values[name] = value.value;
+  }
+}
+
+async function collectValidField(
+  ui: ElicitationUIContext,
+  params: ElicitRequestFormParams,
+  name: string,
+  schema: FormProperty,
+  current?: ElicitationValue,
+): Promise<FieldCollectionResult> {
+  const required = params.requestedSchema.required?.includes(name) === true;
+  while (true) {
+    const result = await collectField(ui, params, name, schema, current);
+    if (result.status === "cancelled") return result;
+    try {
+      coerceAndValidateFormValues({
+        ...params,
+        requestedSchema: {
+          type: "object",
+          properties: { [name]: schema },
+          ...(required ? { required: [name] } : {}),
+        },
+      }, { [name]: result.value });
+      return result;
+    } catch (error) {
+      ui.notify(error instanceof Error ? error.message : String(error), "error");
+      current = result.value;
+    }
+  }
+}
+
+async function collectField(
+  ui: ElicitationUIContext,
+  params: ElicitRequestFormParams,
+  name: string,
+  schema: FormProperty,
+  current?: ElicitationValue,
+): Promise<FieldCollectionResult> {
+  const required = params.requestedSchema.required?.includes(name) === true;
+  const title = [schema.title ?? humanizeName(name), required ? "(required)" : "", schema.description]
+    .filter(Boolean)
+    .join(" ");
+
+  if (schema.type === "string" && ("enum" in schema || "oneOf" in schema)) {
+    const choices = "oneOf" in schema
+      ? schema.oneOf.map(option => ({ value: option.const, display: formatChoice(option.const, option.title) }))
+      : schema.enum.map((value, index) => ({
+          value,
+          display: formatChoice(value, "enumNames" in schema ? schema.enumNames?.[index] : undefined),
+        }));
+    const displays = uniqueLabels(choices.map(choice => choice.display));
+    const actions = [...displays];
+    const useDefault = schema.default === undefined ? undefined : uniqueAction("Use default", actions);
+    if (useDefault) actions.push(useDefault);
+    const omit = required ? undefined : uniqueAction("Omit", actions);
+    if (omit) actions.push(omit);
+    const action = await ui.select(title, actions);
+    if (action === undefined) return { status: "cancelled" };
+    if (action === useDefault) return { status: "collected", value: schema.default };
+    if (action === omit) return { status: "collected", value: undefined };
+    return { status: "collected", value: choices[displays.indexOf(action)]?.value };
+  }
+
+  if (schema.type === "boolean") {
+    const actions = ["Yes", "No"];
+    if (schema.default !== undefined) actions.push("Use default");
+    if (!required) actions.push("Omit");
+    const action = await ui.select(title, actions);
+    if (action === undefined) return { status: "cancelled" };
+    if (action === "Use default") return { status: "collected", value: schema.default };
+    if (action === "Omit") return { status: "collected", value: undefined };
+    return { status: "collected", value: action === "Yes" };
+  }
+
+  if (schema.type === "array") {
+    const actions = ["Choose values"];
+    if (schema.default !== undefined) actions.push("Use default");
+    if (!required) actions.push("Omit");
+    const action = await ui.select(title, actions);
+    if (action === undefined) return { status: "cancelled" };
+    if (action === "Use default") return { status: "collected", value: schema.default };
+    if (action === "Omit") return { status: "collected", value: undefined };
+
+    const choices = extractMultiSelectOptions(schema);
+    const selected = new Set(Array.isArray(current) ? current : []);
+    while (true) {
+      const displays = uniqueLabels(choices.map(choice => selected.has(choice.value) ? `✓ ${choice.display}` : choice.display));
+      const done = uniqueAction("Done", displays);
+      const picked = await ui.select(title, [...displays, done]);
+      if (picked === undefined) return { status: "cancelled" };
+      if (picked === done) return { status: "collected", value: [...selected] };
+      const choice = choices[displays.indexOf(picked)];
+      if (!choice) continue;
+      if (selected.has(choice.value)) selected.delete(choice.value);
+      else selected.add(choice.value);
+    }
+  }
+
+  const actions = ["Enter value"];
+  if (schema.default !== undefined) actions.push("Use default");
+  if (!required) actions.push("Omit");
+  const action = await ui.select(title, actions);
+  if (action === undefined) return { status: "cancelled" };
+  if (action === "Use default") return { status: "collected", value: schema.default };
+  if (action === "Omit") return { status: "collected", value: undefined };
+  const entered = await ui.input(title, current === undefined ? undefined : String(current));
+  return entered === undefined ? { status: "cancelled" } : { status: "collected", value: entered };
+}
+
+export function coerceAndValidateFormValues(
+  params: ElicitRequestFormParams,
+  values: Record<string, ElicitationValue>,
+): Record<string, string | number | boolean | string[]> {
+  const output: Record<string, string | number | boolean | string[]> = {};
+  const required = new Set(params.requestedSchema.required ?? []);
+  for (const [name, schema] of Object.entries(params.requestedSchema.properties)) {
+    const value = values[name];
+    if (value === undefined) {
+      if (required.has(name)) throw new Error(`Missing required elicitation field: ${name}`);
+      continue;
+    }
+    if (schema.type === "string") {
+      const stringValue = String(value);
+      const limits = schema as typeof schema & { minLength?: number; maxLength?: number };
+      if (limits.minLength !== undefined && stringValue.length < limits.minLength) {
+        throw new Error(`Elicitation field ${name} is shorter than minimum length ${limits.minLength}`);
+      }
+      if (limits.maxLength !== undefined && stringValue.length > limits.maxLength) {
+        throw new Error(`Elicitation field ${name} is longer than maximum length ${limits.maxLength}`);
+      }
+      if ("enum" in schema && !schema.enum.includes(stringValue)) {
+        throw new Error(`Elicitation field ${name} is not an allowed value`);
+      }
+      if ("oneOf" in schema && !schema.oneOf.some(option => option.const === stringValue)) {
+        throw new Error(`Elicitation field ${name} is not an allowed value`);
+      }
+      output[name] = stringValue;
+      continue;
+    }
+    if (schema.type === "number" || schema.type === "integer") {
+      if (typeof value === "string" && value.trim() === "") {
+        throw new Error(`Elicitation field ${name} must be a number`);
+      }
+      const numberValue = typeof value === "number" ? value : Number(value);
+      if (!Number.isFinite(numberValue)) throw new Error(`Elicitation field ${name} must be a number`);
+      if (schema.type === "integer" && !Number.isInteger(numberValue)) {
+        throw new Error(`Elicitation field ${name} must be an integer`);
+      }
+      if (schema.minimum !== undefined && numberValue < schema.minimum) {
+        throw new Error(`Elicitation field ${name} is below minimum ${schema.minimum}`);
+      }
+      if (schema.maximum !== undefined && numberValue > schema.maximum) {
+        throw new Error(`Elicitation field ${name} is above maximum ${schema.maximum}`);
+      }
+      output[name] = numberValue;
+      continue;
+    }
+    if (schema.type === "boolean") {
+      output[name] = typeof value === "boolean" ? value : value === "true";
+      continue;
+    }
+    if (schema.type === "array") {
+      if (!Array.isArray(value)) throw new Error(`Elicitation field ${name} must be a list`);
+      const allowed = new Set(extractMultiSelectOptions(schema).map(option => option.value));
+      const arrayValue = value.map(String);
+      if (schema.minItems !== undefined && arrayValue.length < schema.minItems) {
+        throw new Error(`Elicitation field ${name} has fewer than ${schema.minItems} selections`);
+      }
+      if (schema.maxItems !== undefined && arrayValue.length > schema.maxItems) {
+        throw new Error(`Elicitation field ${name} has more than ${schema.maxItems} selections`);
+      }
+      if (arrayValue.some(item => !allowed.has(item))) {
+        throw new Error(`Elicitation field ${name} contains an invalid selection`);
+      }
+      output[name] = arrayValue;
+    }
+  }
+  const validation = new AjvJsonSchemaValidator()
+    .getValidator(params.requestedSchema as JsonSchemaType)(output);
+  if (!validation.valid) {
+    throw new Error(`Invalid elicitation response: ${validation.errorMessage}`);
+  }
+  return output;
+}
+
+function formatChoice(value: string, title?: string): string {
+  return title && title !== value ? `${title} (${value})` : value;
+}
+
+function uniqueLabels(labels: string[]): string[] {
+  const used = new Set<string>();
+  return labels.map(label => {
+    let unique = label;
+    while (used.has(unique)) unique += "…";
+    used.add(unique);
+    return unique;
+  });
+}
+
+function uniqueAction(label: string, choices: string[]): string {
+  let unique = label;
+  while (choices.includes(unique)) unique += "…";
+  return unique;
+}
+
+function extractMultiSelectOptions(schema: Extract<FormProperty, { type: "array" }>): Array<{ value: string; display: string }> {
+  const items = schema.items as { enum?: string[]; anyOf?: Array<{ const: string; title: string }> };
+  return items.anyOf
+    ? items.anyOf.map(option => ({ value: option.const, display: formatChoice(option.const, option.title) }))
+    : (items.enum ?? []).map(value => ({ value, display: value }));
+}
+
+function formatReview(
+  serverName: string,
+  properties: Array<[string, FormProperty]>,
+  content: Record<string, string | number | boolean | string[]>,
+): string {
+  const rows = properties.map(([name, schema]) =>
+    `${schema.title ?? humanizeName(name)}: ${content[name] === undefined ? "(omitted)" : String(content[name])}`);
+  return [`Review input for ${serverName}`, "", ...rows].join("\n");
 }
 
 export async function handleUrlElicitation(
   options: ElicitationHandlerOptions,
   params: ElicitRequestURLParams,
 ): Promise<ElicitResult> {
-  const browserUrl = getBrowserElicitationUrl(params.url);
-  if (!options.autoOpenUrls) {
-    const result = await options.ui.form!({
-      title: "MCP Browser Request",
-      message: [
-        `Server: ${options.serverName}`,
-        "",
-        params.message,
-        "",
-        `Domain: ${browserUrl.host}`,
-        `URL: ${browserUrl.toString()}`,
-        "",
-        "Open this URL in your browser?",
-      ].join("\n"),
-      fields: [],
-      submitLabel: "Open",
-      secondaryLabel: "Decline",
-      cancelLabel: "Cancel",
-    });
-    if (result.action === "secondary") return { action: "decline" };
-    if (result.action === "cancel") return { action: "cancel" };
+  if (!options.allowUrl) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "URL elicitation is not supported");
+
+  let parsed: URL;
+  try {
+    parsed = new URL(params.url);
+  } catch {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, "URL elicitation supplied an invalid URL");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ProtocolError(ProtocolErrorCode.InvalidParams, "URL elicitation only supports HTTP and HTTPS URLs");
   }
 
-  await open(browserUrl.toString());
+  const decision = await options.ui.select([
+    "MCP Browser Request",
+    `Server: ${options.serverName}`,
+    "",
+    params.message,
+    "",
+    `Host: ${parsed.host}`,
+    `Full URL: ${params.url}`,
+    "",
+    "Open this URL in your browser?",
+  ].join("\n"), ["Open", "Decline"]);
+  if (decision === undefined) return { action: "cancel" };
+  if (decision === "Decline") return { action: "decline" };
+
+  try {
+    await open(params.url);
+  } catch (error) {
+    options.ui.notify(`Could not open MCP elicitation URL: ${error instanceof Error ? error.message : String(error)}`, "error");
+    return { action: "cancel" };
+  }
+  options.onUrlAccepted?.(params.elicitationId);
   options.ui.notify("Opened browser for MCP elicitation.", "info");
   return { action: "accept" };
 }
 
-export function convertMcpSchemaToPiForm(
-  serverName: string,
-  params: ElicitRequestFormParams,
-): FormConfig {
-  const required = new Set(params.requestedSchema.required ?? []);
-  return {
-    title: "MCP Input Request",
-    message: `Server: ${serverName}\n\n${params.message}`,
-    submitLabel: "Submit",
-    secondaryLabel: "Decline",
-    cancelLabel: "Cancel",
-    fields: Object.entries(params.requestedSchema.properties).map(([name, schema]): FormField => {
-      const label = schema.title ?? humanizeName(name);
-      const base = {
-        name,
-        label,
-        description: schema.description,
-        required: required.has(name),
-      };
-
-      if (schema.type === "string" && "oneOf" in schema && Array.isArray(schema.oneOf)) {
-        return omitUndefined({
-          ...base,
-          type: "select" as const,
-          options: schema.oneOf.map((option) => ({ value: option.const, label: option.title })),
-          default: schema.default,
-        });
-      }
-
-      if (schema.type === "string" && "enum" in schema && Array.isArray(schema.enum)) {
-        const enumNames = "enumNames" in schema && Array.isArray(schema.enumNames) ? schema.enumNames : undefined;
-        return omitUndefined({
-          ...base,
-          type: "select" as const,
-          options: schema.enum.map((value, index) => omitUndefined({ value, label: enumNames?.[index] })),
-          default: schema.default,
-        });
-      }
-
-      if (schema.type === "array") {
-        return omitUndefined({
-          ...base,
-          type: "multiSelect" as const,
-          options: extractMultiSelectOptions(schema),
-          default: schema.default,
-        });
-      }
-
-      if (schema.type === "number" || schema.type === "integer") {
-        return omitUndefined({
-          ...base,
-          type: schema.type,
-          default: schema.default,
-          minimum: schema.minimum,
-          maximum: schema.maximum,
-        });
-      }
-
-      if (schema.type === "boolean") {
-        return omitUndefined({
-          type: "boolean" as const,
-          name,
-          label,
-          description: schema.description,
-          default: schema.default,
-        });
-      }
-
-      const stringSchema = schema as { default?: string; minLength?: number; maxLength?: number };
-      return omitUndefined({
-        ...base,
-        type: "text" as const,
-        default: stringSchema.default,
-        minLength: stringSchema.minLength,
-        maxLength: stringSchema.maxLength,
-      });
-    }),
-  };
-}
-
-export function convertPiFormResultToMcpResult(result: FormResult): ElicitResult {
-  if (result.action === "secondary") return { action: "decline" };
-  if (result.action === "cancel") return { action: "cancel" };
-  return { action: "accept", content: stripUndefined(result.values as Record<string, ExtensionUIFormValue>) as ElicitResult["content"] };
-}
-
-export function coerceAndValidateFormValues(
-  params: ElicitRequestFormParams,
-  values: Record<string, ExtensionUIFormValue>,
-): Record<string, string | number | boolean | string[]> {
-  const output: Record<string, string | number | boolean | string[]> = {};
-  const required = new Set(params.requestedSchema.required ?? []);
-
-  for (const [name, schema] of Object.entries(params.requestedSchema.properties)) {
-    const raw = values[name] ?? schema.default;
-    if (raw === undefined || (raw === "" && schema.type !== "string")) {
-      if (required.has(name)) throw new Error(`Missing required elicitation field: ${name}`);
-      continue;
-    }
-
-    if (schema.type === "string") {
-      const stringSchema = schema as { minLength?: number; maxLength?: number };
-      const value = String(raw);
-      if (stringSchema.minLength !== undefined && value.length < stringSchema.minLength) {
-        throw new Error(`Elicitation field ${name} is shorter than minimum length ${stringSchema.minLength}`);
-      }
-      if (stringSchema.maxLength !== undefined && value.length > stringSchema.maxLength) {
-        throw new Error(`Elicitation field ${name} is longer than maximum length ${stringSchema.maxLength}`);
-      }
-      if ("enum" in schema && Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-        throw new Error(`Elicitation field ${name} is not an allowed value`);
-      }
-      if ("oneOf" in schema && Array.isArray(schema.oneOf) && !schema.oneOf.some((option) => option.const === value)) {
-        throw new Error(`Elicitation field ${name} is not an allowed value`);
-      }
-      output[name] = value;
-      continue;
-    }
-
-    if (schema.type === "number" || schema.type === "integer") {
-      const value = typeof raw === "number" ? raw : Number(raw);
-      if (!Number.isFinite(value)) throw new Error(`Elicitation field ${name} must be a number`);
-      if (schema.type === "integer" && !Number.isInteger(value)) throw new Error(`Elicitation field ${name} must be an integer`);
-      if (schema.minimum !== undefined && value < schema.minimum) {
-        throw new Error(`Elicitation field ${name} is below minimum ${schema.minimum}`);
-      }
-      if (schema.maximum !== undefined && value > schema.maximum) {
-        throw new Error(`Elicitation field ${name} is above maximum ${schema.maximum}`);
-      }
-      output[name] = value;
-      continue;
-    }
-
-    if (schema.type === "boolean") {
-      output[name] = typeof raw === "boolean" ? raw : raw === "true";
-      continue;
-    }
-
-    if (schema.type === "array") {
-      if (!Array.isArray(raw)) throw new Error(`Elicitation field ${name} must be a list`);
-      const allowed = new Set(extractMultiSelectOptions(schema).map((option) => option.value));
-      const value = raw.map(String);
-      if (schema.minItems !== undefined && value.length < schema.minItems) {
-        throw new Error(`Elicitation field ${name} has fewer than ${schema.minItems} selections`);
-      }
-      if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-        throw new Error(`Elicitation field ${name} has more than ${schema.maxItems} selections`);
-      }
-      for (const item of value) {
-        if (!allowed.has(item)) throw new Error(`Elicitation field ${name} contains an invalid selection`);
-      }
-      output[name] = value;
-    }
-  }
-
-  return output;
-}
-
-function extractMultiSelectOptions(schema: Extract<ElicitRequestFormParams["requestedSchema"]["properties"][string], { type: "array" }>): ExtensionUIFormSelectOption[] {
-  const items = schema.items as { enum?: string[]; anyOf?: Array<{ const: string; title: string }> };
-  if (Array.isArray(items.anyOf)) {
-    return items.anyOf.map((option) => ({ value: option.const, label: option.title }));
-  }
-  return (items.enum ?? []).map((value) => ({ value }));
-}
-
 function humanizeName(name: string): string {
-  return name
-    .replace(/[_-]+/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/^./, (char) => char.toUpperCase());
-}
-
-function getBrowserElicitationUrl(url: string): URL {
-  const parsed = new URL(url);
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error(`MCP URL elicitation only supports http/https URLs: ${parsed.protocol}`);
-  }
-  return parsed;
-}
-
-function stripUndefined(values: Record<string, ExtensionUIFormValue>): Record<string, string | number | boolean | string[]> {
-  const output: Record<string, string | number | boolean | string[]> = {};
-  for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined) output[key] = value;
-  }
-  return output;
-}
-
-function omitUndefined<T extends Record<string, unknown>>(value: T): T {
-  for (const key of Object.keys(value)) {
-    if (value[key] === undefined) delete value[key];
-  }
-  return value;
+  return name.replace(/[_-]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/^./, char => char.toUpperCase());
 }
