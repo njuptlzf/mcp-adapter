@@ -49,7 +49,7 @@ export interface FormConfig {
 /** Result returned by `UISystem.form`. */
 export interface FormResult {
 	action: "submit" | "secondary" | "cancel";
-	values?: Record<string, unknown>;
+	values?: Record<string, unknown> | undefined;
 }
 
 /** A custom UI renderer function. */
@@ -71,11 +71,11 @@ export interface UISystem {
 	/** Set or clear a status bar entry. */
 	setStatus?(key: string, value: string | undefined): void;
 	/** Show an interactive form and await a result. */
-	form?(config: FormConfig): Promise<FormResult>;
+	form?: ((config: FormConfig) => Promise<FormResult>) | undefined;
 	/** Register a custom UI renderer. */
-	custom?(renderer: UIRenderer, options?: UIOptions): void;
+	custom?: ((renderer: UIRenderer, options?: UIOptions) => void) | undefined;
 	/** Optional theming helpers (e.g. Pi's `theme.fg`). */
-	theme?: { fg?(color: string, text: string): string };
+	theme?: { fg?(color: string, text: string): string } | undefined;
 }
 
 /**
@@ -88,13 +88,13 @@ export interface UISystem {
 export interface AgentContext {
 	cwd: string;
 	hasUI: boolean;
-	ui?: UISystem;
+	ui?: UISystem | undefined;
 	model?: unknown;
 	modelRegistry?: unknown;
-	samplingProvider?: SamplingProvider;
+	samplingProvider?: SamplingProvider | undefined;
 	signal?: AbortSignal;
-	reload?: () => Promise<void>;
-	mcpConfigPath?: string;
+	reload?: (() => Promise<void>) | undefined;
+	mcpConfigPath?: string | undefined;
 }
 
 /** Registration shape for `AgentAPI.registerTool`. */
@@ -104,9 +104,9 @@ export interface ToolRegistration {
 	description?: string;
 	promptSnippet?: string;
 	parameters?: unknown;
-	execute: (...args: unknown[]) => unknown;
-	renderCall?: (...args: unknown[]) => unknown;
-	renderResult?: (...args: unknown[]) => unknown;
+	execute: (...args: any[]) => unknown;
+	renderCall?: (...args: any[]) => unknown;
+	renderResult?: (...args: any[]) => unknown;
 	[key: string]: unknown;
 }
 

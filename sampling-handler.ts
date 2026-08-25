@@ -115,7 +115,7 @@ function formatResponseApproval(serverName: string, response: CreateMessageResul
 
 function messageText(message: Message): string {
   if (typeof message.content === "string") return message.content;
-  return message.content.map((block) => {
+  return message.content.map((block: { type: string; text?: string; mimeType?: string; name?: string }) => {
     if (block.type === "text") return block.text;
     if (block.type === "image") return `[image: ${block.mimeType}]`;
     if (block.type === "thinking") return "[thinking]";
@@ -238,12 +238,12 @@ function convertAssistantResult(message: AssistantMessage): CreateMessageResult 
   }
 
   const text = message.content
-    .map((block) => {
+    .map((block: { type: string; text?: string }) => {
       if (block.type === "text") return block.text;
       if (block.type === "thinking") return undefined;
       throw new Error(`MCP sampling result ${block.type} content is not supported`);
     })
-    .filter((value): value is string => value !== undefined)
+    .filter((value: string | undefined): value is string => value !== undefined)
     .join("\n\n")
     .trim();
 

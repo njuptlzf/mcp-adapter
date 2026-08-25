@@ -548,7 +548,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     });
   }
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (_event: any, ctx: any) => {
     const generation = ++lifecycleGeneration;
     const previousState = state;
     const previousOwner = currentOwner;
@@ -638,7 +638,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   });
 
   // Re-flag returned MCP tool failures so pi registers them as errors (see toolErrorOverride).
-  pi.on("tool_result", (event) => toolErrorOverride(event.details));
+  pi.on("tool_result", (event: any) => toolErrorOverride(event.details));
 
   const registerMcpCommand = (commandName: string) => pi.registerCommand(commandName, {
     description: "Show MCP server status",
@@ -688,7 +688,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         .map((serverName) => ({ value: `${subcommand} ${serverName}`, label: serverName }));
       return servers.length > 0 ? servers : null;
     },
-    handler: async (args, ctx) => {
+    handler: async (args: any, ctx: any) => {
       const commandOwner = currentOwner;
       const commandReload = typeof ctx.reload === "function" ? ctx.reload.bind(ctx) : async () => {};
       const commandHasUI = ctx.hasUI;
@@ -828,7 +828,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
 
   pi.registerCommand("mcp-auth", {
     description: "Authenticate with an MCP server (OAuth)",
-    handler: async (args, ctx) => {
+    handler: async (args: any, ctx: any) => {
       const commandOwner = currentOwner;
       const commandHasUI = ctx.hasUI;
       const commandCtx = {
