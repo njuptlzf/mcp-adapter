@@ -47,6 +47,7 @@ function runGit(args: string[], envOverride?: Record<string, string>): string {
   return execFileSync("git", args, {
     encoding: "utf-8",
     env: { ...process.env, ...envOverride },
+    maxBuffer: 64 * 1024 * 1024,
   });
 }
 

@@ -55,7 +55,7 @@ function parseArgs(): CliOptions {
 }
 
 function gitDiff(): string {
-  return execFileSync("git", ["diff", "--unified=0", "--no-color", "main...HEAD"], { encoding: "utf-8" });
+  return execFileSync("git", ["diff", "--unified=0", "--no-color", "main...HEAD"], { encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
 }
 
 const CORE_FILES = /^(?!adapters\/|interfaces\/|types\/|__tests__\/|scripts\/|examples\/|.planning\/|skills\/|.github\/|node_modules\/|.git\/)/;
