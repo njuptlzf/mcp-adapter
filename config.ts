@@ -4,10 +4,9 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import stripJsonComments from "strip-json-comments";
-import { getConfigDirName } from "./agent-dir.ts";
+import { getAgentPath, getConfigDirName } from "./agent-dir.ts";
 import { getAgentPluginSummaries, loadAgentPluginConfigs, type AgentPluginSummary } from "./agent-plugin-loader.ts";
 import { loadPackageMcpConfigs } from "./package-mcp-loader.ts";
-import { resolveAgentGlobalConfigPath, DEFAULT_AGENT_RESOLVER, type AgentPathResolver } from "./interfaces/agent-paths.ts";
 import { isServerDisabled, type HostConfigDiscovery, type McpConfig, type ServerEntry, type McpSettings, type ImportKind, type ServerProvenance } from "./types.ts";
 import { toStringRecord } from "./utils.ts";
 
@@ -42,6 +41,16 @@ export const KNOWN_SERVER_PRESETS: readonly KnownServerPreset[] = [
     name: "Context7",
     summary: "Look up current library documentation and examples.",
     entry: { url: "https://mcp.context7.com/mcp", protocolVersion: "auto" },
+  },
+  {
+    id: "parallel-search",
+    name: "Parallel Search",
+    summary: "Search the web and fetch pages without an API key.",
+    entry: {
+      url: "https://search.parallel.ai/mcp",
+      protocolVersion: "auto",
+      directTools: true,
+    },
   },
   {
     id: "notion",
@@ -167,14 +176,7 @@ export interface ConfigWritePreview {
 }
 
 export function getPiGlobalConfigPath(overridePath?: string): string {
-  return resolveAgentGlobalConfigPath(DEFAULT_AGENT_RESOLVER, overridePath);
-}
-
-export function getAgentGlobalConfigPath(
-  resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER,
-  overridePath?: string,
-): string {
-  return resolveAgentGlobalConfigPath(resolver, overridePath);
+  return overridePath ? resolve(overridePath) : getAgentPath("mcp.json");
 }
 
 export function getGenericGlobalConfigPath(): string {
@@ -189,8 +191,8 @@ export function getProjectPiConfigPath(cwd = process.cwd()): string {
   return resolve(cwd, getConfigDirName(), PROJECT_PI_CONFIG_NAME);
 }
 
-export function getConfigDiscoveryPaths(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): ConfigDiscoveryPath[] {
-  return getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath).map((source) => ({
+export function getConfigDiscoveryPaths(overridePath?: string, cwd = process.cwd()): ConfigDiscoveryPath[] {
+  return getConfigSources(overridePath, cwd).map((source) => ({
     label: source.label,
     path: source.readPath,
     exists: existsSync(source.readPath),
@@ -307,8 +309,8 @@ export function cloneMcpConfig(config: McpConfig): McpConfig {
   return structuredClone(config);
 }
 
-export function loadMcpConfig(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): McpConfig {
-  const sourceSpecs = getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath);
+export function loadMcpConfig(overridePath?: string, cwd = process.cwd()): McpConfig {
+  const sourceSpecs = getConfigSources(overridePath, cwd);
   const hostConfigDiscovery = getConfiguredHostConfigDiscovery(overridePath, cwd);
   // Host files are a lower-precedence fallback. This ordering means an opt-in
   // discovery cannot override a shared or Pi-owned definition, and all normal
@@ -409,19 +411,10 @@ function getConfigConflicts(
     .sort((left, right) => left.serverName.localeCompare(right.serverName));
 }
 
-function getConfigSources(overridePath?: string, cwd = process.cwd(), resolver: AgentPathResolver = DEFAULT_AGENT_RESOLVER, mcpConfigPath?: string): ConfigSourceSpec[] {
-  // Priority: explicit --config override > agent/universal mcpConfigPath > resolver default.
-  // Before this fix, `overridePath` (--config) was ignored whenever `mcpConfigPath`
-  // was also supplied — which bin/mcp-server.ts always does — so `mcp-server --config`
-  // silently fell back to discovery instead of loading the requested file.
-  const userPath = overridePath
-    ? resolve(overridePath)
-    : mcpConfigPath
-      ? resolve(mcpConfigPath)
-      : resolveAgentGlobalConfigPath(resolver);
+function getConfigSources(overridePath?: string, cwd = process.cwd()): ConfigSourceSpec[] {
+  const userPath = getEffectivePiGlobalConfigPath(overridePath);
   const projectPath = getProjectConfigPath(cwd);
-  const projectPiConfigName = resolver.projectConfigName?.() ?? PROJECT_PI_CONFIG_NAME;
-  const projectPiPath = resolve(cwd, projectPiConfigName);
+  const projectPiPath = getProjectPiConfigPath(cwd);
   const sources: ConfigSourceSpec[] = [];
 
   if (isExclusiveConfigMode()) {
@@ -1196,11 +1189,11 @@ export function writeSharedServerEntry(filePath: string, serverName: string, ent
   return filePath;
 }
 
-export function getServerProvenance(overridePath?: string, cwd = process.cwd(), mcpConfigPath?: string): Map<string, ServerProvenance> {
+export function getServerProvenance(overridePath?: string, cwd = process.cwd()): Map<string, ServerProvenance> {
   const provenance = new Map<string, ServerProvenance>();
   const userPath = getPiGlobalConfigPath(overridePath);
 
-if (getConfiguredHostConfigDiscovery(overridePath, cwd) === "on") {
+  if (getConfiguredHostConfigDiscovery(overridePath, cwd) === "on") {
     for (const importKind of Object.keys(IMPORT_PATHS) as ImportKind[]) {
       const imported = loadImportedConfig(importKind, cwd, `Failed to inspect imported MCP config from ${importKind}:`);
       if (!imported) continue;
@@ -1212,7 +1205,7 @@ if (getConfiguredHostConfigDiscovery(overridePath, cwd) === "on") {
     }
   }
 
-  for (const source of getConfigSources(overridePath, cwd, DEFAULT_AGENT_RESOLVER, mcpConfigPath)) {
+  for (const source of getConfigSources(overridePath, cwd)) {
     const loaded = readValidatedConfig(source.readPath, `MCP config from ${source.readPath}`);
     if (!loaded) continue;
 

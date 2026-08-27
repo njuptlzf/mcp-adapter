@@ -562,6 +562,8 @@ export function updateMetadataCache(
     resources,
     ...(prompts !== undefined ? { prompts } : {}),
     ...(connection.instructions !== undefined ? { instructions: connection.instructions } : {}),
+    ...(connection.toolListHints?.ttlMs !== undefined ? { ttlMs: connection.toolListHints.ttlMs } : {}),
+    ...(connection.toolListHints?.cacheScope !== undefined ? { cacheScope: connection.toolListHints.cacheScope } : {}),
     cachedAt: Date.now(),
   };
 
@@ -624,7 +626,11 @@ export function updateStatusBar(state: McpExtensionState): void {
     ui.setStatus("mcp", undefined);
     return;
   }
-  ui.setStatus("mcp", ui.theme ? ui.theme.fg("accent", formattedStatus) : formattedStatus);
+  const theme = ui.theme;
+  const styledStatus = typeof theme?.fg === "function"
+    ? theme.fg("accent", formattedStatus)
+    : formattedStatus;
+  ui.setStatus("mcp", styledStatus);
 }
 
 export async function lazyConnect(state: McpExtensionState, serverName: string, signal?: AbortSignal): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import {
   Client,
@@ -9,6 +9,7 @@ import {
   StreamableHTTPClientTransport,
   UnauthorizedError,
   type GetPromptResult,
+  type ListToolsResult,
   type ReadResourceResult,
   type CacheableRequestOptions,
   type RequestOptions,
@@ -128,6 +129,8 @@ export interface ServerConnection {
   transport: Transport;
   definition: ServerDefinition;
   tools: McpTool[];
+  /** Cache hints from the server's aggregated tools/list result. */
+  toolListHints?: Partial<Pick<ListToolsResult, "ttlMs" | "cacheScope">> | undefined;
   /** Monotonic guard against older refresh responses replacing newer notifications. */
   toolsRevision?: number;
   resources: McpResource[];
@@ -147,6 +150,9 @@ type UiStreamListener = (serverName: string, notification: ServerStreamResultPat
 type MetadataListChangedListener = (serverName: string, reason: string) => void;
 
 export type ToolRefreshResult = "updated" | "unchanged" | "superseded" | "refresh-timeout";
+
+type ToolListCacheHints = Partial<Pick<ListToolsResult, "ttlMs" | "cacheScope">>;
+type ToolListResult = { tools: McpTool[]; hints?: ToolListCacheHints };
 
 const KEEP_ALIVE_REFRESH_TIMEOUT_MS = 5_000;
 
@@ -384,9 +390,9 @@ export class McpServerManager {
 
     const toolsRevision = expectedConnection.toolsRevision ?? 0;
     const refreshSignal = combineAbortSignals(healthOptions.signal, AbortSignal.timeout(timeout));
-    let tools: McpTool[];
+    let toolResult: ToolListResult;
     try {
-      tools = await this.fetchAllTools(expectedConnection.client, {
+      toolResult = await this.fetchAllTools(expectedConnection.client, {
         ...healthOptions,
         ...(refreshSignal ? { signal: refreshSignal } : {}),
         cacheMode: "refresh",
@@ -410,20 +416,30 @@ export class McpServerManager {
       return "superseded";
     }
 
-    if (isDeepStrictEqual(expectedConnection.tools, tools)) {
+    if (
+      isDeepStrictEqual(expectedConnection.tools, toolResult.tools) &&
+      isDeepStrictEqual(expectedConnection.toolListHints, toolResult.hints)
+    ) {
       this.retryPendingMetadataPublication(name, expectedConnection);
       return "unchanged";
     }
 
     const previousTools = expectedConnection.tools;
-    expectedConnection.tools = tools;
+    const previousToolListHints = expectedConnection.toolListHints;
+    expectedConnection.tools = toolResult.tools;
+    expectedConnection.toolListHints = toolResult.hints;
     expectedConnection.toolsRevision = toolsRevision + 1;
     try {
       await this.metadataListChangedListener?.(name, "keep-alive-refresh");
       this.pendingMetadataPublications.delete(name);
     } catch (error) {
-      if (this.connections.get(name) === expectedConnection && expectedConnection.tools === tools) {
+      if (
+        this.connections.get(name) === expectedConnection &&
+        expectedConnection.tools === toolResult.tools &&
+        expectedConnection.toolListHints === toolResult.hints
+      ) {
         expectedConnection.tools = previousTools;
+        expectedConnection.toolListHints = previousToolListHints;
         expectedConnection.toolsRevision = toolsRevision;
       }
       throw error;
@@ -498,6 +514,12 @@ export class McpServerManager {
       client = this.createClient(name, definition);
       let command = definition.command;
       let args = (definition.args ?? []).map((argument) => interpolateEnvVars(argument));
+      const cwd = resolveConfigPath(definition.cwd) ?? this.defaultCwd;
+      if (cwd !== undefined) {
+        const cwdStats = statSync(cwd, { throwIfNoEntry: false });
+        if (!cwdStats) throw new Error(`MCP server "${name}" configured cwd does not exist: "${cwd}"`);
+        if (!cwdStats.isDirectory()) throw new Error(`MCP server "${name}" configured cwd is not a directory: "${cwd}"`);
+      }
 
       if (command === "npx" || command === "npm") {
         const resolved = await resolveNpxBinary(command, args, signal);
@@ -510,7 +532,6 @@ export class McpServerManager {
       throwIfAborted(signal);
 
       if (definition.pluginDataDir) mkdirSync(definition.pluginDataDir, { recursive: true });
-      const cwd = resolveConfigPath(definition.cwd) ?? this.defaultCwd;
       const stdioTransport = new StdioClientTransport({
         command,
         args,
@@ -597,12 +618,13 @@ export class McpServerManager {
 
       // Discover tools, resources, and prompts. Resource and prompt listing is
       // optional: only servers advertising the capability are queried.
-      const [tools, resources, promptResult] = await Promise.all([
+      const [toolResult, resources, promptResult] = await Promise.all([
         this.fetchAllTools(client, requestOptions),
         this.fetchAllResources(client, requestOptions),
         this.fetchAllPrompts(client, requestOptions),
       ]);
-      connection.tools = tools;
+      connection.tools = toolResult.tools;
+      connection.toolListHints = toolResult.hints;
       connection.resources = resources;
       connection.prompts = promptResult.prompts;
       connection.promptDiscoveryFailed = promptResult.failed;
@@ -999,17 +1021,34 @@ export class McpServerManager {
     }
   }
 
-  private async fetchAllTools(client: Client, requestOptions?: CacheableRequestOptions): Promise<McpTool[]> {
+  private async fetchAllTools(client: Client, requestOptions?: CacheableRequestOptions): Promise<ToolListResult> {
     const allTools: McpTool[] = [];
     let cursor: string | undefined;
+    let hints: ToolListCacheHints | undefined;
+    let firstPage = true;
 
     do {
       const result = await client.listTools(cursor ? { cursor } : undefined, requestOptions);
+      if (firstPage) {
+        const ttlMs = typeof result.ttlMs === "number" && Number.isSafeInteger(result.ttlMs) && result.ttlMs >= 0
+          ? result.ttlMs
+          : undefined;
+        const cacheScope = result.cacheScope === "public" || result.cacheScope === "private"
+          ? result.cacheScope
+          : undefined;
+        if (ttlMs !== undefined || cacheScope !== undefined) {
+          hints = {
+            ...(ttlMs !== undefined ? { ttlMs } : {}),
+            ...(cacheScope !== undefined ? { cacheScope } : {}),
+          };
+        }
+        firstPage = false;
+      }
       allTools.push(...(result.tools ?? []));
       cursor = result.nextCursor;
     } while (cursor);
 
-    return allTools;
+    return { tools: allTools, ...(hints !== undefined ? { hints } : {}) };
   }
 
   private async fetchAllPrompts(

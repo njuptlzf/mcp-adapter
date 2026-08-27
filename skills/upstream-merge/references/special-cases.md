@@ -6,7 +6,6 @@ Located at `skills/upstream-merge/references/` per sub-option **D-32 / C2**. The
 
 | Path | Status | Why special | Decision |
 |---|---|---|---|
-| `index.ts` | `decoupled-wrapper` | D-04 backward-compat wrapper; preserves Pi `mcpAdapter(pi)` signature | `ours` |
 | `interfaces/agent-paths.ts` | `decoupled-wrapper` | D-02 AgentPathResolver; removed createKiloResolver/createQoderResolver (Phase 12); createUniversalResolver added; Pi-specific factory is separate | `manual` |
 | `interfaces/sampling.ts` | `decoupled-wrapper` | D-03 SamplingProvider contract; `PiSamplingProvider` is the only Pi-bound adapter | `manual` |
 | `package.json` | `sibling-config` | Pi as optional peer (D-01); bin reduced to `pi-mcp-adapter` + `mcp-server` (Phase 12 D-10: removed `kilo-mcp-server`/`qoder-mcp-bridge`) | `manual` |

@@ -125,6 +125,13 @@ export function isServerCacheValid(
   }
   if (!entry || entry.configHash !== configHash) return false;
   if (!entry.cachedAt || typeof entry.cachedAt !== "number") return false;
+  const declaredTtlMs = entry.ttlMs;
+  if (typeof declaredTtlMs === "number" && Number.isSafeInteger(declaredTtlMs) && declaredTtlMs >= 0) {
+    if (declaredTtlMs === 0) return false;
+    const ageMs = Date.now() - entry.cachedAt;
+    const effectiveMaxAge = maxAgeMs > 0 ? Math.min(maxAgeMs, declaredTtlMs) : declaredTtlMs;
+    return ageMs < effectiveMaxAge;
+  }
   if (maxAgeMs > 0 && Date.now() - entry.cachedAt > maxAgeMs) return false;
   return true;
 }

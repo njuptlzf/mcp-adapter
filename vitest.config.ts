@@ -10,11 +10,8 @@ export default defineConfig({
 			PI_MCP_ADAPTER_DISABLE_AUTH_CACHE: "1",
 		},
 		include: ["__tests__/**/*.test.ts", "tests/**/*.test.ts"],
-		// Plan 07-04: matrix reporter added (D-17) — writes agent × section
-		// matrix to tests/reports/mcp-adapter-test-report.{md,json} on test run end.
-		// 07-02 deviation note: globalSetup was REMOVED due to a vitest 3.2.6
-		// SSR race; the matrix reporter does its work in onTestRunEnd to avoid
-		// that same race. See tests/reporters/matrix-reporter.ts.
+		// Plan 07-04: matrix reporter added (D-17)
+		// 07-02 deviation note: matrix reporter does its work in onTestRunEnd.
 		reporters: ["default", "./tests/reporters/matrix-reporter.ts"],
 		coverage: {
 			provider: "v8",
