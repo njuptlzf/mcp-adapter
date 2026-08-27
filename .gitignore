@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# Generated single-file bundle (npm run build:mcp-server); built on prepublish, not committed
+/mcp-server.mjs
 .pi/
 conformance/results/
 *.log
