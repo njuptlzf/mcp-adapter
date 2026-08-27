@@ -5,10 +5,12 @@
  * Implements Phase 15.5 CI-04 (v3.2): large-function-detector
  * Source: skills/upstream-merge/SKILL.md §6.6 rule 2 + retrospective §1.3
  *
- * Rationale: The 2026-07-01 first merge attempt had `adapters/entry.ts`
- * `createMcpAdapter` at 324 lines — both fork and upstream modified the same
- * function body, causing the hardest conflict. Detecting large functions
- * BEFORE they become merge conflict sources prevents future pain.
+ * Rationale: The 2026-07-01 first merge attempt had a `createMcpAdapter`
+ * (then in the now-retired `adapters/entry.ts`) at 324 lines — both fork and
+ * upstream modified the same function body, causing the hardest conflict.
+ * Post fork-host, the same risk lives in upstream-managed core (e.g.
+ * `index.ts` `installMcpAdapter`); detecting large functions before they
+ * become merge-conflict sources still prevents future pain.
  *
  * Threshold: --max-lines (default 300)
  *
