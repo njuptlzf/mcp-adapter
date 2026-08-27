@@ -4,19 +4,19 @@
 
 # Universal MCP Adapter
 
-A universal MCP (Model Context Protocol) adapter with **Pi as a first-class supported adapter** (not legacy) — and every other MCP-compatible coding agent is welcome via the same `AgentAPI` / `UISystem` interfaces.
+A universal MCP (Model Context Protocol) adapter with **Pi as a first-class host** (native extension) — and every other MCP-compatible coding agent via the universal `mcp-server` stdio entry point.
 
 Use MCP servers without burning your context window, from Pi today and from any MCP-compatible coding agent via the [Supported Agents](#supported-agents) matrix below.
 
 ## Supported Agents
 
-Pi is a first-class supported adapter (Branch A, native extension). **Any other MCP-compatible agent** works via Branch C — the universal `mcp-server` stdio entry point. No per-agent adapter code is needed; the server discovers client capabilities at runtime via MCP protocol.
+Pi is a first-class host (Branch A, native extension). **Any other MCP-compatible agent** works via Branch C — the universal `mcp-server` stdio entry point. No per-agent adapter code is needed; the server discovers client capabilities at runtime via the MCP protocol.
 
-The **single source of truth** for the adapter registry is the `AGENT_ADAPTERS` array in [`interfaces/agent-api.ts`](interfaces/agent-api.ts). It contains two entries: `pi` (Branch A) and `universal-mcp` (Branch C).
+A single upstream engine (`index.ts` `installMcpAdapter`) drives both paths: on Pi it runs as a native extension; on other agents a small host shim (`adapters/universal-host.ts`) impersonates Pi's `ExtensionAPI` so the same engine runs unchanged behind the `mcp-server` stdio layer. See [MAPPING.md](MAPPING.md) for the host-surface contract.
 
 | Branch | Agent | Config path | Integration | Sampling | Elicitation |
 |--------|-------|-------------|-------------|----------|-------------|
-| Branch A | Pi | `~/.pi/agent/mcp.json` | Native Pi extension (`pi install`) | ✅ In-process (`PiSamplingProvider`) | ✅ Pi UI forms |
+| Branch A | Pi | `~/.pi/agent/mcp.json` | Native Pi extension (`pi install`) | ✅ In-process | ✅ Pi UI forms |
 | Branch C | Any MCP-compatible agent | `~/.config/mcp/mcp.json` or `.mcp.json` | Universal MCP stdio server (`mcp-server`) | Runtime-discovered | Runtime-discovered |
 
 > **Branch C is a complete implementation** (D-08): the `mcp` proxy tool is always available.
@@ -63,17 +63,17 @@ Mario wrote about [why you might not need MCP](https://mariozechner.at/posts/202
 
 His take: skip MCP entirely, write simple CLI tools instead.
 
-But the MCP ecosystem has useful stuff - databases, browsers, APIs. This adapter gives you access without the bloat. One proxy tool (~200 tokens) instead of hundreds. The agent discovers what it needs on-demand. Servers only start when you actually use them. The same engine drives Pi today; other agents plug in through the [`AgentAPI` / `UISystem` interfaces](#universal-adapter) without touching MCP server code.
+But the MCP ecosystem has useful stuff - databases, browsers, APIs. This adapter gives you access without the bloat. One proxy tool (~200 tokens) instead of hundreds. The agent discovers what it needs on-demand. Servers only start when you actually use them. The same engine drives Pi today; other agents plug in through the universal `mcp-server` stdio entry without touching MCP server code.
 
 ## Install
 
 ### For Pi users (recommended)
 
 ```bash
-pi install npm:pi-mcp-adapter
+pi install npm:@njuptlzf/mcp-adapter
 ```
 
-Restart Pi after installation. The rest of this README focuses on the Pi integration; for other agents see [Universal Adapter](#universal-adapter).
+Restart Pi after installation. The rest of this README focuses on the Pi integration; for other agents see the next section.
 
 ### For other agents (Branch C — universal MCP stdio server)
 
@@ -105,9 +105,10 @@ Any MCP-compatible agent can use the universal `mcp-server` bin entry. Register 
 For a standalone deployment that needs no `node_modules` (e.g. side-loading a single file onto another machine), build `bin/mcp-server.ts` into one self-contained `.mjs` bundle:
 
 ```bash
-npx esbuild bin/mcp-server.ts --bundle --platform=node --format=esm \
-  --outfile=mcp-server.mjs
+npm run build:mcp-server
 ```
+
+This bundles `bin/mcp-server.ts` into a single self-contained `./mcp-server.mjs` via the `scripts/build-mcp-server.mjs` esbuild pipeline.
 
 The bundle inlines all dependencies (MCP SDK, Zod, adapters), so the single `.mjs` runs on any machine with just Node.js.
 
@@ -130,7 +131,7 @@ Then register it with `node` and the `--config` flag pointing at the file that l
 
 Config discovery order for `--config` is: `--config` flag → `MCP_CONFIG_PATH` env var → `.mcp.json` in the CWD → `~/.config/mcp/mcp.json`.
 
-The server is agent-agnostic — it speaks MCP protocol and discovers client capabilities at runtime. Sampling and elicitation are forwarded via MCP Server→Client reverse calls when the agent declares those capabilities. See [Universal Adapter](#universal-adapter) for the `AgentAPI` / `UISystem` interface details.
+The server is agent-agnostic — it speaks MCP protocol and discovers client capabilities at runtime. Sampling and elicitation are forwarded via MCP Server→Client reverse calls when the agent declares those capabilities.
 
 ## What happens on first run (Pi)
 
@@ -146,29 +147,34 @@ If you prefer the terminal, you can also run `pi-mcp-adapter init` after install
 
 ## Quick Start
 
-The adapter ships two entry points: the Pi-native `mcpAdapter(pi)` for Pi users (backward-compatible) and the universal `createMcpAdapter(adapter, ctx, config, cache)` for any `AgentAPI` adapter. Both produce the same proxy tool behavior.
+The adapter ships one upstream engine with two entry points: the Pi-native `mcpAdapter(pi)` (backward-compatible) and the universal `mcp-server` stdio binary for any MCP-compatible agent.
 
 ### Pi users (Pi-native entry point)
 
 ```typescript
-import { mcpAdapter } from "pi-mcp-adapter";
+import { mcpAdapter } from "@njuptlzf/mcp-adapter";
 
 export default mcpAdapter(pi); // Pi's ExtensionAPI — backward-compatible
 ```
 
-### Universal entry point (any AgentAPI adapter)
+To supply config explicitly instead of relying on Pi's standard MCP files:
 
 ```typescript
-import { createMcpAdapter } from "pi-mcp-adapter";
-import { PiAdapter } from "pi-mcp-adapter/adapters/pi-adapter";
+import { createMcpAdapter } from "@njuptlzf/mcp-adapter";
 
-// For Pi (Branch A): use PiAdapter
-const adapter = new PiAdapter(pi);
+export default createMcpAdapter({ config })(pi); // factory, then install onto `pi`
+```
 
-// For any other MCP-compatible agent (Branch C): use the `mcp-server` bin entry
-// — no adapter code needed, just register it in the agent's MCP config.
+### Universal entry point (any MCP-compatible agent)
 
-createMcpAdapter(adapter, ctx, config, cache); // works for any adapter
+For any other MCP-compatible agent, register the `mcp-server` bin in the agent's MCP config (see [Install](#install)) — no adapter code needed:
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": { "command": "mcp-server" }
+  }
+}
 ```
 
 ---
@@ -225,23 +231,12 @@ Two calls instead of 26 tools cluttering the context.
 
 ## Verification
 
-The `mcp-adapter-test` skill runs a full integration matrix across every registered adapter. Latest report: [tests/reports/mcp-adapter-test-report.md](tests/reports/mcp-adapter-test-report.md) (auto-generated by `tests/reporters/matrix-reporter.ts`).
-
-Run the matrix yourself:
-
 ```bash
-npm run test:prebuild  # build visualizer dist/ (FIX-01)
-npx vitest run          # full matrix, ~30s
+npm run test:prebuild  # build visualizer dist/
+npx vitest run          # full suite
 ```
 
-Latest matrix (auto-refreshed by the reporter):
-
-| Adapter | Section 4 (MockAgent) | Section 5 (Token Bench) | Section 5B (Conv Sim) | Section 6 (E2E) |
-|---------|------------------------|--------------------------|----------------------|------------------|
-| Pi      | 44/44                  | 94% savings 🟡            | 56% savings 🟡        | 25/25            |
-| Universal MCP | 44/44             | 94% savings 🟡            | 56% savings 🟡        | 25/25            |
-
-🟡 = baseline-bound (fixture-determined, identical across adapters — see `docs/mcp-adapter-token-savings.md`).
+The suite covers the upstream engine (`__tests__/index-lifecycle.test.ts`, `__tests__/mcp-code.test.ts`), the universal host wiring (`__tests__/universal-host-acceptance.test.ts`), runtime registration (`__tests__/runtime-register.test.ts`), and the protocol forwarders. Token-savings numbers are baseline-bound; see `docs/mcp-adapter-token-savings.md`.
 
 ## Config
 
@@ -256,7 +251,7 @@ Use the shared MCP files when you want one setup to work across hosts, and host-
 | `<Pi agent dir>/mcp.json` | Pi global override and compatibility imports (`~/.pi/agent/mcp.json` by default) | Pi |
 | `.pi/mcp.json` | Pi project override | Pi |
 
-Pi-specific files are the write targets for imported or shared global servers when Pi needs to persist adapter-only settings such as `directTools`. For other agents, see [Universal Adapter](#universal-adapter) — `interfaces/agent-paths.ts` exposes the same contract as `AgentPathResolver` (`createPiResolver()` is the default).
+Pi-specific files are the write targets for imported or shared global servers when Pi needs to persist adapter-only settings such as `directTools`. Other agents use the `mcp-server` stdio path (Branch C) and don't write host-specific files.
 
 ### Server Options
 
@@ -440,7 +435,7 @@ MCP servers can ship interactive UIs via the [MCP UI](https://github.com/MCP-UI-
 
 1. Agent calls a tool like `launch_dashboard`
 2. The tool's metadata includes `_meta.ui.resourceUri` pointing to a UI resource
-3. pi-mcp-adapter fetches the UI HTML and opens it in an iframe
+3. mcp-adapter fetches the UI HTML and opens it in an iframe
 4. The UI can call MCP tools and send messages back to the agent
 
 **Native rendering:** On macOS, if [Glimpse](https://github.com/hazat/glimpse) is installed (`pi install npm:glimpseui`), UIs open in a native WKWebView window instead of a browser tab. Set `MCP_UI_VIEWER=browser` to force the browser, or `MCP_UI_VIEWER=glimpse` to require native rendering.

@@ -20,7 +20,7 @@ import type {
 	FormConfig,
 	FormField,
 	FormResult,
-} from "../interfaces/agent-api.ts";
+} from "../interfaces/host-types.ts";
 import type {
 	ElicitRequestFormParams,
 	ElicitResult,

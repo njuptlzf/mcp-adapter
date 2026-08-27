@@ -16,7 +16,7 @@ import {
 	convertFieldToSchema,
 } from "../adapters/protocol-elicitation-forwarder.ts";
 import { MockMcpClient } from "./fixtures/mock-mcp-client.ts";
-import type { FormConfig, FormField } from "../interfaces/agent-api.ts";
+import type { FormConfig, FormField } from "../interfaces/host-types.ts";
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 
 /** Minimal FormConfig for tests — text + select fields. */

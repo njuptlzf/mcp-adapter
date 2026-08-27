@@ -1,7 +1,7 @@
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-test: {
+	test: {
 		globals: true,
 		environment: "node",
 		env: {
@@ -26,17 +26,10 @@ test: {
 				"app-bridge.bundle.js",
 				"host-html-template.ts",
 				"glimpse-ui.ts",
-				"interfaces/agent-api.ts",
 			],
 			reporter: ["text", "html", "json"],
 			thresholds: {
 				"interfaces/agent-paths.ts": {
-					lines: 80,
-					functions: 80,
-					branches: 80,
-					statements: 80,
-				},
-				"adapters/pi-adapter.ts": {
 					lines: 80,
 					functions: 80,
 					branches: 80,
@@ -48,19 +41,7 @@ test: {
 					branches: 80,
 					statements: 80,
 				},
-				"adapters/pi-sampling-provider.ts": {
-					lines: 80,
-					functions: 80,
-					branches: 80,
-					statements: 80,
-				},
 				"adapters/pi-renderer.ts": {
-					lines: 80,
-					functions: 80,
-					branches: 80,
-					statements: 80,
-				},
-				"adapters/entry.ts": {
 					lines: 80,
 					functions: 80,
 					branches: 80,
