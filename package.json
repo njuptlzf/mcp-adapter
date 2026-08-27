@@ -160,6 +160,7 @@
     "logger.ts",
     "errors.ts",
     "bin",
+    "dist",
     "interfaces",
     "adapters",
     "app-bridge.bundle.js",
