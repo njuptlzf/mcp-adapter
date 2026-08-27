@@ -499,7 +499,7 @@ Shared MCP files are loaded automatically. Use `imports` only for host-specific 
 
 Supported compatibility imports: `cursor`, `claude-code`, `claude-desktop`, `vscode`, `windsurf`, `codex`
 
-`pi-mcp-adapter init` detects these host-specific configs and adds missing imports to the host agent dir config (Pi: `~/.pi/agent/mcp.json`) for you.
+`pi-mcp-adapter init` detects these host-specific configs and adds missing imports to the host agent dir config (Pi: `~/.pi/agent/mcp.json`) for you. The `opencode` import reads OpenCode V1 `mcp` entries from both `~/.config/opencode/opencode.json` and the project `opencode.json`, with project fields taking precedence. It is explicit-import only; OpenCode V2, inline content, managed configs, and remote discovery are not supported.
 
 ### Project Config
 
@@ -519,7 +519,7 @@ Prefer `.mcp.json` for project-local shared MCP config. Use `.pi/mcp.json` only 
 | Auth start | `mcp({ action: "auth-start", server: "name" })` |
 | Auth complete | `mcp({ action: "auth-complete", server: "name", args: '{"redirectUrl":"..."}' })` |
 
-MCP proxy and direct-tool results render compactly by default: long text shows the first three lines plus a `Ctrl+O to expand` hint, while the full result remains available when expanded and is still returned unchanged to the model.
+MCP proxy and direct-tool results render compactly by default: long text shows the first three lines plus a `Ctrl+O to expand` hint, while the full result remains available when expanded and is still returned unchanged to the model. Set `settings.toolResultRendering` to `"boxed"` to restore the legacy boxed Pi row, or set `settings.collapsedResultLines` to `2` or `3` when you want more collapsed text.
 
 Search includes both MCP tools and host-agent tools (from extensions). Host-agent tools appear first with `[host tool]` prefix. Space-separated words are OR'd.
 
@@ -543,3 +543,22 @@ The `/mcp` and `/mcp-auth` slash commands are Pi-specific UI shortcuts. On other
 If `settings.autoAuth` is `true`, `mcp({ connect: ... })`, `mcp({ tool: ... })`, and direct tool calls automatically run OAuth when needed and retry once.
 
 In interactive sessions, you can also authenticate from `/mcp` with `ctrl+a` or Enter on a server that needs auth. In remote/headless sessions, use the proxy tool's `auth-start` and `auth-complete` actions to copy the authorization URL locally and paste the redirect URL back into Pi. `/mcp-auth` without a server only opens a picker in the interactive UI.
+
+### MCP output schemas
+
+Advertised tool `outputSchema` values support JSON Schema draft-07 and 2020-12. Unstamped schemas use the SDK's 2020-12 default. Returned `structuredContent` is validated against the advertised schema for both proxy and direct-tool calls.
+
+Additional implementation notes:
+
+- Idle servers disconnect after 10 minutes (configurable), reconnect automatically on next use
+- npx-based servers resolve to direct binary paths, skipping the ~143 MB npm parent process
+- MCP server validates arguments, not the adapter
+- Remote keep-alive servers force-refresh their tool catalog during health checks, before user input, and before adapter-triggered turns, with bounded reconnect backoff
+- Specific tools can be promoted from the proxy to first-class host tools via `directTools` config, so the LLM sees them directly instead of having to search
+
+## Limitations
+
+- Cross-session server sharing not yet implemented (each agent session runs its own server processes)
+- Compact MCP result rendering summarizes text, but inline images are still controlled by Pi's image display settings and may render below the compact text summary.
+- Pi still owns one separator row before self-rendered tool output, so compact mode reduces adapter rendering height but cannot promise true zero-gap rows.
+- MCP sampling support is text-only; context inclusion, tools, stop sequences, audio, and image content are rejected with explicit errors.
