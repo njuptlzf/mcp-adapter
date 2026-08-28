@@ -10,6 +10,7 @@ export default defineConfig({
 			PI_MCP_ADAPTER_DISABLE_AUTH_CACHE: "1",
 		},
 		include: ["__tests__/**/*.test.ts", "tests/**/*.test.ts"],
+		setupFiles: ["./tests/setup-cross-platform.ts"],
 		// Plan 07-04: matrix reporter added (D-17)
 		// 07-02 deviation note: matrix reporter does its work in onTestRunEnd.
 		reporters: ["default", "./tests/reporters/matrix-reporter.ts"],
@@ -47,4 +48,20 @@ export default defineConfig({
 			},
 		},
 	},
+	// vite's import-analysis (es-module-lexer) chokes on `.js` files that keep a
+	// `#!` shebang on CRLF line endings (common on Windows checkouts), throwing
+	// "Invalid or unexpected token" when a test `import()`s cli.js. The shebang
+	// only matters for direct execution, never for import, so strip it before
+	// vite's transform.
+	plugins: [
+		{
+			name: "strip-shebang",
+			enforce: "pre",
+			transform(code, id) {
+				if (/\.(js|mjs)$/.test(id) && code.startsWith("#!")) {
+					return code.replace(/^#![^\n]*\n/, "");
+				}
+			},
+		},
+	],
 });
