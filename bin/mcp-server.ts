@@ -53,8 +53,18 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const SERVER_NAME = "mcp-adapter";
-const SERVER_VERSION = "2.29.0-0.0.3";
+const SERVER_VERSION = "2.29.0-0.0.4";
 const GENERIC_GLOBAL_CONFIG_PATH = createUniversalResolver().globalConfigPath();
+
+// Build metadata injected at bundle time by scripts/build-mcp-server.mjs via
+// esbuild `define`. When run directly with tsx (dev), __BUILD_INFO__ is an
+// unbound global, so BUILD_INFO falls back to placeholder values.
+declare const __BUILD_INFO__: { tag: string; hash: string; date: string } | undefined;
+
+const BUILD_INFO: { tag: string; hash: string; date: string } =
+	typeof __BUILD_INFO__ !== "undefined"
+		? __BUILD_INFO__
+		: { tag: "dev", hash: "unknown", date: "unknown" };
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -62,7 +72,7 @@ const GENERIC_GLOBAL_CONFIG_PATH = createUniversalResolver().globalConfigPath();
 
 function showHelp(): void {
 	console.log(`
-Usage: mcp-server [options]
+Usage: mcp-server [options] [version]
 
 Universal MCP stdio server — bridges mcp-adapter proxy tool into any
 MCP-compatible agent via stdio transport.
@@ -70,7 +80,7 @@ MCP-compatible agent via stdio transport.
 Options:
   --config <path>   Path to mcp.json config file
   --help            Show this help message
-  --version         Show version
+  --version         Show version (tag, commit hash, build date)
 
 Environment:
   MCP_CONFIG_PATH   Alternative way to specify config path
@@ -92,7 +102,7 @@ function parseArgs(argv: string[]): { configPath?: string; showHelp: boolean; sh
 		const arg = argv[i];
 		if (arg === "--help" || arg === "-h") {
 			showHelp = true;
-		} else if (arg === "--version" || arg === "-v") {
+		} else if (arg === "--version" || arg === "-v" || arg === "version") {
 			showVersion = true;
 		} else if (arg === "--config") {
 			configPath = argv[++i];
@@ -132,6 +142,9 @@ async function main(): Promise<void> {
 
 	if (args.showVersion) {
 		console.log(SERVER_VERSION);
+		console.log(`tag: ${BUILD_INFO.tag}`);
+		console.log(`commit: ${BUILD_INFO.hash}`);
+		console.log(`built: ${BUILD_INFO.date}`);
 		return;
 	}
 
