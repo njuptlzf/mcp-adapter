@@ -8,7 +8,7 @@ Use MCP servers without burning your context window: one ~200-token proxy tool i
 
 ## What this fork changes
 
-- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `2.29.0-0.0.2` (tracks upstream `v2.29.0`).
+- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `2.29.0-0.0.3` (tracks upstream `v2.29.0`).
 - **Pure upstream core** — `index.ts`, `config.ts`, `agent-dir.ts`, etc. run as upstream code; the fork's MCP SDK v1 → v2 migration is isolated in the `adapters/` host layer so upstream merges stay conflict-free.
 - **Universal host** — `adapters/universal-host.ts` impersonates Pi's `ExtensionAPI`, so the same engine runs unchanged behind the `mcp-server` stdio layer for any MCP-compatible agent.
 - **Prebuilt subpath exports** — `@njuptlzf/mcp-adapter/types`, `/config`, and `/metadata-cache` ship compiled `.js` + `.d.ts` from `dist/`.

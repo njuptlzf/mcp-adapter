@@ -1034,6 +1034,13 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
             description: 'Arguments as a JSON object (e.g., { "key": "value" })',
           }),
         ], { description: "Tool arguments as a JSON object, or as a JSON string encoding one" })),
+        arguments: Type.Optional(Type.Union([
+          Type.String({ description: "Alias for `args` — arguments as a JSON string" }),
+          Type.Object({}, {
+            additionalProperties: true,
+            description: "Alias for `args` — arguments as a JSON object",
+          }),
+        ], { description: "Alias for `args`, accepted for MCP clients/agents that emit the outer field name `arguments`" })),
         connect: Type.Optional(Type.String({ description: "Server name to connect (lazy connect + metadata refresh)" })),
         describe: Type.Optional(Type.String({ description: "Tool name to describe (shows parameters)" })),
         instructions: Type.Optional(Type.String({ description: "Server name to show that server's usage instructions" })),
@@ -1049,6 +1056,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       async execute(_toolCallId: string, params: {
         tool?: string;
         args?: string | Record<string, unknown>;
+        arguments?: string | Record<string, unknown>;
         connect?: string;
         describe?: string;
         instructions?: string;
@@ -1083,7 +1091,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           }
           return args as Record<string, unknown>;
         };
-        const parsedArgs = parseArgs(params.args);
+        const parsedArgs = parseArgs(params.args ?? params.arguments);
         const hasGatewayMode = (value: typeof params): boolean =>
           value.tool !== undefined
           || value.connect !== undefined
@@ -1092,7 +1100,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           || value.search !== undefined
           || value.server !== undefined
           || value.action !== undefined;
-        if (!hasGatewayMode(params) && params.args !== undefined) {
+        if (!hasGatewayMode(params) && (params.args ?? params.arguments) !== undefined) {
           throw new Error("Gateway params were nested inside `args`; pass them top-level (for example, mcp({ search: \"...\" }) or mcp({ tool: \"...\", args: {} })).");
         }
 
