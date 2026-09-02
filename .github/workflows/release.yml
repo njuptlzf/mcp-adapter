@@ -1,0 +1,50 @@
+name: Release
+
+# Publish @njuptlzf/mcp-adapter to npm on version tags.
+# Issue #22 — release pipeline: tag -> esbuild bundle -> GitHub Release asset
+#                                 -> npm publish --access public --tag latest
+#
+# Requires a repo secret `NPM_TOKEN` (npmjs.org token with publish rights to
+# the @njuptlzf scope) and a GitHub token with `contents: write` permission
+# (the default GITHUB_TOKEN provides it) for the Release asset.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build public dist (tsc)
+        run: npm run build:public
+
+      - name: Build mcp-server bundle (esbuild)
+        run: npm run build:mcp-server
+
+      - name: Publish to npm
+        run: npm publish --access public --tag latest
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create GitHub Release with asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: mcp-server.mjs
+          generate_release_notes: true
