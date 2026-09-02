@@ -1,6 +1,6 @@
 {
   "name": "@njuptlzf/mcp-adapter",
-  "version": "2.29.0-0.0.2",
+  "version": "2.29.0-0.0.3",
   "description": "Universal MCP (Model Context Protocol) adapter — Pi as a first-class host, plus any MCP-compatible coding agent via the universal mcp-server entry",
   "type": "module",
   "types": "./index.ts",

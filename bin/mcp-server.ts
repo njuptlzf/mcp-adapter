@@ -53,7 +53,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const SERVER_NAME = "mcp-adapter";
-const SERVER_VERSION = "2.29.0-0.0.2";
+const SERVER_VERSION = "2.29.0-0.0.3";
 const GENERIC_GLOBAL_CONFIG_PATH = createUniversalResolver().globalConfigPath();
 
 // ---------------------------------------------------------------------------

@@ -50,6 +50,18 @@ describe("MCP tool call renderer", () => {
     ]);
   });
 
+  it("accepts `arguments` as an alias for `args`", () => {
+    const display = formatMcpProxyToolCallLines({
+      tool: "cf-portal_list_worker_tail_events",
+      arguments: { accountId: "abc" },
+    });
+
+    expect(display).toEqual([
+      "mcp call cf-portal_list_worker_tail_events",
+      '{\n  "accountId": "abc"\n}',
+    ]);
+  });
+
   it("shows proxy discovery operations", () => {
     expect(formatMcpProxyToolCallLines({ search: "tail events", server: "cf-portal", regex: true })).toEqual([
       "mcp search tail events @ cf-portal (regex)",

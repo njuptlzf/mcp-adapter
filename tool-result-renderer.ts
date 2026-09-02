@@ -14,6 +14,7 @@ const plainTheme: RenderTheme = { fg: (_name, text) => text };
 export interface McpProxyToolCallInput {
   tool?: string;
   args?: string | Record<string, unknown>;
+  arguments?: string | Record<string, unknown>;
   connect?: string;
   describe?: string;
   search?: string;
@@ -220,7 +221,8 @@ export function formatMcpProxyToolCallLines(
   if (args.tool) {
     const target = args.server ? `${args.tool} @ ${args.server}` : args.tool;
     const lines = [`mcp call ${target}`];
-    if (args.args) lines.push(formatJsonish(args.args, maxInputChars));
+    const callArgs = args.args ?? args.arguments;
+    if (callArgs) lines.push(formatJsonish(callArgs, maxInputChars));
     return lines;
   }
 
