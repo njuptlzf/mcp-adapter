@@ -411,7 +411,7 @@ function getConfigConflicts(
     .sort((left, right) => left.serverName.localeCompare(right.serverName));
 }
 
-function getConfigSources(overridePath?: string, cwd = process.cwd()): ConfigSourceSpec[] {
+export function getConfigSources(overridePath?: string, cwd = process.cwd()): ConfigSourceSpec[] {
   const userPath = getEffectivePiGlobalConfigPath(overridePath);
   const projectPath = getProjectConfigPath(cwd);
   const projectPiPath = getProjectPiConfigPath(cwd);

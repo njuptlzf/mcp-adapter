@@ -12,7 +12,7 @@ import { isServerInActiveFailureBackoff } from "./failure-backoff.ts";
 import { loadMetadataCache, parseDirectToolSelectors, type MetadataCache } from "./metadata-cache.ts";
 import { createPromptCommand, resolveCachedPrompts } from "./prompts.ts";
 import { logger } from "./logger.ts";
-import { executeAuthComplete, executeAuthStart, executeCall, executeConnect, executeDescribe, executeInstructions, executeList, executeSearch, executeStatus, executeUiMessages } from "./proxy-modes.ts";
+import { executeAuthComplete, executeAuthStart, executeCall, executeConnect, executeDescribe, executeInstructions, executeList, executeReload, executeSearch, executeStatus, executeUiMessages } from "./proxy-modes.ts";
 import { formatTerminalError, getConfigPathFromArgv, normalizeDirectToolInputSchema, truncateAtWord } from "./utils.ts";
 import { createOAuthRuntime, shutdownOAuth } from "./mcp-auth-flow.ts";
 import { createMcpDirectToolCallRenderer, createMcpProxyToolCallRenderer, createMcpScriptToolCallRenderer, createMcpToolResultRenderer, resolveMcpToolRenderOptions } from "./tool-result-renderer.ts";
@@ -1050,7 +1050,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         limit: optionalNumber({ minimum: 1, description: "Maximum search results to return (default: 12)" }),
         offset: optionalNumber({ minimum: 0, description: "Search result offset (default: 0)" }),
         server: Type.Optional(Type.String({ description: "Filter to specific server (also disambiguates tool calls)" })),
-        action: Type.Optional(Type.String({ description: "Action: 'ui-messages', 'auth-start', or 'auth-complete'" })),
+        action: Type.Optional(Type.String({ description: "Action: 'ui-messages', 'auth-start', 'auth-complete', or 'reload' (re-read the watched config and restart the adapter to apply servers registered after startup)" })),
       }),
       renderResult: renderMcpToolResult,
       async execute(_toolCallId: string, params: {
@@ -1139,6 +1139,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         }
         executeOwner?.throwIfInactive();
 
+        if (params.action === "reload") {
+          return executeReload();
+        }
         if (params.action === "ui-messages") {
           return executeUiMessages(state);
         }

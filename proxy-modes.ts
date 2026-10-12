@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata, McpContent } from "./types.ts";
 import { getServerPrefix, isServerDisabled, parseUiPromptHandoff } from "./types.ts";
+import { getConfigWatch } from "./config-watch.ts";
 import { lazyConnect, markKeepAliveAfterConnect, notifyToolMetadataUpdated, updateServerMetadata, updateMetadataCache, getFailureAgeSeconds, updateStatusBar, clearFailure, recordFailure } from "./init.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
 import { combineAbortSignals, isAbortError } from "./runtime-owner.ts";
@@ -389,9 +390,35 @@ export function executeStatus(state: McpExtensionState): ProxyToolResult {
     text += `\nmcp({ server: "name" }) to list tools, mcp({ search: "..." }) to search`;
   }
 
+  const watchNotes = getConfigWatch()?.statusNotes() ?? [];
+  if (watchNotes.length > 0) {
+    text += `\n${watchNotes.join("\n")}`;
+  }
+
   return {
     content: [{ type: "text" as const, text: text.trim() }],
     details: { mode: "status", servers, totalTools, connectedCount, disabledCount },
+  };
+}
+
+/**
+ * mcp({ action: "reload" }) — fork addition for issue #34. The stdio entry point
+ * registered a config watch at startup; this re-reads the watched files through
+ * the full loader, logs the truth, and exits(0) so a supervising client respawns
+ * the adapter with the current config.
+ */
+export function executeReload(): ProxyToolResult {
+  const watch = getConfigWatch();
+  if (!watch) {
+    return {
+      content: [{ type: "text" as const, text: "Config watch is not active in this process — config changes apply on the next session start." }],
+      details: { mode: "reload", error: "watch_inactive" },
+    };
+  }
+  const text = watch.restartWithFreshConfig('Manual reload requested via mcp({ action: "reload" })');
+  return {
+    content: [{ type: "text" as const, text }],
+    details: { mode: "reload", restarting: true },
   };
 }
 
@@ -522,8 +549,9 @@ export function executeDescribe(state: McpExtensionState, toolName: string): Pro
     if (failedMatch) return serverBackoffResult(state, "describe", failedMatch);
     const suggestions = rankSuggestions(state, toolName, 5);
     const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(", ")}` : "";
+    const watchHint = getConfigWatch()?.notFoundHint(Object.keys(state.config.mcpServers).length) ?? "";
     return {
-      content: [{ type: "text" as const, text: `Tool "${toolName}" not found. Use mcp({ search: "..." }) to search.${suggestionText}` }],
+      content: [{ type: "text" as const, text: `Tool "${toolName}" not found. Use mcp({ search: "..." }) to search.${suggestionText}${watchHint}` }],
       details: { mode: "describe", error: "tool_not_found", requestedTool: toolName, suggestions },
     };
   }
@@ -1093,6 +1121,7 @@ export async function executeCall(
     }
     const suggestions = rankSuggestions(state, toolName, 5);
     if (suggestions.length > 0) msg += ` Did you mean: ${suggestions.join(", ")}`;
+    msg += getConfigWatch()?.notFoundHint(Object.keys(state.config.mcpServers).length) ?? "";
     return {
       content: [{ type: "text" as const, text: msg }],
       details: { mode: "call", error: "tool_not_found", requestedTool: toolName, hintServer, suggestions },
