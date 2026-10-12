@@ -325,6 +325,7 @@ export function buildProxyDescription(config: McpConfig): string {
   desc += `  mcp({ action: "ui-messages" })        → Retrieve accumulated messages from completed UI sessions\n`;
   desc += `  mcp({ action: "auth-start", server: "name" })      → Start manual OAuth and get a browser URL\n`;
   desc += `  mcp({ action: "auth-complete", server: "name", args: { redirectUrl: "..." } }) → Complete manual OAuth\n`;
+  desc += `  mcp({ action: "reload" })            → Re-read the watched config and restart the adapter to apply post-startup changes\n`;
   desc += `\nMode: action > tool (call) > connect > describe > instructions > search > server (list) > nothing (status)`;
 
   return desc;

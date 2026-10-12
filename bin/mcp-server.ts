@@ -42,7 +42,8 @@ import { createMcpAdapter } from "../index.ts";
 import { UniversalMcpHost } from "../adapters/universal-host.ts";
 import { ProtocolSamplingForwarder } from "../adapters/protocol-sampling-forwarder.ts";
 import { ProtocolElicitationForwarder } from "../adapters/protocol-elicitation-forwarder.ts";
-import { loadMcpConfig } from "../config.ts";
+import { getConfigSources, loadMcpConfig } from "../config.ts";
+import { getConfigWatch, startConfigWatch } from "../config-watch.ts";
 import { createUniversalResolver } from "../interfaces/agent-paths.ts";
 import type { AgentChannel, FormConfig, UISystem } from "../interfaces/host-types.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -53,7 +54,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const SERVER_NAME = "mcp-adapter";
-const SERVER_VERSION = "2.29.0-0.0.4";
+const SERVER_VERSION = "2.29.0-0.0.5";
 const GENERIC_GLOBAL_CONFIG_PATH = createUniversalResolver().globalConfigPath();
 
 // Build metadata injected at bundle time by scripts/build-mcp-server.mjs via
@@ -84,6 +85,8 @@ Options:
 
 Environment:
   MCP_CONFIG_PATH   Alternative way to specify config path
+  MCP_CONFIG_WATCH  "0"/"off"/"false" disables the auto-restart when watched
+                    config files change after startup (warn-only instead)
 
 Config discovery (in priority order):
   1. --config flag
@@ -155,8 +158,23 @@ async function main(): Promise<void> {
 	const serverCount = Object.keys(config.mcpServers || {}).length;
 	console.error(`[mcp-server] Config loaded: ${serverCount} server(s) configured`);
 
+	// Step 2b: fingerprint the config files the loader reads and watch them for
+	// post-startup changes (issue #34). Consumers may write the manifest only after
+	// the adapter is already running; the engine config is a frozen snapshot, so a
+	// detected change exits(0) and lets the client supervisor respawn fresh.
+	// MCP_CONFIG_WATCH=0|off|false downgrades auto-restart to warn-only.
+	const watchPaths = [...new Set(getConfigSources(args.configPath, process.cwd()).map((source) => source.readPath))];
+	const autoRestart = !["0", "off", "false"].includes((process.env.MCP_CONFIG_WATCH ?? "").trim().toLowerCase());
+	startConfigWatch({
+		paths: watchPaths,
+		overridePath: args.configPath,
+		cwd: process.cwd(),
+		loadedServerCount: serverCount,
+		autoRestart,
+	});
+
 	if (serverCount === 0) {
-		console.error("[mcp-server] Warning: no MCP servers configured. Create a .mcp.json file or use --config <path>.");
+		console.error(`[mcp-server] Warning: no MCP servers configured. Create a .mcp.json file or use --config <path>.${autoRestart ? " Watching config files — the adapter restarts itself when one appears or changes." : ""}`);
 	}
 
 	// Step 3: Install the UPSTREAM engine onto a UniversalMcpHost (Stage 2).
@@ -208,6 +226,13 @@ async function main(): Promise<void> {
 		signal: undefined as AbortSignal | undefined,
 		reload: undefined as (() => Promise<void>) | undefined,
 		samplingProvider: undefined as unknown,
+	};
+
+	// The stdio host has no session-reload loop, so wire ctx.reload (used by the
+	// engine's /mcp enable|disable flows) to the config watch: exit so the next
+	// process reads the config the command just wrote (issue #34).
+	ctx.reload = async () => {
+		getConfigWatch()?.restartWithFreshConfig("Reload requested by host");
 	};
 
 	server.setRequestHandler(CallToolRequestSchema, async (request) => {
