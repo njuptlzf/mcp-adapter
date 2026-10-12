@@ -29,6 +29,13 @@ function createState() {
       ["failed", [{ name: "failed_search" }, { name: "failed_read" }]],
       ["idle", [{ name: "old_search" }]],
     ]),
+    directToolCounts: new Map([
+      ["connected", 1],
+      ["cached", 2],
+      ["failed", 0],
+      ["idle", 1],
+      ["disabled", 3],
+    ]),
     resourceCounts: new Map([["connected", 2], ["cached", 1]]),
     failureTracker: new Map([["failed", Date.now() - 4_000]]),
     statusEvents: undefined,
@@ -36,12 +43,34 @@ function createState() {
 }
 
 describe("MCP status snapshots", () => {
+  it("labels trust-blocked project servers without exposing their definitions", () => {
+    const state = createState();
+    state.blockedProjectServers = new Map([["disabled", {
+      reason: "untrusted",
+      source: { path: "/project/.mcp.json" },
+    }]]);
+
+    const blocked = createMcpStatusSnapshot(state).servers.find(server => server.name === "disabled");
+    expect(blocked).toMatchObject({
+      status: "blocked",
+      blockedReason: expect.stringContaining("blocked by project trust"),
+      disabled: true,
+      toolCount: 0,
+    });
+    expect(blocked).not.toHaveProperty("source");
+
+    const proxyText = executeStatus(state).content[0]?.text ?? "";
+    expect(proxyText).toContain("disabled (blocked by project trust");
+    expect(proxyText).not.toContain("disabled)\n");
+  });
+
   it("projects every status without connecting or exposing configuration", () => {
     const state = createState();
     state.manager.getConnection.mockImplementation((name: string) => {
       if (name === "connected") {
         return {
           status: "connected",
+          listenState: "active",
           tools: [{ name: "search" }],
           resources: [{ name: "doc", uri: "file://doc" }, { name: "other", uri: "file://other" }],
           client: { secret: true },
@@ -61,12 +90,12 @@ describe("MCP status snapshots", () => {
       disabledCount: 1,
     });
     expect(snapshot.servers).toEqual(expect.arrayContaining([
-      { name: "connected", status: "connected", toolCount: 1, resourceCount: 2, disabled: false },
-      { name: "cached", status: "cached", toolCount: 2, resourceCount: 1, disabled: false },
-      expect.objectContaining({ name: "failed", status: "failed", toolCount: 0, disabled: false }),
-      { name: "auth", status: "needs-auth", toolCount: 0, disabled: false },
-      { name: "idle", status: "cached", toolCount: 1, disabled: false },
-      { name: "disabled", status: "disabled", toolCount: 0, disabled: true },
+      { name: "connected", status: "connected", listenState: "active", toolCount: 1, directToolCount: 1, resourceCount: 2, disabled: false },
+      { name: "cached", status: "cached", listenState: "disconnected", toolCount: 2, directToolCount: 2, resourceCount: 1, disabled: false },
+      expect.objectContaining({ name: "failed", status: "failed", toolCount: 0, directToolCount: 0, disabled: false }),
+      { name: "auth", status: "needs-auth", listenState: "disconnected", toolCount: 0, directToolCount: 0, disabled: false },
+      { name: "idle", status: "cached", listenState: "disconnected", toolCount: 1, directToolCount: 1, disabled: false },
+      { name: "disabled", status: "disabled", listenState: "disconnected", toolCount: 0, directToolCount: 0, disabled: true },
     ]));
     const failed = snapshot.servers.find(server => server.name === "failed");
     expect(failed?.failedAgoSeconds).toBeGreaterThanOrEqual(4);
@@ -90,7 +119,55 @@ describe("MCP status snapshots", () => {
       name: "auth",
       status: "needs-auth",
       toolCount: 0,
+      directToolCount: 0,
     });
+  });
+
+  it("reports retained direct registrations during frozen failure backoff", () => {
+    const state = createState();
+    state.directToolCounts.set("failed", 2);
+
+    const snapshot = createMcpStatusSnapshot(state);
+
+    expect(snapshot.servers.find(server => server.name === "failed")).toMatchObject({
+      status: "failed",
+      directToolCount: 2,
+    });
+  });
+
+  it("reports a dropped listen separately from a connected transport", () => {
+    const state = createState();
+    state.manager.getConnection.mockImplementation((name: string) => name === "connected"
+      ? { status: "connected", listenState: "dropped", tools: [{ name: "search" }], resources: [] }
+      : undefined);
+
+    expect(createMcpStatusSnapshot(state).servers.find(server => server.name === "connected")).toMatchObject({
+      status: "connected",
+      listenState: "dropped",
+    });
+    expect(executeStatus(state).content[0]?.text).toContain(
+      "catalog may be stale; will reconcile on next keep-alive or tool use",
+    );
+  });
+
+  it("includes legacy-config migration notices in proxy status", () => {
+    const state = createState();
+    (state as typeof state & { migrationNotices: string[] }).migrationNotices = ["move old mcp.json to mcp-adapter.json"];
+    expect(executeStatus(state).content[0]?.text).toContain("⚠ move old mcp.json to mcp-adapter.json");
+  });
+
+  it("reports an active listen with unconfirmed catalog freshness", () => {
+    const state = createState();
+    state.manager.getConnection.mockImplementation((name: string) => name === "connected"
+      ? { status: "connected", listenState: "active", listenCatalogStale: true, tools: [{ name: "search" }], resources: [] }
+      : undefined);
+
+    expect(createMcpStatusSnapshot(state).servers.find(server => server.name === "connected")).toMatchObject({
+      status: "connected",
+      listenState: "active",
+      catalogStale: true,
+    });
+    expect(executeStatus(state).content[0]?.text).toContain("listen active, catalog may be stale");
   });
 
   it("keeps proxy status and shared snapshots in parity for cached failure states", () => {

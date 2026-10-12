@@ -1,9 +1,9 @@
 import { getToolUiResourceUri } from "./ui-app-bridge-helpers.ts";
 import type { McpExtensionState } from "./state.ts";
 import type { ToolMetadata, McpTool, McpResource, ServerEntry, ToolPrefix } from "./types.ts";
-import { createToolSelectorCandidateIndex, formatToolName, getToolNameCandidates, isToolAllowed, resolveToolPrefix } from "./types.ts";
+import { createToolSelectorCandidateIndex, formatToolName, getToolNameCandidates, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
-import { extractToolUiStreamMode } from "./utils.ts";
+import { extractToolAnnotations, extractToolUiStreamMode } from "./utils.ts";
 import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
 
 export function buildToolMetadata(
@@ -18,7 +18,6 @@ export function buildToolMetadata(
 ): { metadata: ToolMetadata[]; failedTools: string[] } {
   const metadata: ToolMetadata[] = [];
   const failedTools: string[] = [];
-  const seenNames = new Set<string>();
   const effectivePrefix = resolveToolPrefix(definition, prefix);
   const hasToolFilters =
     (Array.isArray(definition.includeTools) && definition.includeTools.length > 0) ||
@@ -86,16 +85,10 @@ export function buildToolMetadata(
     }
 
     const name = formatToolName(tool.name, serverName, effectivePrefix);
-    if (seenNames.has(name)) {
-      continue;
-    }
-
     const uiVisibility = extractUiToolVisibility(tool._meta);
     if (!isUiToolVisibleToModel(uiVisibility)) {
       continue;
     }
-    seenNames.add(name);
-
     let uiResourceUri: string | undefined;
     try {
       uiResourceUri = getToolUiResourceUri({ _meta: tool._meta });
@@ -103,14 +96,17 @@ export function buildToolMetadata(
       failedTools.push(tool.name);
     }
     const uiStreamMode = extractToolUiStreamMode(tool._meta);
+    const annotations = extractToolAnnotations(tool.annotations);
     metadata.push({
       name,
       originalName: tool.name,
       description: tool.description ?? "",
       ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
       ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
       ...(uiVisibility !== undefined ? { uiVisibility } : {}),
       ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),
+      ...(annotations !== undefined ? { annotations } : {}),
     });
   }
 
@@ -122,11 +118,6 @@ export function buildToolMetadata(
       }
 
       const name = formatToolName(baseName, serverName, effectivePrefix);
-      if (seenNames.has(name)) {
-        continue;
-      }
-      seenNames.add(name);
-
       metadata.push({
         name,
         originalName: baseName,
@@ -136,7 +127,11 @@ export function buildToolMetadata(
     }
   }
 
-  return { metadata, failedTools };
+  const ownership = resolveUniqueNameOwnership(metadata, (tool) => tool.name);
+  for (const colliding of ownership.collisions.values()) {
+    failedTools.push(...colliding.map((tool) => tool.originalName));
+  }
+  return { metadata: ownership.unique, failedTools };
 }
 
 export function getToolNames(state: McpExtensionState, serverName: string): string[] {
@@ -157,6 +152,19 @@ export function findToolByName(metadata: ToolMetadata[] | undefined, toolName: s
   if (exact) return exact;
   const normalized = toolName.replace(/-/g, "_");
   return metadata.find(m => m.name.replace(/-/g, "_") === normalized);
+}
+
+/** Whether the schema formatter has field descriptions worth showing beside a compact shape. */
+export function hasSchemaDescriptions(schema: unknown, includeRoot = false): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return false;
+  const s = schema as Record<string, unknown>;
+  if (includeRoot && typeof s.description === "string" && s.description.length > 0) return true;
+  const hasNestedDescription = (child: unknown) => hasSchemaDescriptions(child, true);
+  if (s.properties && typeof s.properties === "object" && !Array.isArray(s.properties)
+    && Object.values(s.properties).some(hasNestedDescription)) return true;
+  return hasNestedDescription(s.items)
+    || (Array.isArray(s.anyOf) && s.anyOf.some(hasNestedDescription))
+    || (Array.isArray(s.oneOf) && s.oneOf.some(hasNestedDescription));
 }
 
 export function formatSchema(schema: unknown, indent = "  "): string {

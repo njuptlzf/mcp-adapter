@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { RESOURCE_MIME_TYPE } from "../ui-app-bridge-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   clients: [] as any[],
@@ -216,10 +217,45 @@ describe("McpServerManager sampling", () => {
     await manager.connect("demo", { command: "node", args: ["server.js"] });
 
     const client = mocks.clients[0];
-    expect(client.options).not.toHaveProperty("capabilities");
+    expect(client.options.capabilities).not.toHaveProperty("sampling");
     expect(client.options.listChanged.tools.onChanged).toBeTypeOf("function");
     expect(client.options.listChanged.resources.onChanged).toBeTypeOf("function");
     expect(client.setRequestHandler).not.toHaveBeenCalled();
+  });
+
+  it("passes the MCP Apps capability through legacy and modern client paths", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+
+    await manager.connect("legacy", { command: "node", args: ["server.js"] });
+    await manager.connect("auto", {
+      command: "node",
+      args: ["server.js"],
+      protocolVersion: "auto",
+    });
+    await manager.connect("pinned", {
+      command: "node",
+      args: ["server.js"],
+      protocolVersion: "2026-07-28",
+    });
+
+    const expectedCapabilities = {
+      extensions: {
+        "io.modelcontextprotocol/ui": {
+          mimeTypes: [RESOURCE_MIME_TYPE],
+        },
+      },
+    };
+    expect(mocks.clients.map(client => client.options.capabilities)).toEqual([
+      expectedCapabilities,
+      expectedCapabilities,
+      expectedCapabilities,
+    ]);
+    expect(mocks.clients.map(client => client.options.versionNegotiation)).toEqual([
+      undefined,
+      { mode: "auto" },
+      { mode: { pin: "2026-07-28" } },
+    ]);
   });
 
   it("refreshes cached lists and ignores notifications from replaced clients", async () => {
@@ -384,6 +420,42 @@ describe("McpServerManager sampling", () => {
     client.getServerCapabilities.mockReturnValue({ resources: {} });
     client.ping = vi.fn(async () => { throw timeout; });
     await expect(manager.refreshTools("demo", connection)).rejects.toBe(timeout);
+  });
+
+  it.each([
+    {
+      kind: "tools" as const,
+      reason: "tools-list-changed",
+      next: [{ name: "fresh_tool", description: "Fresh tool" }],
+    },
+    {
+      kind: "prompts" as const,
+      reason: "prompts-list-changed",
+      next: [{ name: "fresh_prompt", description: "Fresh prompt" }],
+    },
+    {
+      kind: "resources" as const,
+      reason: "resources-list-changed",
+      next: [{ uri: "file://fresh", name: "Fresh resource" }],
+    },
+  ])("retries a failed $kind list-changed publication on the next unchanged refresh", async ({ kind, reason, next }) => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const connection = await manager.connect("demo", { command: "node", args: ["server.js"] });
+    const client = mocks.clients[0];
+    const metadataChanged = vi.fn()
+      .mockImplementationOnce(() => { throw new Error("cache unavailable"); })
+      .mockImplementation(() => undefined);
+    manager.setMetadataListChangedListener(metadataChanged);
+
+    client.options.listChanged[kind].onChanged(null, next);
+    expect(connection[kind]).toEqual(next);
+
+    client.listTools.mockResolvedValueOnce({ tools: connection.tools });
+    await expect(manager.refreshTools("demo", connection)).resolves.toBe("unchanged");
+
+    expect(metadataChanged).toHaveBeenCalledTimes(2);
+    expect(metadataChanged).toHaveBeenNthCalledWith(2, "demo", reason);
   });
 
   it("retries queued metadata publication after a no-tools ping", async () => {

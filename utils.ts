@@ -1,8 +1,53 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawnSync } from "node:child_process";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir, platform } from "node:os";
-import { extname, isAbsolute, join } from "node:path";
-import type { McpConfig, ServerEntry } from "./types.ts";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import stripJsonComments from "strip-json-comments";
+import type { McpConfig, McpToolAnnotations, ServerEntry } from "./types.ts";
+
+export function stripUtf8Bom(raw: string): string {
+  return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+}
+
+export function parseJsonWithComments(raw: string): unknown {
+  return JSON.parse(stripJsonComments(stripUtf8Bom(raw), { trailingCommas: true }));
+}
+
+/** Resolve a candidate only when its real path stays within the real root. */
+export function resolveRealContainedPath(root: string, candidate: string, allowMissing = false): string | null {
+  const contained = resolveContainedPath(root, candidate);
+  if (!contained) return null;
+  const canonical = (path: string): string => {
+    let existing = path;
+    while (allowMissing && !existsSync(existing)) {
+      const parent = dirname(existing);
+      if (parent === existing) throw new Error("No existing path ancestor");
+      existing = parent;
+    }
+    return resolve(realpathSync(existing), relative(existing, path));
+  };
+  try {
+    return resolveContainedPath(canonical(root), canonical(contained));
+  } catch {
+    return null;
+  }
+}
+
+export function resolveContainedPath(root: string, candidate: string): string | null {
+  const resolved = resolve(root, candidate);
+  const rel = relative(root, resolved);
+  return rel === "" || (!rel.startsWith("..") && !rel.startsWith(sep) && !isAbsolute(rel)) ? resolved : null;
+}
+
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableStringify(item)).join(",")}]`;
+  }
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object).sort().map(key => `${JSON.stringify(key)}:${stableStringify(object[key])}`).join(",")}}`;
+}
 
 async function execOpen(pi: ExtensionAPI, target: string, browser?: string, signal?: AbortSignal) {
   const os = platform();
@@ -64,11 +109,28 @@ export async function parallelLimit<T, R>(
 }
 
 export function getConfigPathFromArgv(): string | undefined {
-  const idx = process.argv.indexOf("--mcp-config");
-  if (idx >= 0 && idx + 1 < process.argv.length) {
-    return process.argv[idx + 1];
+  let configPath: string | undefined;
+  for (let index = 2; index < process.argv.length; index++) {
+    const arg = process.argv[index];
+    if (arg === undefined) continue;
+    if (arg === "--") break;
+
+    if (arg === "--mcp-config") {
+      const value = process.argv[index + 1];
+      if (value !== undefined && !value.startsWith("-") && !value.startsWith("@")) {
+        configPath = value;
+        index++;
+      } else {
+        configPath = undefined;
+      }
+      continue;
+    }
+
+    if (arg.startsWith("--mcp-config=")) {
+      configPath = arg.slice("--mcp-config=".length);
+    }
   }
-  return undefined;
+  return configPath;
 }
 
 export function interpolateEnvVars(value: string): string;
@@ -80,7 +142,7 @@ export function interpolateEnvVars(value: string, environment: NodeJS.ProcessEnv
     .replace(/\{env:(\w+)\}/g, (_, name) => environment[name] ?? "");
 }
 
-function getMissingEnvVars(value: string, environment: NodeJS.ProcessEnv): string[] {
+export function getMissingEnvVars(value: string, environment: NodeJS.ProcessEnv = process.env): string[] {
   const missing = new Set<string>();
   for (const match of value.matchAll(/\$\{(\w+)\}|\$env:(\w+)|\{env:(\w+)\}/g)) {
     const name = match[1] ?? match[2] ?? match[3];
@@ -189,10 +251,18 @@ export function resolveServerUrl(definition: Pick<ServerEntry, "url">, environme
 export function resolveConfigPath(value: string | undefined, environment: NodeJS.ProcessEnv = process.env): string | undefined {
   if (value === undefined) return undefined;
 
-  const resolved = interpolateEnvVars(value, environment);
+  return expandHomePath(interpolateEnvVars(value, environment));
+}
+
+/** Expand a leading home-directory marker without interpolating environment variables. */
+export function expandHomePath(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+
+  const resolved = value;
   if (resolved === "~") return homedir();
-  if (resolved.startsWith("~/") || resolved.startsWith("~\\")) {
-    return join(homedir(), resolved.slice(2));
+  if (resolved.startsWith("~/") || (platform() === "win32" && resolved.startsWith("~\\"))) {
+    const suffix = platform() === "win32" ? resolved.slice(2).replace(/[\\/]/g, sep) : resolved.slice(2);
+    return join(homedir(), suffix);
   }
   return resolved;
 }
@@ -276,6 +346,17 @@ export function truncateAtWord(text: string, target: number): string {
   return truncated + "...";
 }
 
+/** Request `_meta` key that lets MCP servers correlate a call with the Pi tool call that made it. */
+export const TOOL_CALL_ID_REQUEST_META_KEY = "pi-mcp-adapter/toolCallId";
+
+export function withToolCallIdMeta(
+  meta: Record<string, unknown> | undefined,
+  toolCallId: string | undefined,
+): Record<string, unknown> | undefined {
+  if (!toolCallId) return meta;
+  return { ...meta, [TOOL_CALL_ID_REQUEST_META_KEY]: toolCallId };
+}
+
 export function normalizeDirectToolInputSchema(schema: unknown): Record<string, unknown> {
   const inputSchema = schema && typeof schema === "object" && !Array.isArray(schema)
     ? schema as Record<string, unknown>
@@ -355,17 +436,48 @@ function assertJsonSerializable(value: unknown, context: string, path = ""): voi
 }
 
 export function formatAuthRequiredMessage(
-  config: Pick<McpConfig, "settings">,
+  config: Pick<McpConfig, "settings" | "mcpServers">,
   serverName: string,
   defaultMessage: string,
 ): string {
+  const auth = config.mcpServers[serverName]?.auth;
+  if (typeof auth === "object") return providerSignInMessage(serverName, auth.provider);
   const template = config.settings?.authRequiredMessage;
   return template ? template.replaceAll("${server}", serverName) : defaultMessage;
+}
+
+/** Servers with `auth.provider` sign in through Pi, never through MCP OAuth. */
+export function providerSignInMessage(serverName: string, provider: string): string {
+  return `MCP server "${serverName}" needs sign-in. Run /login ${provider}, then /mcp-adapter reconnect ${serverName}.`;
+}
+
+/** Why a server must not receive its `auth.provider` token at `url`, or undefined when it may. */
+export function providerAuthUrlError(url: string): string | undefined {
+  const parsed = URL.canParse(url) ? new URL(url) : undefined;
+  if (parsed?.protocol === "https:") return undefined;
+  if (parsed?.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname)) return undefined;
+  return "auth.provider requires an https URL, or http on localhost, 127.0.0.1, or [::1]";
 }
 
 export function formatMcpStatus(config: Pick<McpConfig, "settings">, message: string): string | undefined {
   if (config.settings?.mcpFooterStatus === "off") return undefined;
   return `${config.settings?.showStatusIcon === false ? "MCP: " : "🔌 MCP: "}${message}`;
+}
+
+export function formatMcpFooterStatus(
+  config: Pick<McpConfig, "settings">,
+  enabledCount: number,
+  disabledCount: number,
+  connectedCount: number,
+): string | undefined {
+  if (enabledCount + disabledCount === 0 || config.settings?.mcpFooterStatus === "off") return undefined;
+  const footerStatus = config.settings?.mcpFooterStatus ?? "full";
+  if (footerStatus === "compact") return `MCP ${connectedCount}/${enabledCount}`;
+
+  let status = `${enabledCount} ${enabledCount === 1 ? "server" : "servers"} enabled`;
+  if (connectedCount > 0) status += ` (${connectedCount} connected)`;
+  if (disabledCount > 0) status += ` (${disabledCount} disabled)`;
+  return formatMcpStatus(config, status);
 }
 
 /**
@@ -379,4 +491,19 @@ export function extractToolUiStreamMode(toolMeta: Record<string, unknown> | unde
     return streamMode;
   }
   return undefined;
+}
+
+/**
+ * Keep only the spec tool annotations with the right types. Server and cache
+ * input is untrusted, so a malformed field is dropped instead of failing the tool list.
+ */
+export function extractToolAnnotations(annotations: unknown): McpToolAnnotations | undefined {
+  if (!annotations || typeof annotations !== "object") return undefined;
+  const source = annotations as Record<string, unknown>;
+  const kept: McpToolAnnotations = {};
+  if (typeof source.title === "string") kept.title = source.title;
+  for (const key of ["readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"] as const) {
+    if (typeof source[key] === "boolean") kept[key] = source[key];
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
 }

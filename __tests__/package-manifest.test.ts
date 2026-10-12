@@ -16,12 +16,36 @@ const packageJson = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf
 };
 
 const hostPeerPackages = {
-  "@earendil-works/pi-ai": { peer: "^0.84.1", dev: "0.84.1" },
-  "@earendil-works/pi-tui": { peer: "*", dev: "0.84.1" },
-  "typebox": { peer: "*", dev: "1.3.3" },
+  "@earendil-works/pi-ai": { peer: "^0.84.1 || ^0.85.0 || ^0.86.0 || ^0.87.0 || ^0.99.0 || ^1.0.0", dev: "1.0.0", optional: true },
+  "@earendil-works/pi-tui": { peer: "*", dev: "1.0.0", optional: false },
+  "typebox": { peer: "*", dev: "1.3.27", optional: false },
 };
 
 describe("package.json files", () => {
+  it("keeps the bundled MCP scripting skill available for manual use only", () => {
+    const skill = readFileSync(join(repoRoot, "skills", "mcp-scripting", "SKILL.md"), "utf-8");
+    expect(skill).toMatch(/^disable-model-invocation:\s*true\s*$/m);
+  });
+
+  it("ships every doc section the published README links to", () => {
+    // Fork layout: README.md is the short fork page; the full upstream docs
+    // README (the one that links into docs/*.md) ships as README-src.md.
+    const readme = readFileSync(join(repoRoot, "README-src.md"), "utf-8");
+    const links = [...readme.matchAll(/\]\(([^)]*docs\/[^)]*)\)/g)].map(([, url]) => {
+      const parsed = url!.match(/^https:\/\/github\.com\/nicobailon\/pi-mcp-adapter\/blob\/main\/(docs\/[\w-]+\.md)(?:#([\w-]+))?$/);
+      expect(parsed, url).not.toBeNull();
+      return parsed!;
+    });
+
+    expect(links.length).toBeGreaterThan(0);
+    expect(packageJson.files).toContain("docs");
+    for (const [, path, anchor] of links) {
+      const headings = readFileSync(join(repoRoot, path!), "utf-8").match(/^#+ .+$/gm)!
+        .map((heading) => heading.replace(/^#+ /, "").toLowerCase().replace(/[^\w\- ]/g, "").replaceAll(" ", "-"));
+      if (anchor) expect(headings, `${path}#${anchor}`).toContain(anchor);
+    }
+  });
+
   it("exports source entry points and plain Node host helpers", () => {
     expect(packageJson.types).toBe("./index.ts");
     expect(packageJson.exports).toMatchObject({
@@ -48,10 +72,13 @@ describe("package.json files", () => {
     });
   });
 
-  it("ships public host helpers without install-time prepare", () => {
+  it("ships public host helpers with prepack-built dist", () => {
     const publishedFiles = new Set(packageJson.files ?? []);
 
-    expect(packageJson.scripts?.prepare).toBeUndefined();
+    // Fork overlay: `prepare` rebuilds dist on git-dependency installs and the
+    // fork's CI tracked-dist check relies on that rebuild, so it stays.
+    // Upstream relies on prepack alone.
+    expect(packageJson.scripts?.prepare).toBe("npm run build:public");
     expect(packageJson.scripts?.prepack).toBe("npm run build:public");
     expect(publishedFiles.has("dist")).toBe(true);
     for (const entry of Object.values(packageJson.exports ?? {})) {
@@ -90,22 +117,77 @@ describe("package.json files", () => {
 });
 
 describe("package.json dependency policy", () => {
-  it("treats Pi host packages as optional peers with exact dev pins", () => {
+  it("uses only registry semver dependency specs and no native refresh-lock addon", () => {
+    const dependencyGroups = [
+      packageJson.dependencies ?? {},
+      packageJson.devDependencies ?? {},
+      packageJson.peerDependencies ?? {},
+    ];
+    const registrySemver = /^(?:[~^]?\d+\.\d+\.\d+|\*)(?:\s*\|\|\s*(?:[~^]?\d+\.\d+\.\d+|\*))*$/;
+
+    for (const dependencies of dependencyGroups) {
+      for (const [name, spec] of Object.entries(dependencies)) {
+        if (name === "recheck") {
+          expect(spec).toBe("4.6.0-beta.3");
+          continue;
+        }
+        expect(spec).toMatch(registrySemver);
+        expect(spec).not.toMatch(/^(?:https?:|git(?:\+[^:]+)?:|file:)/);
+      }
+    }
+    expect(packageJson.dependencies?.["fs-native-extensions"]).toBeUndefined();
+  });
+
+  it("declares Pi host packages as peers with exact dev pins", () => {
     const entries = Object.entries(hostPeerPackages);
 
     for (const [name, versions] of entries) {
       expect(packageJson.peerDependencies?.[name]).toBe(versions.peer);
-      expect(packageJson.peerDependenciesMeta?.[name]?.optional).toBe(true);
+      expect(packageJson.peerDependenciesMeta?.[name]?.optional ?? false).toBe(versions.optional);
       expect(packageJson.dependencies?.[name]).toBeUndefined();
       expect(packageJson.devDependencies?.[name]).toBe(versions.dev);
     }
   });
 
+  // Hosts that import the package outside Pi's extension loader resolve peers with Node, so a peer
+  // imported at runtime cannot be optional. Type-only peers stay optional to skip their install.
+  it("marks a Pi host peer optional only when shipped source imports it for types alone", () => {
+    const shippedSources = (packageJson.files ?? [])
+      .filter((file) => /\.(?:ts|js|mjs|cjs)$/.test(file))
+      .map((file) => readFileSync(join(repoRoot, file), "utf-8"));
+
+    for (const [name, versions] of Object.entries(hostPeerPackages)) {
+      const specifier = `["']${name}(?:/[^"']*)?["']`;
+      const runtimeImport = new RegExp([
+        `^\\s*(?:import|export)\\s+(?!type\\s)[^;]*?from\\s+${specifier}`,
+        `^\\s*import\\s+${specifier}`,
+        `\\b(?:import|require)\\(\\s*${specifier}\\s*\\)`,
+      ].join("|"), "m");
+      expect(shippedSources.some((source) => runtimeImport.test(source)), name).toBe(!versions.optional);
+    }
+  });
+
+  it("tests extension APIs against Pi 1.0.0", () => {
+    expect(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"]).toBe("1.0.0");
+  });
+
   it("uses the stable modular SDK v2 client/core packages without the legacy monolithic SDK", () => {
-    expect(packageJson.dependencies?.["@modelcontextprotocol/ext-apps"]).toBeDefined();
+    const packageLock = JSON.parse(readFileSync(join(repoRoot, "package-lock.json"), "utf-8")) as {
+      packages: Record<string, { dev?: boolean }>;
+    };
+    // Fork overlay: @qoder-ai/qoder-agent-sdk (a production dependency of the
+    // universal host) transitively requires the legacy monolithic SDK, and npm
+    // hoists it to the top-level install. Upstream's stricter guarantee (no
+    // production copy at all) does not apply to the fork as long as the only
+    // production copy is the single hoisted path and it stays out of the
+    // fork's own dependency manifest (asserted below).
+    const productionLegacySdk = Object.keys(packageLock.packages).filter(
+      (path) => path.endsWith("node_modules/@modelcontextprotocol/sdk") && !packageLock.packages[path]?.dev,
+    );
+    expect(productionLegacySdk.every((path) => path === "node_modules/@modelcontextprotocol/sdk")).toBe(true);
     expect(packageJson.dependencies?.["@modelcontextprotocol/sdk"]).toBeUndefined();
-    expect(packageJson.dependencies?.["@modelcontextprotocol/client"]).toBe("2.0.0");
-    expect(packageJson.dependencies?.["@modelcontextprotocol/core"]).toBe("2.0.0");
+    expect(packageJson.dependencies?.["@modelcontextprotocol/client"]).toBe("2.3.1");
+    expect(packageJson.dependencies?.["@modelcontextprotocol/core"]).toBe("2.3.1");
     expect(packageJson.devDependencies?.["@modelcontextprotocol/server"]).toBeUndefined();
   });
 });

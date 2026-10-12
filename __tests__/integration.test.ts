@@ -17,12 +17,13 @@ describe("integration: UniversalMcpHost + upstream engine", () => {
 		expect(() => mcpAdapter(host)).not.toThrow();
 	});
 
-	it("registers mcp proxy tool, mcpScript, commands, and mcp-config flag", () => {
+	it("registers mcp proxy tool, commands, and mcp-config flag (mcpScript is opt-in)", () => {
 		const host = new UniversalMcpHost();
 		mcpAdapter(host);
 
 		expect(host.tools.has("mcp")).toBe(true);
-		expect(host.tools.has("mcpScript")).toBe(true);
+		// Upstream #744: mcpScript registers only with settings.scriptMode.
+		expect(host.tools.has("mcpScript")).toBe(false);
 		expect(host.commands.has("mcp")).toBe(true);
 		expect(host.commands.has("mcp-auth")).toBe(true);
 		expect(host.flags.has("mcp-config")).toBe(true);

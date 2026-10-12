@@ -1,6 +1,9 @@
+import { execFile } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createRequestHeadersCommandFetch } from "../request-headers-command.ts";
 
@@ -13,6 +16,28 @@ function commandScript(source: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runWithWindowsTaskkillExitCode(status: number): Promise<Response> {
+  const dir = mkdtempSync(join(tmpdir(), "pi-mcp-request-headers-taskkill-"));
+  const priorPlatform = process.platform;
+  const taskkill = join(dir, priorPlatform === "win32" ? "taskkill.cmd" : "taskkill");
+  writeFileSync(taskkill, priorPlatform === "win32" ? `@exit ${status}\r\n` : `#!/bin/sh\nexit ${status}\n`);
+  chmodSync(taskkill, 0o755);
+  const priorPath = process.env.PATH;
+  process.env.PATH = `${dir}${delimiter}${priorPath ?? ""}`;
+  Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+  try {
+    const script = commandScript('process.stdout.write(JSON.stringify({ "x-derived": "ok" }));\n');
+    const fetch = createRequestHeadersCommandFetch(
+      { command: process.execPath, args: [script] },
+      async () => new Response("ok"),
+    );
+    return await fetch("https://mcp.example.test/mcp");
+  } finally {
+    process.env.PATH = priorPath;
+    Object.defineProperty(process, "platform", { configurable: true, value: priorPlatform });
+  }
 }
 
 const readEnvelope = `
@@ -31,6 +56,54 @@ process.stdin.on("end", () => {
 `;
 
 describe("per-request HTTP header commands", () => {
+  it.each(["init", "Request"])("aborts a streamed response after garbage collection using the %s signal", async mode => {
+    await promisify(execFile)(process.execPath, [
+      "--expose-gc",
+      "--import", "tsx",
+      fileURLToPath(new URL("./fixtures/request-headers-stream.ts", import.meta.url)),
+      mode,
+    ], { timeout: 10_000 });
+  }, 15_000);
+
+  it("uses the init signal override instead of the input Request signal", async () => {
+    const script = commandScript('process.stdout.write("{}");\n');
+    const inputController = new AbortController();
+    const overrideController = new AbortController();
+    const input = new Request("https://mcp.example.test/mcp", { signal: inputController.signal });
+    let forwardedSignal: AbortSignal | null | undefined;
+    const fetch = createRequestHeadersCommandFetch(
+      { command: process.execPath, args: [script] },
+      async (_input, init) => {
+        forwardedSignal = init?.signal;
+        return new Response("ok");
+      },
+    );
+
+    await fetch(input, { signal: overrideController.signal });
+    inputController.abort();
+    expect(forwardedSignal?.aborted).toBe(false);
+    overrideController.abort();
+    expect(forwardedSignal?.aborted).toBe(true);
+  });
+
+  it("detaches the input Request signal for an explicit null override", async () => {
+    const script = commandScript('process.stdout.write("{}");\n');
+    const controller = new AbortController();
+    const input = new Request("https://mcp.example.test/mcp", { signal: controller.signal });
+    let forwardedSignal: AbortSignal | null | undefined;
+    const fetch = createRequestHeadersCommandFetch(
+      { command: process.execPath, args: [script] },
+      async (_input, init) => {
+        forwardedSignal = init?.signal;
+        return new Response("ok");
+      },
+    );
+
+    controller.abort();
+    await fetch(input, { signal: null });
+    expect(forwardedSignal?.aborted).toBe(false);
+  });
+
   it("derives headers from the exact request and preserves existing headers", async () => {
     const script = commandScript(readEnvelope);
     let forwarded: Request | undefined;
@@ -69,6 +142,16 @@ describe("per-request HTTP header commands", () => {
     await fetch("https://mcp.example.test/mcp", { method: "POST", body: "one" });
     await fetch("https://mcp.example.test/mcp", { method: "POST", body: "two" });
     expect(bodies).toEqual(["one", "two"]);
+  });
+
+  it("treats Windows taskkill exit code 128 as successful cleanup", async () => {
+    await expect(runWithWindowsTaskkillExitCode(128)).resolves.toBeInstanceOf(Response);
+  });
+
+  it("preserves real Windows taskkill cleanup failures", async () => {
+    await expect(runWithWindowsTaskkillExitCode(7)).rejects.toThrow(
+      "HTTP request headers command cleanup failed: taskkill exited with code 7",
+    );
   });
 
   it.skipIf(process.platform === "win32")("uses one cleanup process snapshot per stabilization pass", async () => {

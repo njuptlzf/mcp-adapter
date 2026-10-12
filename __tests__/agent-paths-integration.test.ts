@@ -30,9 +30,12 @@ describe("agent path resolution integration", () => {
     }
   });
 
-  it("getConfigSources is intentionally not part of the public surface (resolver is)", async () => {
+  it("getConfigSources is exposed on the fork (bin/config-watch needs it; upstream keeps it private)", async () => {
     const mod = await import("../config.ts");
-    expect((mod as unknown as { getConfigSources?: unknown }).getConfigSources).toBeUndefined();
+    // Fork divergence, intentional since issue #34: `export function getConfigSources`
+    // in config.ts feeds the stdio entry's config watcher. Upstream v2.29.0-0.0.5
+    // still treats it as private.
+    expect(typeof (mod as unknown as { getConfigSources?: unknown }).getConfigSources).toBe("function");
   });
 
   it("default resolver honors MCP_AGENT_DIR and returns the agent-specific path", () => {

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from "
 import { dirname } from "node:path";
 import { getAgentPath } from "./agent-dir.ts";
 import { createHash } from "node:crypto";
+import { isBuiltInAgentPlugin } from "./agent-plugin-provenance.ts";
 import { getToolUiResourceUri } from "./ui-app-bridge-helpers.ts";
 import type {
   CachedPrompt,
@@ -19,20 +20,21 @@ import type {
   ToolMetadata,
   PromptMetadata,
 } from "./types.ts";
-import { createToolSelectorCandidateIndex, formatPromptCommandName, formatToolName, getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix, type ToolPrefix, type ToolSelectorCandidateIndex } from "./types.ts";
+import { createToolSelectorCandidateIndex, formatPromptCommandName, formatToolName, getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership, type ToolPrefix, type ToolSelectorCandidateIndex } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import {
+  extractToolAnnotations,
   extractToolUiStreamMode,
   interpolateEnvRecord,
   interpolateEnvVars,
   resolveBearerToken,
   resolveConfigPath,
   resolveServerUrl,
+  stableStringify,
 } from "./utils.ts";
 import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
 
 const CACHE_VERSION = 1;
-const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type { CachedPrompt, CachedResource, CachedTool, MetadataCache, ServerCacheEntry } from "./types.ts";
 
@@ -54,28 +56,53 @@ export function loadMetadataCache(): MetadataCache | null {
   }
 }
 
-export function saveMetadataCache(cache: MetadataCache): void {
+export function saveMetadataCache(cache: MetadataCache, options: { startupSnapshot?: MetadataCache["servers"] } = {}): void {
+  updateMetadataCacheFile(servers => {
+    const next = { ...servers };
+    for (const [name, entry] of Object.entries(cache.servers)) {
+      // Startup batch: a catalog is written unless disk has a newer catalog for the same config, and keeps output shapes
+      // saved meanwhile. A failure marker is written only if disk is unchanged since the startup snapshot, so it never
+      // destroys what another session wrote during the pass.
+      const disk = servers[name];
+      if (!options.startupSnapshot) {
+        next[name] = entry;
+      } else if (entry.discoveryFailed) {
+        if (JSON.stringify(disk) === JSON.stringify(options.startupSnapshot[name])) next[name] = entry;
+      } else if (disk && !disk.discoveryFailed && disk.configHash === entry.configHash) {
+        if ((disk.cachedAt ?? 0) > entry.cachedAt) continue;
+        const outputShapes = { ...entry.outputShapes, ...keepOutputShapes(disk, entry.configHash, entry.tools) };
+        next[name] = Object.keys(outputShapes).length > 0 ? { ...entry, outputShapes } : entry;
+      } else {
+        next[name] = entry;
+      }
+    }
+    return next;
+  });
+}
+
+/** Reads the cache file, applies one update, and writes the result; an update returning undefined skips the write. */
+function updateMetadataCacheFile(update: (servers: MetadataCache["servers"]) => MetadataCache["servers"] | undefined): void {
   const cachePath = getMetadataCachePath();
   const dir = dirname(cachePath);
   mkdirSync(dir, { recursive: true });
 
-  let merged: MetadataCache = { version: CACHE_VERSION, servers: {} };
+  let servers: MetadataCache["servers"] = {};
   try {
     if (existsSync(cachePath)) {
       const existing = JSON.parse(readFileSync(cachePath, "utf-8")) as MetadataCache;
       if (existing && existing.version === CACHE_VERSION && existing.servers) {
-        merged.servers = { ...existing.servers };
+        servers = { ...existing.servers };
       }
     }
   } catch {
     // Ignore parse errors and proceed with empty cache
   }
 
-  merged.version = CACHE_VERSION;
-  merged.servers = { ...merged.servers, ...cache.servers };
+  const next = update(servers);
+  if (!next) return;
 
   const tmpPath = `${cachePath}.${process.pid}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(merged), "utf-8");
+  writeFileSync(tmpPath, JSON.stringify({ version: CACHE_VERSION, servers: next }), "utf-8");
   renameSync(tmpPath, cachePath);
 }
 
@@ -83,14 +110,17 @@ export function computeServerHash(definition: ServerEntry, environment: NodeJS.P
   // Hash only fields that affect server identity and tool/resource output.
   // Exclude lifecycle, idleTimeout, requestTimeoutMs, debug — those are runtime behavior settings
   // that don't change which tools a server exposes.
+  const isStdio = !!definition.command;
+  const literalEnv = isBuiltInAgentPlugin(definition, "env") || (isStdio && definition.literalEnv === true);
   const identity: Record<string, unknown> = {
-    command: definition.command,
+    command: resolveConfigPath(definition.command, environment),
     args: definition.args,
     socket: resolveConfigPath(definition.socket, environment),
-    env: interpolateEnvRecord(definition.env, environment),
-    cwd: resolveConfigPath(definition.cwd, environment),
+    env: literalEnv ? definition.env : interpolateEnvRecord(definition.env, environment),
+    ...(isStdio ? { inheritEnv: definition.inheritEnv !== false, literalEnv } : {}),
+    cwd: isBuiltInAgentPlugin(definition, "cwd") ? definition.cwd : resolveConfigPath(definition.cwd, environment),
     url: resolveServerUrl(definition, environment),
-    headers: interpolateEnvRecord(definition.headers, environment),
+    headers: isBuiltInAgentPlugin(definition, "headers") ? definition.headers : interpolateEnvRecord(definition.headers, environment),
     requestHeadersCommand: definition.requestHeadersCommand
       ? {
           command: interpolateEnvVars(definition.requestHeadersCommand.command, environment),
@@ -111,10 +141,54 @@ export function computeServerHash(definition: ServerEntry, environment: NodeJS.P
   return createHash("sha256").update(normalized).digest("hex");
 }
 
+/**
+ * Identifies the tool definition an output shape was learned against. A shape is only used or saved while
+ * the tool's description and input schema still match, since a change there can mean a different result.
+ */
+export function outputShapeKey(tool: Pick<CachedTool, "description" | "inputSchema">): string {
+  return stableStringify({ description: tool.description ?? "", inputSchema: tool.inputSchema ?? null });
+}
+
+/**
+ * Saves one tool's observed output shape into its server's cache entry, if the entry matches the running config
+ * and tool. The entry comes from the same read the write replaces, so newer metadata from other Pi processes is kept.
+ */
+export function saveObservedOutput(
+  serverName: string,
+  definition: ServerEntry,
+  toolName: string,
+  toolKey: string,
+  output: NonNullable<ServerCacheEntry["outputShapes"]>[string],
+): void {
+  const configHash = computeServerHash(definition);
+  updateMetadataCacheFile(servers => {
+    const entry = servers[serverName];
+    const cachedTool = entry?.tools?.find(tool => tool.name === toolName);
+    if (!entry || !cachedTool || entry.configHash !== configHash || outputShapeKey(cachedTool) !== toolKey) return undefined;
+    return { ...servers, [serverName]: { ...entry, outputShapes: { ...entry.outputShapes, [toolName]: output } } };
+  });
+}
+
+/** Output shapes to carry into a rewritten cache entry: same config, not private, and only tools whose definition kept its shape key. */
+export function keepOutputShapes(
+  previous: ServerCacheEntry | undefined,
+  configHash: string,
+  tools: CachedTool[],
+): ServerCacheEntry["outputShapes"] {
+  if (!previous?.outputShapes || previous.configHash !== configHash || previous.cacheScope === "private") return undefined;
+  const kept = Object.entries(previous.outputShapes).filter(([toolName]) => {
+    const before = previous.tools?.find(tool => tool.name === toolName);
+    const after = tools.find(tool => tool.name === toolName);
+    return before !== undefined && after !== undefined && outputShapeKey(before) === outputShapeKey(after);
+  });
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
+
 export function isServerCacheValid(
   entry: ServerCacheEntry,
   definition: ServerEntry,
-  maxAgeMs: number = CACHE_MAX_AGE_MS,
+  // 0 means no age limit: without a server-declared TTL, an entry stays valid until the next connect refreshes it.
+  maxAgeMs: number = 0,
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
   let configHash: string;
@@ -125,6 +199,9 @@ export function isServerCacheValid(
   }
   if (!entry || entry.configHash !== configHash) return false;
   if (!entry.cachedAt || typeof entry.cachedAt !== "number") return false;
+  // The persistent cache is not partitioned by authorization context.
+  if (entry.cacheScope === "private") return false;
+  if (entry.discoveryFailed) return false;
   const declaredTtlMs = entry.ttlMs;
   if (typeof declaredTtlMs === "number" && Number.isSafeInteger(declaredTtlMs) && declaredTtlMs >= 0) {
     if (declaredTtlMs === 0) return false;
@@ -200,7 +277,6 @@ export function reconstructToolMetadata(
   sharedSelectorCandidateIndex?: ToolSelectorCandidateIndex,
 ): ToolMetadata[] {
   const metadata: ToolMetadata[] = [];
-  const seenNames = new Set<string>();
   const effectivePrefix = resolveToolPrefix(definition, prefix);
   const hasToolFilters =
     (Array.isArray(definition.includeTools) && definition.includeTools.length > 0) ||
@@ -221,19 +297,17 @@ export function reconstructToolMetadata(
     }
 
     const name = formatToolName(tool.name, serverName, effectivePrefix);
-    if (seenNames.has(name)) {
-      continue;
-    }
-    seenNames.add(name);
-
+    const annotations = extractToolAnnotations(tool.annotations);
     metadata.push({
       name,
       originalName: tool.name,
       description: tool.description ?? "",
       ...(tool.inputSchema !== undefined ? { inputSchema: tool.inputSchema } : {}),
+      ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}),
       ...(tool.uiResourceUri !== undefined ? { uiResourceUri: tool.uiResourceUri } : {}),
       ...(tool.uiVisibility !== undefined ? { uiVisibility: tool.uiVisibility } : {}),
       ...(tool.uiStreamMode !== undefined ? { uiStreamMode: tool.uiStreamMode } : {}),
+      ...(annotations !== undefined ? { annotations } : {}),
     });
   }
 
@@ -246,11 +320,6 @@ export function reconstructToolMetadata(
       }
 
       const name = formatToolName(baseName, serverName, effectivePrefix);
-      if (seenNames.has(name)) {
-        continue;
-      }
-      seenNames.add(name);
-
       metadata.push({
         name,
         originalName: baseName,
@@ -260,7 +329,7 @@ export function reconstructToolMetadata(
     }
   }
 
-  return metadata;
+  return resolveUniqueNameOwnership(metadata, (tool) => tool.name).unique;
 }
 
 export function createCachedToolSelectorCandidateIndex(
@@ -294,13 +363,16 @@ export function serializeTools(tools: McpTool[]): CachedTool[] {
       const uiResourceUri = tryGetToolUiResourceUri(t);
       const uiVisibility = extractUiToolVisibility(t._meta);
       const uiStreamMode = extractToolUiStreamMode(t._meta);
+      const annotations = extractToolAnnotations(t.annotations);
       return {
         name: t.name,
         ...(t.description !== undefined ? { description: t.description } : {}),
         ...(t.inputSchema !== undefined ? { inputSchema: t.inputSchema } : {}),
+        ...(t.outputSchema !== undefined ? { outputSchema: t.outputSchema } : {}),
         ...(uiResourceUri !== undefined ? { uiResourceUri } : {}),
         ...(uiVisibility !== undefined ? { uiVisibility } : {}),
         ...(uiStreamMode !== undefined ? { uiStreamMode } : {}),
+        ...(annotations !== undefined ? { annotations } : {}),
       };
     });
 }
@@ -358,19 +430,6 @@ export function reconstructPromptMetadata(
       arguments: args,
     };
   });
-}
-
-function stableStringify(value: unknown): string {
-  if (value === null || value === undefined || typeof value !== "object") {
-    const serialized = JSON.stringify(value);
-    return serialized === undefined ? "undefined" : serialized;
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(v => stableStringify(v)).join(",")}]`;
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
 }
 
 function tryGetToolUiResourceUri(tool: McpTool): string | undefined {

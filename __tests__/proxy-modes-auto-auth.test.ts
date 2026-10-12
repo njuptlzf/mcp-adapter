@@ -519,7 +519,7 @@ describe("proxy auto auth", () => {
     const result = await inFlight;
 
     expect(manager.getRequestOptions).toHaveBeenCalledWith("demo", controller.signal);
-    expect(connection.client.callTool).toHaveBeenCalledWith({ name: "search", arguments: {}, _meta: undefined }, requestOptions);
+    expect(connection.client.callTool).toHaveBeenCalledWith({ name: "search", arguments: {}, _meta: undefined }, { ...requestOptions, onprogress: expect.any(Function), resetTimeoutOnProgress: true });
     expect(result.details).toMatchObject({ error: "aborted", message: "request aborted" });
     expect(result.content[0].text).toContain("request aborted");
   });
@@ -618,6 +618,39 @@ describe("proxy auto auth", () => {
     expect(fallbackCall).not.toHaveBeenCalled();
   });
 
+  it("uses the server's prefix override to scope a cold candidate call", async () => {
+    const { executeCall } = await import("../proxy-modes.ts");
+    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "called" }] }));
+    mocks.lazyConnect.mockImplementation(async (state: any, serverName: string) => {
+      state.toolMetadata.set(serverName, [
+        { name: "mcp__demo_search", originalName: "search", description: "Search" },
+      ]);
+      return true;
+    });
+    const state = {
+      config: {
+        settings: { toolPrefix: "server" },
+        mcpServers: { demo: { command: "demo", toolPrefix: "mcp" } },
+      },
+      toolMetadata: new Map(),
+      manager: {
+        getConnection: () => ({ status: "connected", client: { callTool } }),
+        getRequestOptions: () => undefined,
+        touch: vi.fn(),
+        incrementInFlight: vi.fn(),
+        decrementInFlight: vi.fn(),
+      },
+      failureTracker: new Map(),
+      completedUiSessions: [],
+    } as any;
+
+    await expect(executeCall(state, "mcp__demo_search", {})).resolves.toMatchObject({
+      details: { server: "demo", tool: "search", canonicalTool: "mcp__demo_search" },
+    });
+    expect(mocks.lazyConnect).toHaveBeenCalledWith(state, "demo", undefined);
+    expect(callTool).toHaveBeenCalledOnce();
+  });
+
   it("fails closed when lazy metadata has duplicate normalized tool names", async () => {
     const { executeCall } = await import("../proxy-modes.ts");
     const callTool = vi.fn();
@@ -710,8 +743,8 @@ describe("proxy auto auth", () => {
     expect(client.listTools).toHaveBeenCalledWith(undefined, { timeout: 5000 });
     expect(client.listResources).toHaveBeenCalledTimes(1);
     expect(client.listResources).toHaveBeenCalledWith(undefined, { timeout: 5000 });
-    expect(client.callTool).toHaveBeenNthCalledWith(1, { name: "search", arguments: { q: "one" }, _meta: undefined }, { timeout: 5000 });
-    expect(client.callTool).toHaveBeenNthCalledWith(2, { name: "search", arguments: { q: "two" }, _meta: undefined }, { timeout: 5000 });
+    expect(client.callTool).toHaveBeenNthCalledWith(1, { name: "search", arguments: { q: "one" }, _meta: undefined }, { timeout: 5000, onprogress: expect.any(Function), resetTimeoutOnProgress: true });
+    expect(client.callTool).toHaveBeenNthCalledWith(2, { name: "search", arguments: { q: "two" }, _meta: undefined }, { timeout: 5000, onprogress: expect.any(Function), resetTimeoutOnProgress: true });
     expect(first.content[0].text).toContain("ok");
     expect(second.content[0].text).toContain("ok");
   });

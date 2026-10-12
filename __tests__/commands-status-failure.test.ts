@@ -13,6 +13,23 @@ vi.mock("../init.ts", () => ({
 }));
 
 describe("MCP status failure reasons", () => {
+  it("shows trust-blocked servers with the approval action instead of /mcp enable", async () => {
+    const { showStatus } = await import("../commands.ts");
+    const ui = { notify: vi.fn() };
+    await showStatus({
+      config: { mcpServers: { demo: { command: "node", disabled: true } } },
+      blockedProjectServers: new Map([["demo", { reason: "approval-required", source: { path: "/project/.mcp.json" } }]]),
+      manager: { getConnection: () => undefined },
+      toolMetadata: new Map(),
+      failureTracker: new Map(),
+    } as any, { hasUI: true, ui } as any);
+
+    const output = ui.notify.mock.calls[0][0];
+    expect(output).toContain("demo: blocked: project server approval required");
+    expect(output).toContain("approve it in a trusted interactive session");
+    expect(output).not.toContain("/mcp-adapter enable demo");
+  });
+
   it("includes the bounded failure reason as a safe single-line status", async () => {
     const { showStatus } = await import("../commands.ts");
     const ui = { notify: vi.fn() };
@@ -21,13 +38,19 @@ describe("MCP status failure reasons", () => {
       manager: { getConnection: () => undefined },
       toolMetadata: new Map(),
       failureTracker: new Map([["demo", Date.now()]]),
+      migrationNotices: ["move old mcp.json to mcp-adapter.json"],
     } as any, { hasUI: true, ui } as any);
 
     expect(ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("demo: failed 7s ago — stderr says server failed"),
       "info",
     );
-    expect(ui.notify.mock.calls[0][0]).not.toContain("https://secret.invalid/status");
+    const output = ui.notify.mock.calls[0][0];
+    expect(output).toContain(".mcp.json for this project/team");
+    expect(output).toContain("~/.config/mcp/mcp.json for all projects");
+    expect(output).toContain("mcp-adapter.json files hold compatibility imports and adapter-specific overrides");
+    expect(output).toContain("⚠ move old mcp.json to mcp-adapter.json");
+    expect(output).not.toContain("https://secret.invalid/status");
   });
 
   it("uses known metadata during reconnect filtering", async () => {
@@ -46,7 +69,7 @@ describe("MCP status failure reasons", () => {
           my_2d_server: { command: "escaped" },
         },
       },
-      manager: { close: vi.fn(async () => {}), connect: vi.fn(async () => connection) },
+      manager: { getConnection: vi.fn(() => undefined), connect: vi.fn(async () => connection) },
       toolMetadata: new Map([["my_2d_server", [{ name: "my_2d_server_search_records", originalName: "search_records", description: "Other" }]]]),
       promptMetadata: new Map(),
       promptMetadataLive: new Set(),
@@ -64,7 +87,7 @@ describe("MCP status failure reasons", () => {
     await reconnectServer({
       config: { settings: {}, mcpServers: { demo: { command: "node" } } },
       manager: {
-        close: vi.fn(async () => {}),
+        getConnection: vi.fn(() => undefined),
         connect: vi.fn(async () => {
           throw new Error("stderr \x1b]52;c;clipboard-secret\x07server failed");
         }),

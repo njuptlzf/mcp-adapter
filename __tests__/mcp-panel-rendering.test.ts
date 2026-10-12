@@ -142,6 +142,30 @@ describe("mcp-panel rendering", () => {
     expect(createFailedPanel("idle", "should not appear", 60)).not.toContain("should not appear");
   });
 
+  it("shows the server description, or the first instructions line, when a server is expanded", () => {
+    const render = (description: string | undefined): { collapsed: string; expanded: string } => {
+      const config = createConfig();
+      if (description) config.mcpServers.atlassian!.description = description;
+      const cache = createCache(config);
+      cache.servers.atlassian!.instructions = "\nJira and Confluence tools.\nCall search first.";
+      const panel = createMcpPanel(config, cache, new Map(), createCallbacks(), { requestRender: () => {} }, () => {});
+      const collapsed = stripAnsi(panel.render(120).join("\n"));
+      panel.handleInput("\r");
+      const expanded = stripAnsi(panel.render(120).join("\n"));
+      panel.dispose();
+      return { collapsed, expanded };
+    };
+
+    const configured = render("Atlassian Cloud");
+    expect(configured.collapsed).not.toContain("Atlassian Cloud");
+    expect(configured.expanded).toContain("Atlassian Cloud");
+    expect(configured.expanded).not.toContain("Jira and Confluence tools.");
+
+    const fallback = render(undefined).expanded;
+    expect(fallback).toContain("Jira and Confluence tools.");
+    expect(fallback).not.toContain("Call search first.");
+  });
+
   it("updates direct counts and token totals after each toggle", () => {
     const config: McpConfig = {
       mcpServers: {
@@ -224,6 +248,71 @@ describe("mcp-panel rendering", () => {
     expect(snapshots.at(-1)).toContain("1/2  ~19");
     expect(snapshots.at(-1)).toContain("1 direct  ~19 tokens");
     panel.dispose();
+  });
+
+  it("does not report cached data when reconnect returns no cache entry", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        example: { command: "mock" },
+      },
+    };
+    let connectionStatus: "idle" | "connected" = "idle";
+    const callbacks: McpPanelCallbacks = {
+      ...createCallbacks(),
+      reconnect: async () => {
+        connectionStatus = "connected";
+        return true;
+      },
+      getConnectionStatus: () => connectionStatus,
+      refreshCacheAfterReconnect: () => null,
+    };
+    const panel = createMcpPanel(config, null, new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\x12");
+    await Promise.resolve();
+
+    expect(stripAnsi(panel.render(100).join("\n"))).toContain("example  (not cached)");
+    panel.dispose();
+  });
+
+  it("shows zero-TTL metadata after reconnect but not when the panel is reopened", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        example: { command: "mock" },
+      },
+    };
+    const cache: MetadataCache = { version: 1, servers: {} };
+    const refreshedEntry = {
+      configHash: computeServerHash(config.mcpServers.example),
+      cachedAt: Date.now(),
+      ttlMs: 0,
+      tools: [{ name: "search" }],
+      resources: [],
+    };
+    let connectionStatus: "idle" | "connected" = "idle";
+    const callbacks: McpPanelCallbacks = {
+      ...createCallbacks(),
+      reconnect: async () => {
+        connectionStatus = "connected";
+        return true;
+      },
+      getConnectionStatus: () => connectionStatus,
+      refreshCacheAfterReconnect: () => refreshedEntry,
+    };
+    const panel = createMcpPanel(config, cache, new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\x12");
+    await Promise.resolve();
+
+    const currentOutput = stripAnsi(panel.render(100).join("\n"));
+    expect(currentOutput).toContain("example  0/1");
+    expect(currentOutput).not.toContain("(not cached)");
+    panel.dispose();
+
+    const reopenedPanel = createMcpPanel(config, cache, new Map(), callbacks, { requestRender: () => {} }, () => {});
+    const reopenedOutput = stripAnsi(reopenedPanel.render(100).join("\n"));
+    expect(reopenedOutput).toContain("example  (not cached)");
+    reopenedPanel.dispose();
   });
 
   it("keeps dirty changes and closes when Keep & Close is confirmed", () => {

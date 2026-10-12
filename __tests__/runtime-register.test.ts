@@ -1,7 +1,18 @@
+import { registerMcpProtocol } from "../runtime-protocol.ts";
+const testProtocols = new WeakMap<object, ReturnType<typeof registerMcpProtocol>>();
+const testProtocolSession = (pi: any, name: string) => {
+  let protocol = testProtocols.get(pi);
+  if (!protocol) {
+    protocol = registerMcpProtocol(pi, { namespace: "demo", requests: ["demo/list"], streams: ["demo/stream"], notifications: ["notifications/demo/event"] });
+    testProtocols.set(pi, protocol);
+  }
+  return protocol.connect(name);
+};
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   initializeMcp: vi.fn(),
+  lazyConnect: vi.fn(),
   updateStatusBar: vi.fn(),
   flushMetadataCache: vi.fn(),
   notifyToolMetadataUpdated: vi.fn(),
@@ -10,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   shutdownOAuth: vi.fn().mockResolvedValue(undefined),
   loadMcpConfig: vi.fn(() => ({ mcpServers: {} })),
   cloneMcpConfig: vi.fn((config: unknown) => structuredClone(config)),
+  discoverConfiguredClaudePluginSkills: vi.fn(() => []),
+  resolveConfiguredClaudePluginMcp: vi.fn((config: unknown) => structuredClone(config)),
   loadMetadataCache: vi.fn(() => null),
   buildProxyDescription: vi.fn(() => "MCP gateway"),
   createDirectToolExecutor: vi.fn(() => vi.fn()),
@@ -44,6 +57,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../init.ts", () => ({
   initializeMcp: mocks.initializeMcp,
+  lazyConnect: mocks.lazyConnect,
   updateStatusBar: mocks.updateStatusBar,
   flushMetadataCache: mocks.flushMetadataCache,
   notifyToolMetadataUpdated: mocks.notifyToolMetadataUpdated,
@@ -58,6 +72,10 @@ vi.mock("../mcp-auth-flow.ts", () => ({
 vi.mock("../config.ts", () => ({
   loadMcpConfig: mocks.loadMcpConfig,
   cloneMcpConfig: mocks.cloneMcpConfig,
+  discoverConfiguredClaudePluginSkills: mocks.discoverConfiguredClaudePluginSkills,
+  resolveConfiguredClaudePluginMcp: mocks.resolveConfiguredClaudePluginMcp,
+  getLegacyMcpMigrationNotices: vi.fn(() => []),
+  setPiMcpConfigEnabled: vi.fn(),
   writeProjectServerDisabledOverride: mocks.writeProjectServerDisabledOverride,
 }));
 
@@ -65,11 +83,16 @@ vi.mock("../metadata-cache.ts", () => ({
   loadMetadataCache: mocks.loadMetadataCache,
 }));
 
-vi.mock("../direct-tools.ts", () => ({
+vi.mock("../direct-tool-surface.ts", () => ({
   buildProxyDescription: mocks.buildProxyDescription,
-  createDirectToolExecutor: mocks.createDirectToolExecutor,
+  getLargeDirectToolsAdvisory: vi.fn(() => undefined),
   getMissingConfiguredDirectToolServers: mocks.getMissingConfiguredDirectToolServers,
+  prepareDirectToolArguments: vi.fn((_schema: unknown, args: unknown) => args),
   resolveDirectTools: mocks.resolveDirectTools,
+}));
+
+vi.mock("../direct-tools.ts", () => ({
+  createDirectToolExecutor: mocks.createDirectToolExecutor,
 }));
 
 vi.mock("../commands.ts", () => ({
@@ -158,6 +181,7 @@ function createPi(events = createEventBus()) {
       unregisterTool: vi.fn(() => true),
       registerFlag: vi.fn(),
       registerCommand: vi.fn(),
+      registerShortcut: vi.fn(),
       on: vi.fn((event: string, handler: (...args: any[]) => unknown) => {
         handlers.set(event, handler);
       }),
@@ -453,4 +477,95 @@ describe("runtime MCP server registration", () => {
       persisted: false,
     });
   });
+
+  async function connectionFixture() {
+    const state = createState();
+    const definition = { command: "test-server" };
+    state.config.mcpServers = { demo: definition, disabled: { command: "disabled", disabled: true } };
+    const connection = { status: "connected", definition, client: {}, transport: {}, inFlight: 0, lastUsedAt: 0 };
+    state.manager.getConnection.mockReturnValue(connection);
+    mocks.loadMcpConfig.mockReturnValue(state.config);
+    mocks.initializeMcp.mockImplementation(async (_pi, _ctx, owner) => { state.owner = owner; return state; });
+    mocks.lazyConnect.mockResolvedValue(true);
+    const module = await import("../index.ts");
+    const events = createEventBus();
+    const adapter = createPi(events);
+    const consumer = createPi(events);
+    module.default(adapter.api);
+    return { state, connection, module, adapter, consumer, async start() {
+      await adapter.handlers.get("session_start")?.({}, {});
+      await settle();
+    } };
+  }
+
+  it("connects through distinct extension wrappers without adding model tools or eager connections", async () => {
+    const f = await connectionFixture();
+    await expect(testProtocolSession(f.consumer.api, "demo")).rejects.toThrow("active Pi session");
+    expect(mocks.lazyConnect).not.toHaveBeenCalled();
+    await f.start();
+    const tools = f.adapter.api.registerTool.mock.calls.length;
+    const first = await testProtocolSession(f.consumer.api, "demo");
+    const second = await testProtocolSession(f.consumer.api, "demo");
+    expect(first).not.toHaveProperty("client");
+    expect(first).not.toHaveProperty("transport");
+    expect(second).not.toBe(first);
+    expect(mocks.lazyConnect).toHaveBeenCalledWith(f.state, "demo", f.state.owner.signal);
+    expect(f.adapter.api.registerTool.mock.calls.length).toBe(tools);
+    first.close();
+    expect(second.signal.aborted).toBe(false);
+    await f.adapter.handlers.get("session_shutdown")?.({});
+    expect(second.signal.aborted).toBe(true);
+    await expect(testProtocolSession(f.consumer.api, "demo")).rejects.toThrow("active Pi session");
+  });
+
+  it.each(["missing", "disabled", "toString", "__proto__"])("rejects unavailable configured server %s before connecting", async name => {
+    const f = await connectionFixture();
+    await f.start();
+    await expect(testProtocolSession(f.consumer.api, name)).rejects.toThrow("not configured or enabled");
+    expect(mocks.lazyConnect).not.toHaveBeenCalled();
+    await f.adapter.handlers.get("session_shutdown")?.({});
+  });
+
+  it("rejects authentication/connect failures without returning a session", async () => {
+    const f = await connectionFixture();
+    await f.start();
+    mocks.lazyConnect.mockResolvedValue(false);
+    await expect(testProtocolSession(f.consumer.api, "demo")).rejects.toThrow("could not connect");
+    expect(f.connection).not.toHaveProperty("activeProtocolOperations");
+    await f.adapter.handlers.get("session_shutdown")?.({});
+  });
+
+  it.each(["shutdown", "session replacement", "config replacement"])("rejects a connection completed after %s", async mode => {
+    const f = await connectionFixture();
+    await f.start();
+    let resolve!: (value: boolean) => void;
+    mocks.lazyConnect.mockImplementation(() => new Promise<boolean>(r => { resolve = r; }));
+    const pending = testProtocolSession(f.consumer.api, "demo");
+    const rejected = expect(pending).rejects.toThrow();
+    await vi.waitFor(() => expect(mocks.lazyConnect).toHaveBeenCalled());
+    if (mode === "shutdown") await f.adapter.handlers.get("session_shutdown")?.({});
+    else if (mode === "session replacement") await f.start();
+    else f.state.config.mcpServers.demo = { command: "replacement" };
+    resolve(true);
+    await rejected;
+    expect(f.connection).not.toHaveProperty("activeProtocolOperations");
+    await f.adapter.handlers.get("session_shutdown")?.({});
+  });
+
+
+  it("keeps simultaneous Pi sessions independent", async () => {
+    const first = await connectionFixture();
+    await first.start();
+    const second = await connectionFixture();
+    await second.start();
+    const a = await testProtocolSession(first.consumer.api, "demo");
+    const b = await testProtocolSession(second.consumer.api, "demo");
+    expect(a).not.toBe(b);
+    await first.adapter.handlers.get("session_shutdown")?.({});
+    expect(a.signal.aborted).toBe(true);
+    expect(b.signal.aborted).toBe(false);
+    await second.adapter.handlers.get("session_shutdown")?.({});
+    expect(b.signal.aborted).toBe(true);
+  });
+
 });

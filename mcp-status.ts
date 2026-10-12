@@ -7,6 +7,7 @@ import {
   type McpStatusSnapshot,
 } from "./types.ts";
 import { getFailureAgeSeconds, isServerInActiveFailureBackoff } from "./failure-backoff.ts";
+import { describeProjectServerBlock } from "./project-server-trust.ts";
 
 /** Build a sanitized snapshot without connecting or querying any MCP server. */
 export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnapshot {
@@ -24,12 +25,21 @@ export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnap
     const activeFailure = !disabled && isServerInActiveFailureBackoff(state, name);
     const metadata = disabled || activeFailure ? undefined : state.toolMetadata.get(name);
     const toolCount = metadata?.length ?? (connection?.status === "connected" ? connection.tools.length : 0);
+    // This is the last active direct-tool sync result, rather than a fresh
+    // resolution. A frozen direct surface may intentionally retain its
+    // registrations while the server is in failure backoff.
+    const directToolCount = disabled ? 0 : state.directToolCounts?.get(name) ?? 0;
     const resourceCount = disabled || activeFailure
       ? undefined
       : state.resourceCounts?.get(name) ?? (connection?.status === "connected" ? connection.resources.length : undefined);
 
     let status: McpServerStatusSnapshot["status"] = "not-connected";
-    if (disabled) {
+    const block = state.blockedProjectServers?.get(name);
+    const blockedReason = block ? describeProjectServerBlock(block.reason) : undefined;
+    if (block) {
+      status = "blocked";
+      disabledCount++;
+    } else if (disabled) {
       status = "disabled";
       disabledCount++;
     } else if (connection?.status === "connected") {
@@ -48,10 +58,14 @@ export function createMcpStatusSnapshot(state: McpExtensionState): McpStatusSnap
     servers.push({
       name,
       status,
+      listenState: connection?.status === "connected" ? connection.listenState : "disconnected",
       toolCount,
+      directToolCount,
+      ...(connection?.status === "connected" && connection.listenCatalogStale ? { catalogStale: true } : {}),
       ...(resourceCount !== undefined ? { resourceCount } : {}),
       ...(status === "failed" && failedAgoSeconds !== null ? { failedAgoSeconds } : {}),
       disabled,
+      ...(blockedReason ? { blockedReason } : {}),
     });
   }
 

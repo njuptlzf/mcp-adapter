@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DIRECT_TOOLS_ADVISORY_THRESHOLD, buildProxyDescription, resolveDirectTools } from "../direct-tools.ts";
+import { DIRECT_TOOLS_ADVISORY_THRESHOLD, buildProxyDescription, getLargeDirectToolsAdvisory, resolveDirectTools } from "../direct-tools.ts";
 import {
   computeServerHash,
   getMissingConfiguredDirectToolServers,
@@ -13,6 +13,7 @@ import { formatToolName } from "../types.ts";
 import type { McpConfig } from "../types.ts";
 import { reconstructToolMetadata } from "../metadata-cache.ts";
 import { updateServerMetadata } from "../init.ts";
+import { markBuiltInAgentPlugin } from "../agent-plugin-provenance.ts";
 
 const originalHashEnv = {
   MCP_HASH_CWD: process.env.MCP_HASH_CWD,
@@ -58,6 +59,11 @@ describe("formatToolName", () => {
 });
 
 describe("buildProxyDescription", () => {
+  it("points to mcpScript only when it is registered", () => {
+    expect(buildProxyDescription({ mcpServers: {} }, true)).toContain("Use mcpScript");
+    expect(buildProxyDescription({ mcpServers: {}, settings: { scriptMode: true } }, false)).not.toContain("mcpScript");
+  });
+
   it("documents the ui-messages action", () => {
     const config: McpConfig = {
       mcpServers: {
@@ -73,7 +79,6 @@ describe("buildProxyDescription", () => {
     expect(description).toContain('mcp({ action: "ui-messages" })');
     expect(description).toContain("Retrieve accumulated messages from completed UI sessions");
     expect(description).toContain("server status, tool search/describe, auth, and single MCP tool calls");
-    expect(description).toContain("When one request needs several MCP calls with logic between them, use mcpScript.");
     expect(description).toContain("Search MCP tools by name/description");
     expect(description).toContain("Non-MCP Pi tools should be called directly, not through mcp.");
     expect(description).not.toContain("MCP + pi");
@@ -134,7 +139,7 @@ describe("buildProxyDescription", () => {
     const description = buildProxyDescription(config);
 
     expect(description).toContain("Servers: demo\n");
-    expect(description).toContain("Disabled servers (enable with /mcp enable <server> and /reload): parked");
+    expect(description).toContain("Disabled servers (enable with /mcp-adapter enable <server> and /reload): parked");
   });
 
   it("omits the Servers line entirely when no servers are configured", () => {
@@ -154,6 +159,28 @@ describe("metadata cache hashing", () => {
     const modern = computeServerHash({ command: "node", protocolVersion: "2026-07-28" });
 
     expect(new Set([legacy, automatic, modern]).size).toBe(3);
+  });
+
+  it("invalidates cached stdio tools when inheritEnv or literalEnv changes", () => {
+    const definition = { command: "node", env: { MODE: "${MODE}" } };
+    const environment = { MODE: "expanded" };
+    const entry = { configHash: computeServerHash(definition, environment), cachedAt: Date.now(), tools: [], resources: [] };
+    const literal = { ...definition, literalEnv: true };
+    const plugin = markBuiltInAgentPlugin({ ...definition }, ["env"]);
+
+    expect(isServerCacheValid(entry, { ...definition, inheritEnv: true, literalEnv: false }, undefined, environment)).toBe(true);
+    expect(isServerCacheValid(entry, { ...definition, inheritEnv: false }, undefined, environment)).toBe(false);
+    expect(isServerCacheValid(entry, literal, undefined, environment)).toBe(false);
+    expect(computeServerHash(literal, { MODE: "first" })).toBe(computeServerHash(literal, { MODE: "second" }));
+    expect(computeServerHash(plugin, { MODE: "first" })).toBe(computeServerHash(plugin, { MODE: "second" }));
+  });
+
+  it("keeps caches from before stdio env flags were hashed valid for remote servers only", () => {
+    const cached = (configHash: string) => ({ configHash, cachedAt: Date.now(), tools: [], resources: [] });
+
+    expect(isServerCacheValid(cached("211503c5c035663196f90839c226a3f67c2e01ff7719c2ed818860072c96d8ec"), { url: "https://example.test/mcp" })).toBe(true);
+    expect(isServerCacheValid(cached("c5e102840a79aec3fd3d129037f379198fb13cdcfa5ffbc96a5f314002e7d188"), { socket: "/tmp/mcp.sock" })).toBe(true);
+    expect(isServerCacheValid(cached("c7cd5329512fb9b1605e786af247579d1ff2e23f694488e403295ea142b4e9ce"), { command: "node" })).toBe(false);
   });
 
   it("hashes interpolated URLs", () => {
@@ -375,7 +402,7 @@ describe("direct tool metadata bootstrap", () => {
     ]);
   });
 
-  it("keeps duplicate direct names reserved by failed-backoff servers", () => {
+  it("keeps duplicate direct names fail-closed when one server is in backoff", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const config: McpConfig = {
       settings: { toolPrefix: "none", directTools: true, warnOnLargeDirectTools: false },
@@ -402,9 +429,7 @@ describe("direct tool metadata bootstrap", () => {
       },
     };
 
-    expect(resolveDirectTools(config, cache, "none").map(tool => [tool.serverName, tool.prefixedName])).toEqual([
-      ["failed", "search"],
-    ]);
+    expect(resolveDirectTools(config, cache, "none")).toEqual([]);
     expect(resolveDirectTools(config, cache, "none", undefined, new Set(["failed"]))).toEqual([]);
   });
 
@@ -599,10 +624,10 @@ describe("excludeTools filtering", () => {
 
   it("keeps cached metadata filtering scoped to current server identities", () => {
     const config: McpConfig = {
-      settings: { toolPrefix: "server" },
+      settings: { toolPrefix: "server", directTools: true },
       mcpServers: {
-        "my-server": { command: "hyphen", excludeTools: ["my_2d_server_do_thing"] },
         my_2d_server: { command: "escaped", excludeTools: ["my_2d_server_do_thing"] },
+        "my-server": { command: "hyphen", excludeTools: ["my_2d_server_do_thing"] },
       },
     };
     const cache: MetadataCache = {
@@ -617,6 +642,7 @@ describe("excludeTools filtering", () => {
 
     expect(reconstructToolMetadata("my-server", cache.servers["my-server"]!, "server", config.mcpServers["my-server"], config.mcpServers, cache).map(tool => tool.name)).toEqual(["my-server_do_thing"]);
     expect(reconstructToolMetadata("my_2d_server", cache.servers.my_2d_server!, "server", config.mcpServers.my_2d_server, config.mcpServers, cache)).toEqual([]);
+    expect(resolveDirectTools(config, cache, "server").map(tool => tool.prefixedName)).toEqual(["my-server_do_thing"]);
   });
 
   it("filters included tools from live and cached metadata before applying exclusions", () => {
@@ -682,7 +708,7 @@ describe("excludeTools filtering", () => {
     ]);
   });
 
-  it("keeps the first raw tool when sanitized live metadata names collide", () => {
+  it("omits all raw tools when sanitized live metadata names collide", () => {
     const { metadata } = buildToolMetadata(
       [
         { name: "namespace.tool", description: "Dotted" },
@@ -695,13 +721,10 @@ describe("excludeTools filtering", () => {
       "server",
     );
 
-    expect(metadata.map((tool) => [tool.name, tool.originalName, tool.description])).toEqual([
-      ["demo_namespace_tool", "namespace.tool", "Dotted"],
-      ["demo_read_namespace_tool", "read_namespace.tool", "Tool before colliding resource"],
-    ]);
+    expect(metadata).toEqual([]);
   });
 
-  it("keeps the first raw tool when sanitized cached metadata names collide", () => {
+  it("omits all raw tools when sanitized cached metadata names collide", () => {
     const reconstructed = reconstructToolMetadata(
       "demo",
       {
@@ -718,10 +741,21 @@ describe("excludeTools filtering", () => {
       { command: "npx", args: ["-y", "demo"] },
     );
 
-    expect(reconstructed.map((tool) => [tool.name, tool.originalName, tool.description])).toEqual([
-      ["demo_namespace_tool", "namespace.tool", "Dotted"],
-      ["demo_read_namespace_tool", "read_namespace.tool", "Tool before colliding resource"],
-    ]);
+    expect(reconstructed).toEqual([]);
+  });
+
+  it("does not register either owner of a self-prefix collision", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const definition = { command: "demo", directTools: true };
+    const config = { mcpServers: { demo: definition } };
+    const cache: MetadataCache = { version: 1, servers: { demo: {
+      configHash: computeServerHash(definition),
+      cachedAt: Date.now(),
+      tools: [{ name: "search" }, { name: "demo_search" }],
+      resources: [],
+    } } };
+
+    expect(resolveDirectTools(config, cache, "server")).toEqual([]);
   });
 
   it("filters excluded tools during direct tool registration from cache", () => {
@@ -815,9 +849,8 @@ describe("excludeTools filtering", () => {
     expect(resolveDirectTools(config, cache, "server").map((spec) => [spec.serverName, spec.prefixedName])).toEqual([
       ["my_server", "my_server_get"],
       ["my-server", "my-server_get"],
-      ["my server", "my_20_server_get"],
     ]);
-    expect(warn).toHaveBeenCalledWith('MCP: skipping duplicate direct tool "my_20_server_get" from "my_20_server"');
+    expect(warn).toHaveBeenCalledWith('MCP: skipping colliding direct name "my_20_server_get" from "my server", "my_20_server"');
   });
 
   it("honors per-server toolPrefix during direct tool registration from cache", () => {
@@ -850,7 +883,7 @@ describe("excludeTools filtering", () => {
     expect(specs.map((spec) => spec.prefixedName)).toEqual(["github_search"]);
   });
 
-  it("warns by default without capping when resolved direct tools exceed the README threshold", () => {
+  it("resolves tools deterministically and reports the advisory at the eager-tool threshold", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const tools = Array.from({ length: DIRECT_TOOLS_ADVISORY_THRESHOLD }, (_, index) => ({
       name: `tool_${index}`,
@@ -880,8 +913,11 @@ describe("excludeTools filtering", () => {
     const specs = resolveDirectTools(config, cache, "server");
 
     expect(specs).toHaveLength(DIRECT_TOOLS_ADVISORY_THRESHOLD);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("75+ direct tools"));
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("settings.warnOnLargeDirectTools to false"));
+    expect(warn).not.toHaveBeenCalled();
+    expect(getLargeDirectToolsAdvisory(config, specs)).toEqual(expect.stringContaining("75+ direct tools"));
+    expect(getLargeDirectToolsAdvisory(config, specs)).toEqual(expect.stringContaining("settings.warnOnLargeDirectTools to false"));
+    expect(getLargeDirectToolsAdvisory(config, specs.slice(0, -1))).toBeUndefined();
+    expect(getLargeDirectToolsAdvisory(config, specs.map((spec) => ({ ...spec, lazy: true })))).toBeUndefined();
   });
 
   it("suppresses the large direct-tools advisory when configured", () => {
@@ -916,6 +952,7 @@ describe("excludeTools filtering", () => {
 
     expect(specs).toHaveLength(DIRECT_TOOLS_ADVISORY_THRESHOLD);
     expect(warn).not.toHaveBeenCalled();
+    expect(getLargeDirectToolsAdvisory(config, specs)).toBeUndefined();
   });
 
   it("filters included tools during direct tool registration from cache", () => {
