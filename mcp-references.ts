@@ -2,10 +2,12 @@ import { isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { createCachedToolSelectorCandidateIndex, isServerCacheValid, parseDirectToolSelectors, type MetadataCache } from "./metadata-cache.ts";
 import {
+  formatServerNamespace,
   formatToolName,
   isServerDisabled,
   isToolAllowed,
   resolveToolPrefix,
+  resolveUniqueNameOwnership,
   type CachedTool,
   type McpConfig,
   type ServerCacheEntry,
@@ -34,7 +36,7 @@ type CachedServer = { serverName: string; definition: ServerEntry; entry: Server
 const BUILTIN_NAMES = new Set(["read", "bash", "edit", "write", "grep", "find", "ls", "mcp"]);
 
 export function namespaceProxyName(serverName: string): string {
-  return `mcp__${serverName.replace(/-/g, "_")}`;
+  return `mcp__${formatServerNamespace(serverName)}`;
 }
 
 export function parseMcpReference(raw: string): ParsedMcpReference {
@@ -65,21 +67,23 @@ function resolveDirectSelection(
     const selectedTools = envOverride.tools.get(serverName);
     return selectedTools ? [...selectedTools] : false;
   }
-  if (definition.directTools !== undefined) return definition.directTools;
-  return config.settings?.directTools === true;
+  // "search" registers the same tool set as `true`; only activation differs.
+  if (definition.directTools !== undefined) return definition.directTools === "search" ? true : definition.directTools;
+  return config.settings?.directTools === true || config.settings?.directTools === "search";
 }
 
 export function isMcpServerDirectlyRegistered(
-  definition: { directTools?: boolean | string[] } | undefined,
+  definition: { directTools?: boolean | string[] | "search" } | undefined,
   settings: McpConfig["settings"],
   serverName: string,
   envOverride: DirectToolSelectorOverride | null,
 ): boolean {
   if (envOverride) return envOverride.servers.has(serverName);
   if (definition?.directTools !== undefined) {
-    return definition.directTools === true || (Array.isArray(definition.directTools) && definition.directTools.length > 0);
+    return definition.directTools === true || definition.directTools === "search"
+      || (Array.isArray(definition.directTools) && definition.directTools.length > 0);
   }
-  return settings?.directTools === true;
+  return settings?.directTools === true || settings?.directTools === "search";
 }
 
 export function hasCallableCachedTargets(entry: Pick<ServerCacheEntry, "tools" | "resources">, definition: Pick<ServerEntry, "exposeResources">): boolean {
@@ -94,6 +98,7 @@ function hasNamespaceProxy(
   existingDirectNames: ReadonlySet<string>,
   serverName: string,
 ): boolean {
+  if (config.settings?.namespaceProxyTools === false) return false;
   const definition = config.mcpServers[serverName];
   if (!definition || isServerDisabled(definition)) return false;
   if (isMcpServerDirectlyRegistered(definition, config.settings, serverName, envOverride)) return false;
@@ -143,14 +148,14 @@ function registeredDirectNames(
   envOverride: DirectToolSelectorOverride | null,
   selectorIndex: ToolSelectorCandidateIndex | undefined,
 ): Map<string, DirectNameOwner> {
-  const owners = new Map<string, DirectNameOwner>();
+  const entries: Array<{ name: string; owner: DirectNameOwner }> = [];
   for (const { serverName, definition, entry, prefix } of cachedServers(config, cache)) {
     const selection = resolveDirectSelection(config, definition, serverName, envOverride);
     for (const { name, originalName } of directNameEntries(entry, serverName, definition, prefix, selection, selectorIndex)) {
-      if (!owners.has(name)) owners.set(name, { serverName, originalName });
+      entries.push({ name, owner: { serverName, originalName } });
     }
   }
-  return owners;
+  return new Map(resolveUniqueNameOwnership(entries, (entry) => entry.name).unique.map(({ name, owner }) => [name, owner]));
 }
 
 function allCurrentCandidates(config: McpConfig, cache: MetadataCache | null): ToolSelectorCandidateIndex | undefined {

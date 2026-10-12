@@ -113,6 +113,23 @@ describe("disabled MCP servers", () => {
     expect(state.manager.connect).not.toHaveBeenCalled();
   });
 
+  it("explains project-trust blocks instead of suggesting /mcp enable", async () => {
+    const state = disabledState();
+    state.blockedProjectServers = new Map([["disabled", { reason: "untrusted", source: { path: "/project/.mcp.json" } }]]);
+    const call = await executeCall(state, "disabled_search", {}, "disabled");
+    const direct = await createDirectToolExecutor(() => state, () => null, {
+      serverName: "disabled",
+      originalName: "search",
+      prefixedName: "disabled_search",
+      description: "cached",
+    })("call", {}, undefined, undefined, {} as any);
+
+    for (const result of [call, direct, await executeConnect(state, "disabled")]) {
+      expect(result.content[0].text).toContain("blocked by project trust");
+      expect(result.content[0].text).not.toContain("/mcp-adapter enable");
+    }
+  });
+
   it("rejects manager and UI resource connections for disabled definitions", async () => {
     const manager = new McpServerManager();
     await expect(manager.connect("disabled", { command: "node", disabled: true })).rejects.toThrow("disabled");
@@ -127,7 +144,7 @@ describe("disabled MCP servers", () => {
 
   it("writes only a project-local disabled override and removes it cleanly", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-mcp-disabled-override-"));
-    const filePath = join(cwd, ".pi", "mcp.json");
+    const filePath = join(cwd, ".pi", "mcp-adapter.json");
     mkdirSync(join(cwd, ".pi"));
     writeFileSync(filePath, JSON.stringify({ unrelated: { keep: true }, mcpServers: {
       disabled: { disabled: false, directTools: true },
@@ -151,7 +168,7 @@ describe("disabled MCP servers", () => {
     writeFileSync(overridePath, JSON.stringify({ mcpServers: { lower: { command: "node", disabled: true } } }));
 
     expect(writeProjectServerDisabledOverride(overridePath, cwd, "lower", false)).toMatchObject({ changed: true });
-    expect(JSON.parse(readFileSync(join(cwd, ".pi", "mcp.json"), "utf8")).mcpServers.lower).toEqual({ disabled: false });
+    expect(JSON.parse(readFileSync(join(cwd, ".pi", "mcp-adapter.json"), "utf8")).mcpServers.lower).toEqual({ disabled: false });
     expect(loadMcpConfig(overridePath, cwd).mcpServers.lower.disabled).toBe(false);
   });
 
@@ -162,19 +179,19 @@ describe("disabled MCP servers", () => {
     writeFileSync(join(cwd, ".vscode", "mcp.json"), JSON.stringify({
       mcpServers: { imported: { command: "node", disabled: true } },
     }));
-    writeFileSync(join(cwd, ".pi", "mcp.json"), JSON.stringify({
+    writeFileSync(join(cwd, ".pi", "mcp-adapter.json"), JSON.stringify({
       imports: ["vscode"],
       mcpServers: { imported: { disabled: true } },
     }));
 
     expect(writeProjectServerDisabledOverride(undefined, cwd, "imported", false)).toMatchObject({ changed: true });
-    expect(JSON.parse(readFileSync(join(cwd, ".pi", "mcp.json"), "utf8")).mcpServers.imported).toEqual({ disabled: false });
+    expect(JSON.parse(readFileSync(join(cwd, ".pi", "mcp-adapter.json"), "utf8")).mcpServers.imported).toEqual({ disabled: false });
     expect(loadMcpConfig(undefined, cwd).mcpServers.imported).toMatchObject({ command: "node", disabled: false });
   });
 
   it("preserves the supported raw server-map key while updating an override", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-mcp-disabled-alias-"));
-    const filePath = join(cwd, ".pi", "mcp.json");
+    const filePath = join(cwd, ".pi", "mcp-adapter.json");
     mkdirSync(join(cwd, ".pi"));
     writeFileSync(filePath, JSON.stringify({ "mcp-servers": { alias: { command: "node", args: ["server"] } } }));
 
@@ -187,11 +204,11 @@ describe("disabled MCP servers", () => {
 
   it("preserves malformed project overrides instead of replacing them", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-mcp-disabled-malformed-"));
-    const filePath = join(cwd, ".pi", "mcp.json");
+    const filePath = join(cwd, ".pi", "mcp-adapter.json");
     mkdirSync(join(cwd, ".pi"));
     writeFileSync(filePath, "{ malformed");
 
-    expect(() => writeProjectServerDisabledOverride(undefined, cwd, "server", true)).toThrow("Failed to read project MCP override");
+    expect(() => writeProjectServerDisabledOverride(undefined, cwd, "server", true)).toThrow(`Failed to read MCP config at ${filePath}`);
     expect(readFileSync(filePath, "utf8")).toBe("{ malformed");
   });
 

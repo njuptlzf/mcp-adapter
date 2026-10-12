@@ -15,18 +15,22 @@ import { createMcpAdapter, registerMcpServer } from "../index.ts";
 import { UniversalMcpHost } from "../adapters/universal-host.ts";
 import { MCP_STATUS_EVENT } from "../types.ts";
 
-function install(): UniversalMcpHost {
+function install(scriptMode = false): UniversalMcpHost {
 	const host = new UniversalMcpHost();
-	createMcpAdapter({ config: { mcpServers: {} } })(host as unknown as ExtensionAPI);
+	createMcpAdapter({
+		config: { mcpServers: {}, ...(scriptMode ? { settings: { scriptMode: true } } : {}) },
+	})(host as unknown as ExtensionAPI);
 	return host;
 }
 
 describe("Phase 1.6 acceptance: UniversalMcpHost + upstream engine", () => {
-	it("C1: registers mcp proxy tool + mcpScript batch tool (scriptMode default on)", () => {
+	it("C1: registers mcp proxy tool by default; mcpScript requires settings.scriptMode (upstream #744 opt-in)", () => {
 		const host = install();
 		expect(host.tools.has("mcp")).toBe(true);
-		expect(host.tools.has("mcpScript")).toBe(true);
-		expect(host.getActiveTools()).toEqual(expect.arrayContaining(["mcp", "mcpScript"]));
+		expect(host.tools.has("mcpScript")).toBe(false);
+		expect(host.getActiveTools()).toEqual(expect.arrayContaining(["mcp"]));
+		const scripted = install(true);
+		expect(scripted.tools.has("mcpScript")).toBe(true);
 	});
 
 	it("C2: proxy tool exposes the rich schema (args object|string, instructions, limit, offset, server)", () => {
@@ -41,7 +45,7 @@ describe("Phase 1.6 acceptance: UniversalMcpHost + upstream engine", () => {
 	});
 
 	it("C5: active tool surface is engine-driven (setActiveTools narrows; getActiveTools reflects it)", () => {
-		const host = install();
+		const host = install(true);
 		host.setActiveTools(["mcp"]);
 		expect(host.getActiveTools()).toEqual(["mcp"]);
 		expect(host.getAllTools().map((t) => t.name)).toEqual(expect.arrayContaining(["mcp", "mcpScript"]));

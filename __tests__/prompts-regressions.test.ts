@@ -137,6 +137,104 @@ describe("MCP prompt regressions", () => {
     ]);
   });
 
+  it("does not revive private persisted prompts after discovery fails", () => {
+    const configHash = computeServerHash(definition);
+    saveMetadataCache({
+      version: 1,
+      servers: {
+        demo: {
+          configHash,
+          tools: [],
+          resources: [],
+          prompts: [{ name: "brief", description: "private cached" }],
+          ttlMs: 5_000,
+          cacheScope: "private",
+          cachedAt: Date.now(),
+        },
+      },
+    });
+    const connection = {
+      status: "connected",
+      tools: [],
+      resources: [],
+      prompts: [],
+      promptDiscoveryFailed: true,
+    };
+    const current = state({ manager: { getConnection: vi.fn(() => connection) } });
+
+    updateMetadataCache(current, "demo");
+
+    expect(JSON.parse(readFileSync(join(agentDir, "mcp-cache.json"), "utf8")).servers.demo)
+      .not.toHaveProperty("prompts");
+  });
+
+  it("keeps current-session private prompts after discovery fails", () => {
+    const configHash = computeServerHash(definition);
+    const connection = {
+      status: "connected",
+      tools: [],
+      resources: [],
+      prompts: [],
+      promptDiscoveryFailed: true,
+      toolListHints: { ttlMs: 5_000, cacheScope: "private" as const },
+    };
+    const current = state({
+      manager: { getConnection: vi.fn(() => connection) },
+      sessionMetadata: new Map([[
+        "demo",
+        {
+          configHash,
+          tools: [],
+          resources: [],
+          prompts: [{ name: "brief", description: "live private" }],
+          ttlMs: 5_000,
+          cacheScope: "private" as const,
+          cachedAt: Date.now(),
+        },
+      ]]),
+    });
+
+    updateMetadataCache(current, "demo");
+
+    expect(current.sessionMetadata?.get("demo")?.prompts).toEqual([
+      { name: "brief", description: "live private" },
+    ]);
+    expect(JSON.parse(readFileSync(join(agentDir, "mcp-cache.json"), "utf8")).servers.demo)
+      .toMatchObject({ cacheScope: "private", ttlMs: 5_000 });
+  });
+
+  it("does not write private session metadata into a public entry after discovery fails", () => {
+    const connection = {
+      status: "connected",
+      tools: [],
+      resources: [],
+      prompts: [],
+      promptDiscoveryFailed: true,
+      resourceDiscoveryFailed: true,
+    };
+    const current = state({
+      manager: { getConnection: vi.fn(() => connection) },
+      sessionMetadata: new Map([[
+        "demo",
+        {
+          configHash: computeServerHash(definition),
+          tools: [],
+          resources: [{ uri: "file://private", name: "private resource" }],
+          prompts: [{ name: "brief", description: "live private" }],
+          cacheScope: "private" as const,
+          cachedAt: Date.now(),
+        },
+      ]]),
+    });
+
+    updateMetadataCache(current, "demo");
+
+    const saved = JSON.parse(readFileSync(join(agentDir, "mcp-cache.json"), "utf8")).servers.demo;
+    expect(saved.cacheScope).toBeUndefined();
+    expect(saved.prompts).toBeUndefined();
+    expect(saved.resources).toEqual([]);
+  });
+
   it("surfaces prompt discovery failures in /mcp prompts", async () => {
     const notify = vi.fn();
     const current = state({

@@ -88,3 +88,7 @@ as an advisory warning. Document the reason in the merge commit body.
 - `skills/upstream-merge/SKILL.md §1` — Step 0 (feature branch creation) and
   the "Anti-pattern: commit directly to main" note
 - `skills/upstream-merge/SKILL.md §5.5` — the full PR sub-flow for upstream-merge
+
+## Upstream acceptance policy (from nicobailon/pi-mcp-adapter)
+
+Agents working in this repository must read [VISION.md](VISION.md) before making product, architecture, scope, or backlog-disposition decisions. VISION.md is the acceptance policy for upstream contributions and is intentionally the single source for those rules; this file does not duplicate user-global or tool-level instructions.

@@ -54,7 +54,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 const SERVER_NAME = "mcp-adapter";
-const SERVER_VERSION = "2.29.0-0.0.5";
+const SERVER_VERSION = "5.2.0-0.0.6";
 const GENERIC_GLOBAL_CONFIG_PATH = createUniversalResolver().globalConfigPath();
 
 // Build metadata injected at bundle time by scripts/build-mcp-server.mjs via

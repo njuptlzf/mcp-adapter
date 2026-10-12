@@ -11,7 +11,11 @@ export function getAgentDir(): string {
   const piConfig = readPiConfig();
   const name = piConfig?.name;
   const appName = typeof name === "string" && name.trim() ? name.trim() : "pi";
-  const configured = process.env[`${appName.toUpperCase()}_CODING_AGENT_DIR`]?.trim();
+  // Fork overlay (restored after the v2.29 sync dropped it; see task 05-02):
+  // MCP_AGENT_DIR is the agent-neutral primary for the universal host, with
+  // the Pi-native `${appName}_CODING_AGENT_DIR` as the backward-compatible fallback.
+  const configured =
+    process.env.MCP_AGENT_DIR?.trim() ?? process.env[`${appName.toUpperCase()}_CODING_AGENT_DIR`]?.trim();
   if (!configured) {
     return join(homedir(), getConfigDirName(), "agent");
   }

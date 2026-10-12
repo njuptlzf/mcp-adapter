@@ -45,6 +45,46 @@ describe("direct tool host contracts", () => {
     })).toThrow("MCP direct tool arguments do not match the advertised input schema");
   });
 
+  it("recovers containers declared by type arrays and unions without coercing valid strings", async () => {
+    const { prepareDirectToolArguments } = await import("../direct-tools.ts");
+    const schema = {
+      type: "object",
+      required: ["typed", "either", "exclusive", "ambiguous"],
+      properties: {
+        typed: { type: ["array", "null"], items: { type: "number" } },
+        either: { anyOf: [{ type: "object", required: ["id"], properties: { id: { type: "number" } } }] },
+        exclusive: { oneOf: [{ type: "array", items: { type: "string" } }, { type: "null" }] },
+        ambiguous: { anyOf: [{ type: "string" }, { type: "object" }] },
+      },
+      additionalProperties: false,
+    };
+
+    expect(prepareDirectToolArguments(schema, {
+      typed: "[1,2]",
+      either: '{"id":7}',
+      exclusive: '["north"]',
+      ambiguous: '{"keep":"as a string"}',
+    })).toEqual({
+      typed: [1, 2],
+      either: { id: 7 },
+      exclusive: ["north"],
+      ambiguous: '{"keep":"as a string"}',
+    });
+
+    expect(() => prepareDirectToolArguments(schema, {
+      typed: "{}",
+      either: '{"id":7}',
+      exclusive: '["north"]',
+      ambiguous: "valid",
+    })).toThrow("MCP direct tool arguments do not match the advertised input schema");
+    expect(() => prepareDirectToolArguments(schema, {
+      typed: "[broken",
+      either: '{"id":7}',
+      exclusive: '["north"]',
+      ambiguous: "valid",
+    })).toThrow("MCP direct tool arguments do not match the advertised input schema");
+  });
+
   it("returns a bounded raw MCP result when configured", async () => {
     const rawResult = {
       content: [{ type: "text", text: "accepted" }],
@@ -65,13 +105,16 @@ describe("direct tool host contracts", () => {
         settings: { directToolResultDetails: "bounded" },
         mcpServers: { demo: { command: "demo" } },
       },
+      toolMetadata: new Map(),
       manager: {
+        ensureListen: vi.fn().mockResolvedValue(undefined),
         getConnection: vi.fn(() => connection),
         getRequestOptions: vi.fn(() => undefined),
         touch: vi.fn(),
         incrementInFlight: vi.fn(),
         decrementInFlight: vi.fn(),
       },
+      toolMetadata: new Map(),
       failureTracker: new Map(),
       completedUiSessions: [],
     } as any;
@@ -90,6 +133,7 @@ describe("direct tool host contracts", () => {
       tool: "commit",
       mcpResult: rawResult,
     });
+    expect(state.manager.ensureListen).toHaveBeenCalledWith("demo", connection);
   });
 
   it("invalidates a connected transport after a direct tool call fails", async () => {
@@ -111,6 +155,7 @@ describe("direct tool host contracts", () => {
         incrementInFlight: vi.fn(),
         decrementInFlight: vi.fn(),
       },
+      toolMetadata: new Map(),
       failureTracker: new Map(),
       completedUiSessions: [],
     } as any;
@@ -129,6 +174,38 @@ describe("direct tool host contracts", () => {
     expect(close).toHaveBeenCalledWith("demo");
   });
 
+  it.each([
+    ["a result", false],
+    ["an error result", true],
+  ])("passes the server's structuredContent of %s on only for deferred tools", async (_label, isError) => {
+    const structuredContent = { rows: [{ id: 7 }] };
+    const connection = {
+      status: "connected",
+      client: { callTool: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "7" }], structuredContent, ...(isError ? { isError } : {}) }) },
+    };
+    const state = {
+      config: { settings: {}, mcpServers: { demo: { command: "demo" } } },
+      manager: {
+        getConnection: vi.fn(() => connection),
+        getRequestOptions: vi.fn(() => undefined),
+        touch: vi.fn(),
+        incrementInFlight: vi.fn(),
+        decrementInFlight: vi.fn(),
+      },
+      toolMetadata: new Map(),
+      failureTracker: new Map(),
+      completedUiSessions: [],
+    } as any;
+    const { createDirectToolExecutor } = await import("../direct-tools.ts");
+    const spec = { serverName: "demo", originalName: "rows", prefixedName: "demo_rows", description: "Rows" };
+
+    const deferred = await createDirectToolExecutor(() => state, () => null, spec, true)("call-1", {}, undefined, undefined, undefined as any);
+    const direct = await createDirectToolExecutor(() => state, () => null, spec)("call-2", {}, undefined, undefined, undefined as any);
+
+    expect(deferred.structuredContent).toEqual(structuredContent);
+    expect(direct).not.toHaveProperty("structuredContent");
+  });
+
   it("returns a bounded raw MCP result for direct resources when configured", async () => {
     const rawResult = {
       contents: [{ uri: "docs://handbook", mimeType: "text/plain", text: "accepted" }],
@@ -144,6 +221,7 @@ describe("direct tool host contracts", () => {
         mcpServers: { demo: { command: "demo" } },
       },
       manager: {
+        prepareResourceUse: vi.fn().mockResolvedValue(undefined),
         getConnection: vi.fn(() => connection),
         getRequestOptions: vi.fn(() => undefined),
         touch: vi.fn(),
@@ -170,5 +248,6 @@ describe("direct tool host contracts", () => {
       mcpResult: rawResult,
     });
     expect(connection.client.readResource).toHaveBeenCalledWith({ uri: "docs://handbook" }, undefined);
+    expect(state.manager.prepareResourceUse).toHaveBeenCalledWith("demo", "docs://handbook", connection);
   });
 });

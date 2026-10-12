@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { describe, expect, it, vi } from "vitest";
 import type { GetPromptResult } from "@modelcontextprotocol/client";
 import {
+  completePromptArgs,
   createPromptCommand,
   formatPromptResult,
   listAllPromptMetadata,
@@ -112,6 +113,37 @@ describe("parsePromptArgs", () => {
   });
 });
 
+describe("completePromptArgs", () => {
+  it("suggests declared argument names without connecting", () => {
+    expect(completePromptArgs(meta(), "")).toEqual([
+      { value: "topic=", label: "topic=", description: "Topic" },
+      { value: "date=", label: "date=" },
+    ]);
+  });
+
+  it("preserves committed arguments when completing the current name", () => {
+    expect(completePromptArgs(meta(), "topic=ai da")).toEqual([
+      { value: "topic=ai date=", label: "date=" },
+    ]);
+  });
+
+  it("does not suggest arguments already filled by name", () => {
+    expect(completePromptArgs(meta(), "topic=ai ")).toEqual([
+      { value: "topic=ai date=", label: "date=" },
+    ]);
+  });
+
+  it("treats committed positional arguments as occupying declared slots", () => {
+    expect(completePromptArgs(meta(), '"model context" ')).toEqual([
+      { value: '"model context" date=', label: "date=" },
+    ]);
+  });
+
+  it("does not offer name completions while typing a value", () => {
+    expect(completePromptArgs(meta(), "topic=a")).toBeNull();
+  });
+});
+
 describe("resolvePromptArgs", () => {
   it("returns positional args mapped by declared order", () => {
     const result = resolvePromptArgs(meta(), { positional: ["ai", "today"], named: {} });
@@ -202,7 +234,71 @@ describe("formatPromptResult", () => {
   });
 });
 
+describe("createPromptCommand completions", () => {
+  it("uses cached metadata without initializing or connecting the runtime", () => {
+    const ensureState = vi.fn();
+    const lazyConnect = vi.fn();
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+    const command = createPromptCommand(pi, () => null, meta(), { ensureState, lazyConnect });
+
+    expect(command.getArgumentCompletions("to")).toEqual([
+      { value: "topic=", label: "topic=", description: "Topic" },
+    ]);
+    expect(ensureState).not.toHaveBeenCalled();
+    expect(lazyConnect).not.toHaveBeenCalled();
+  });
+
+  it("uses refreshed live prompt arguments without starting the server", () => {
+    const live = meta({
+      arguments: [{ name: "audience", required: false, description: "Audience" }],
+    });
+    const state = baseState(new Map([["demo", [live]]]));
+    state.promptMetadataLive = new Set(["demo"]);
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+
+    const command = createPromptCommand(pi, () => state, meta());
+
+    expect(command.getArgumentCompletions("au")).toEqual([
+      { value: "audience=", label: "audience=", description: "Audience" },
+    ]);
+    expect(state.manager.getPrompt).not.toHaveBeenCalled();
+  });
+
+  it("stops suggesting a cached prompt after live discovery removes it", () => {
+    const state = baseState(new Map([["demo", []]]));
+    state.promptMetadataLive = new Set(["demo"]);
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+
+    const command = createPromptCommand(pi, () => state, meta());
+
+    expect(command.getArgumentCompletions("")).toBeNull();
+  });
+
+  it("stops suggesting arguments after the server is disabled", () => {
+    const state = baseState(new Map());
+    state.config.mcpServers.demo = { command: "demo", disabled: true };
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+
+    const command = createPromptCommand(pi, () => state, meta());
+
+    expect(command.getArgumentCompletions("")).toBeNull();
+  });
+});
+
 describe("createPromptCommand handler", () => {
+  it("notifies and returns when deferred initialization fails", async () => {
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+    const notify = vi.fn();
+    const command = createPromptCommand(pi, () => null, meta(), {
+      ensureState: vi.fn().mockRejectedValue(new Error("startup failed")),
+    });
+
+    await expect(command.handler("ai", commandCtx({ hasUI: true, ui: { notify } as any }))).resolves.toBeUndefined();
+
+    expect(notify).toHaveBeenCalledWith("MCP initialization failed: startup failed", "error");
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("sends the resolved prompt text as a user message", async () => {
     const promptMetadata = new Map<string, PromptMetadata[]>([["demo", [meta()]]]);
     const state = baseState(promptMetadata);
@@ -228,6 +324,37 @@ describe("createPromptCommand handler", () => {
     await command.handler("", commandCtx({ hasUI: true, ui: { notify } as any }));
 
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required argument"), "error");
+  });
+
+  it("refreshes stale cached arguments before rejecting a call", async () => {
+    const state = baseState(new Map([["demo", [meta()]]]));
+    (state.manager.getPrompt as ReturnType<typeof vi.fn>).mockResolvedValue({
+      messages: [{ role: "user", content: { type: "text", text: "Brief" } }],
+    });
+    const lazyConnect = vi.fn(async () => {
+      state.promptMetadata!.set("demo", [meta({ arguments: [{ name: "topic", required: false }] })]);
+      state.promptMetadataLive = new Set(["demo"]);
+      return true;
+    });
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+
+    await createPromptCommand(pi, () => state, meta(), { lazyConnect }).handler("", commandCtx());
+
+    expect(lazyConnect).toHaveBeenCalledTimes(1);
+    expect(pi.sendUserMessage).toHaveBeenCalledWith("Brief");
+  });
+
+  it("rejects missing arguments from live metadata without connecting", async () => {
+    const state = baseState(new Map([["demo", [meta()]]]));
+    state.promptMetadataLive = new Set(["demo"]);
+    const lazyConnect = vi.fn();
+    const notify = vi.fn();
+
+    await createPromptCommand({ sendUserMessage: vi.fn() } as unknown as ExtensionAPI, () => state, meta(), { lazyConnect })
+      .handler("", commandCtx({ ui: { notify } as any }));
+
+    expect(lazyConnect).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Missing required argument"), "error");
   });
 
@@ -273,6 +400,57 @@ describe("createPromptCommand handler", () => {
 
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("no text content"), "warning");
+  });
+});
+
+describe("fallback prompt runtime loading", () => {
+  it("does not connect after a delayed fallback import outlives its state", async () => {
+    vi.resetModules();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lazyConnect = vi.fn();
+    vi.doMock("../init.ts", async () => {
+      await gate;
+      return { lazyConnect };
+    });
+    const { createPromptCommand: createFreshPromptCommand } = await import("../prompts.ts");
+    const state = baseState(new Map([["demo", [meta()]]]));
+    let currentState: McpExtensionState | null = state;
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+    const command = createFreshPromptCommand(pi, () => currentState, meta());
+
+    const pending = command.handler("ai", commandCtx());
+    currentState = null;
+    release();
+    await pending;
+
+    expect(lazyConnect).not.toHaveBeenCalled();
+    expect(state.manager.getPrompt).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not notify stale UI when prompt execution fails after state replacement", async () => {
+    const notify = vi.fn();
+    let rejectPrompt!: (reason?: unknown) => void;
+    const getPrompt = vi.fn(() => new Promise<never>((_resolve, reject) => {
+      rejectPrompt = reject;
+    }));
+    const current = baseState(new Map([["demo", [meta()]]]));
+    current.manager.getPrompt = getPrompt;
+    let currentState: McpExtensionState | null = current;
+    const pi = { sendUserMessage: vi.fn() } as unknown as ExtensionAPI;
+    const command = createPromptCommand(pi, () => currentState, meta(), {
+      lazyConnect: vi.fn().mockResolvedValue(true),
+    });
+
+    const pending = command.handler("ai", commandCtx({ ui: { notify } as any }));
+    await vi.waitFor(() => expect(getPrompt).toHaveBeenCalled());
+    currentState = null;
+    rejectPrompt(new Error("prompt failed"));
+    await pending;
+
+    expect(notify).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 });
 

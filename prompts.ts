@@ -6,7 +6,6 @@ import type {
 import type { McpExtensionState } from "./state.ts";
 import { isServerDisabled, type McpConfig, type PromptMetadata } from "./types.ts";
 import { formatPromptCommandName } from "./types.ts";
-import { lazyConnect } from "./init.ts";
 import { isServerCacheValid, loadMetadataCache, reconstructPromptMetadata } from "./metadata-cache.ts";
 import { logger } from "./logger.ts";
 import { truncateAtWord } from "./utils.ts";
@@ -123,6 +122,64 @@ function stripQuotes(value: string): string {
   return value;
 }
 
+function findCurrentPromptTokenStart(input: string): number {
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  let start = 0;
+
+  for (let i = 0; i < input.length; i++) {
+    const char = input.charAt(i);
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) start = i + 1;
+  }
+
+  return start;
+}
+
+export function completePromptArgs(
+  metadata: PromptMetadata,
+  input: string,
+): Array<{ value: string; label: string; description?: string }> | null {
+  const tokenStart = findCurrentPromptTokenStart(input);
+  const current = input.slice(tokenStart);
+  if (current.includes("=") || current.startsWith('"') || current.startsWith("'")) return null;
+
+  const committed = input.slice(0, tokenStart);
+  const parsed = parsePromptArgs(committed);
+  const used = new Set(Object.keys(parsed.named));
+  let positionalIndex = 0;
+
+  for (const arg of metadata.arguments) {
+    if (Object.hasOwn(parsed.named, arg.name)) continue;
+    const positional = parsed.positional[positionalIndex++];
+    if (positional !== undefined && positional !== "") used.add(arg.name);
+  }
+
+  const matches = metadata.arguments.filter(arg => !used.has(arg.name) && arg.name.startsWith(current));
+  if (matches.length === 0) return null;
+
+  return matches.map(arg => ({
+    value: committed + arg.name + "=",
+    label: arg.name + "=",
+    ...(arg.description ? { description: arg.description } : {}),
+  }));
+}
+
 export interface ResolvedPromptArgs {
   ok: boolean;
   /** Present when `ok === true`. */
@@ -226,17 +283,51 @@ function extractMessageText(message: PromptMessage): string {
  * per prompt at extension load time from the metadata cache; the same
  * factory is reused by tests to invoke the handler without a running pi.
  */
+export interface PromptRuntimeDependencies {
+  ensureState?: (ctx: ExtensionCommandContext) => Promise<McpExtensionState | null>;
+  lazyConnect?: (state: McpExtensionState, serverName: string, signal?: AbortSignal) => Promise<boolean>;
+  isStateCurrent?: (state: McpExtensionState) => boolean;
+}
+
+let defaultRuntimePromise: Promise<typeof import("./init.ts")> | null = null;
+function loadDefaultRuntime(): Promise<typeof import("./init.ts")> {
+  return defaultRuntimePromise ??= import("./init.ts").catch((error) => {
+    defaultRuntimePromise = null;
+    throw error;
+  });
+}
+
 export function createPromptCommand(
   pi: ExtensionAPI,
   getState: () => McpExtensionState | null,
   metadata: PromptMetadata,
+  runtime: PromptRuntimeDependencies = {},
 ) {
   const description = buildCommandDescription(metadata);
 
   return {
     description,
-    handler: async (args: string, ctx: ExtensionCommandContext) => {
+    getArgumentCompletions: (prefix: string) => {
       const state = getState();
+      if (!state) return completePromptArgs(metadata, prefix);
+      const definition = state.config.mcpServers[metadata.serverName];
+      if (!definition || isServerDisabled(definition)) return null;
+
+      const liveMetadata = findLivePromptMetadata(state, metadata.serverName, metadata.originalName);
+      if (state.promptMetadataLive?.has(metadata.serverName) && !liveMetadata) return null;
+      return completePromptArgs(liveMetadata ?? metadata, prefix);
+    },
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      let state = getState();
+      if (!state && runtime.ensureState) {
+        try {
+          state = await runtime.ensureState(ctx);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (ctx.hasUI) ctx.ui.notify(`MCP initialization failed: ${message}`, "error");
+          return;
+        }
+      }
       if (!state) {
         if (ctx.hasUI) ctx.ui.notify("MCP not initialized", "error");
         return;
@@ -246,7 +337,7 @@ export function createPromptCommand(
       if (state.promptMetadataLive?.has(metadata.serverName) && !liveMetadata) {
         if (ctx.hasUI) {
           ctx.ui.notify(
-            `MCP prompt "${metadata.originalName}" is no longer advertised by server "${metadata.serverName}". Run /mcp reconnect to refresh.`,
+            `MCP prompt "${metadata.originalName}" is no longer advertised by server "${metadata.serverName}". Run /mcp-adapter reconnect to refresh.`,
             "error",
           );
         }
@@ -254,30 +345,37 @@ export function createPromptCommand(
       }
       const live = liveMetadata ?? metadata;
       const parsed = parsePromptArgs(args ?? "");
-      const resolved = resolvePromptArgs(live, parsed);
-      if (!resolved.ok) {
+      let resolved = resolvePromptArgs(live, parsed);
+      // Cached argument lists can be stale; only live metadata may reject before the connect that refreshes them.
+      if (!resolved.ok && state.promptMetadataLive?.has(metadata.serverName)) {
         if (ctx.hasUI) ctx.ui.notify(resolved.error ?? "Invalid prompt arguments", "error");
         return;
       }
-      const promptArgs = resolved.args ?? {};
 
       if (!state.config.mcpServers[metadata.serverName]) {
         if (ctx.hasUI) {
           ctx.ui.notify(
-            `MCP prompt "${live.originalName}" is no longer configured. Run /mcp reconnect to refresh.`,
+            `MCP prompt "${live.originalName}" is no longer configured. Run /mcp-adapter reconnect to refresh.`,
             "error",
           );
         }
         return;
       }
 
-      const connected = await lazyConnect(state, metadata.serverName, ctx.signal);
+      const expectedState = state;
+      const isStateCurrent = () => runtime.isStateCurrent
+        ? runtime.isStateCurrent(expectedState)
+        : getState() === expectedState;
+      const lazyConnect = runtime.lazyConnect ?? (await loadDefaultRuntime()).lazyConnect;
+      if (!isStateCurrent()) return;
+      const connected = await lazyConnect(expectedState, metadata.serverName, ctx.signal);
+      if (!isStateCurrent()) return;
       if (!connected) {
         if (ctx.hasUI) {
           const conn = state.manager.getConnection(metadata.serverName);
           const message = conn?.status === "needs-auth"
             ? `MCP server "${metadata.serverName}" needs authentication. Run /mcp-auth ${metadata.serverName}.`
-            : `MCP server "${metadata.serverName}" is not available. Run /mcp reconnect ${metadata.serverName}.`;
+            : `MCP server "${metadata.serverName}" is not available. Run /mcp-adapter reconnect ${metadata.serverName}.`;
           ctx.ui.notify(message, "error");
         }
         return;
@@ -287,13 +385,21 @@ export function createPromptCommand(
       if (state.promptMetadataLive?.has(metadata.serverName) && !refreshed) {
         if (ctx.hasUI) {
           ctx.ui.notify(
-            `MCP prompt "${metadata.originalName}" is no longer advertised by server "${metadata.serverName}". Run /mcp reconnect to refresh.`,
+            `MCP prompt "${metadata.originalName}" is no longer advertised by server "${metadata.serverName}". Run /mcp-adapter reconnect to refresh.`,
             "error",
           );
         }
         return;
       }
       const dispatchMetadata = refreshed ?? live;
+      if (!resolved.ok) {
+        resolved = resolvePromptArgs(dispatchMetadata, parsed);
+        if (!resolved.ok) {
+          if (ctx.hasUI) ctx.ui.notify(resolved.error ?? "Invalid prompt arguments", "error");
+          return;
+        }
+      }
+      const promptArgs = resolved.args ?? {};
       let result: GetPromptResult;
       try {
         result = await state.manager.getPrompt(
@@ -305,12 +411,14 @@ export function createPromptCommand(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.debug(`MCP prompt "${live.originalName}" on ${metadata.serverName} failed: ${message}`);
+        if (!isStateCurrent()) return;
         if (ctx.hasUI) {
           ctx.ui.notify(`MCP prompt "${live.originalName}" failed: ${message}`, "error");
         }
         return;
       }
 
+      if (!isStateCurrent()) return;
       const text = formatPromptResult(result);
       if (!text) {
         if (ctx.hasUI) {
@@ -338,7 +446,7 @@ function buildCommandDescription(metadata: PromptMetadata): string {
 }
 
 /**
- * Public helper used by `/mcp prompts` to render the list of prompts known
+ * Public helper used by `/mcp-adapter prompts` to render the list of prompts known
  * to the adapter, whether from a live connection or the metadata cache.
  */
 export function listAllPromptMetadata(state: McpExtensionState): PromptMetadata[] {

@@ -9,6 +9,7 @@ import {
   type McpToolApprovalRequest,
   type ToolMetadata,
 } from "../types.ts";
+import type { SessionApprovalEntry } from "../session-approvals.ts";
 
 const tool: ToolMetadata = {
   name: "demo_search-records",
@@ -17,10 +18,11 @@ const tool: ToolMetadata = {
 };
 
 function createState(options: {
-  approveTools?: boolean | string[];
+  approveTools?: boolean | "destructive" | string[];
   decision?: "Allow once" | "Allow for session" | "Deny";
   interactive?: boolean;
   broker?: (request: McpToolApprovalRequest) => void;
+  persist?: (record: SessionApprovalEntry) => void;
 } = {}) {
   const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "called" }] });
   const select = vi.fn().mockResolvedValue(options.decision ?? "Allow once");
@@ -46,6 +48,7 @@ function createState(options: {
     promptMetadataLive: new Set(),
     serverInstructions: new Map(),
     approvedToolCalls: new Map<string, true>(),
+    ...(options.persist ? { persistSessionApproval: options.persist } : {}),
     ...(options.broker
       ? { approvalEvents: { emit: vi.fn((channel: string, data: unknown) => {
           expect(channel).toBe(MCP_TOOL_APPROVAL_REQUEST_EVENT);
@@ -161,7 +164,8 @@ describe("tool approval", () => {
   });
 
   it("fails closed headlessly with a structured approval_required result", async () => {
-    const { state, callTool } = createState({ approveTools: true, interactive: false });
+    const persist = vi.fn();
+    const { state, callTool } = createState({ approveTools: true, interactive: false, persist });
 
     const result = await executeCall(state, tool.name, { query: "private" });
 
@@ -173,14 +177,17 @@ describe("tool approval", () => {
     });
     expect(result.content[0].text).toContain("approval-gated");
     expect(callTool).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
   });
 
   it("returns approval_denied without throwing or invoking proxy or direct tools", async () => {
-    const proxy = createState({ approveTools: true, decision: "Deny" });
+    const persist = vi.fn();
+    const proxy = createState({ approveTools: true, decision: "Deny", persist });
     await expect(executeCall(proxy.state, tool.name, {})).resolves.toMatchObject({
       details: { error: "approval_denied", server: "demo", tool: "search-records" },
     });
     expect(proxy.callTool).not.toHaveBeenCalled();
+    expect(persist).not.toHaveBeenCalled();
 
     const direct = createState({ approveTools: true, decision: "Deny" });
     const execute = createDirectToolExecutor(() => direct.state, () => null, {
@@ -195,19 +202,112 @@ describe("tool approval", () => {
     expect(direct.callTool).not.toHaveBeenCalled();
   });
 
+  it("with approveTools \"destructive\", prompts unless the server marks the tool read-only or non-destructive", async () => {
+    const readOnly: ToolMetadata = { name: "demo_list", originalName: "list", description: "", annotations: { readOnlyHint: true } };
+    const safeWrite: ToolMetadata = { name: "demo_tag", originalName: "tag", description: "", annotations: { destructiveHint: false } };
+    const destructive: ToolMetadata = { name: "demo_drop", originalName: "drop", description: "", annotations: { destructiveHint: true } };
+    const unmarked: ToolMetadata = { name: "demo_mystery", originalName: "mystery", description: "" };
+    const { state, callTool, select } = createState({ approveTools: "destructive", decision: "Deny" });
+    state.toolMetadata.set("demo", [readOnly, safeWrite, destructive, unmarked]);
+
+    for (const allowed of [readOnly, safeWrite]) {
+      expect((await executeCall(state, allowed.name, {})).details).not.toHaveProperty("error");
+    }
+    for (const gated of [destructive, unmarked]) {
+      await expect(executeCall(state, gated.name, {})).resolves.toMatchObject({ details: { error: "approval_denied" } });
+    }
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(callTool).toHaveBeenCalledTimes(2);
+
+    // Direct tools rebuild metadata from the connection, so these hints come from what the server advertises.
+    state.manager.getConnection("demo")!.tools.push(
+      { name: "list", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },
+      { name: "drop", inputSchema: { type: "object" }, annotations: { destructiveHint: true } },
+    );
+    const direct = (meta: ToolMetadata) => createDirectToolExecutor(() => state, () => null, {
+      serverName: "demo", originalName: meta.originalName, prefixedName: meta.name, description: "",
+    })("call-1", {}, undefined, undefined, {} as never);
+    expect((await direct(readOnly)).details).not.toHaveProperty("error");
+    await expect(direct(destructive)).resolves.toMatchObject({ details: { error: "approval_denied" } });
+    expect(select).toHaveBeenCalledTimes(3);
+
+    const resource: ToolMetadata = { name: "demo_get_doc", originalName: "get_doc", description: "", resourceUri: "test://doc" };
+    expect(isToolCallApprovalRequired(state.config, "demo", resource)).toBe(false);
+  });
+
+  it("lets per-server approveTools override a global \"destructive\" and the reverse", () => {
+    const unmarked: ToolMetadata = { name: "demo_mystery", originalName: "mystery", description: "" };
+    const readOnly: ToolMetadata = { ...unmarked, annotations: { readOnlyHint: true } };
+    const globalDestructive: McpConfig = { settings: { approveTools: "destructive" }, mcpServers: { demo: { approveTools: false } } };
+    const serverDestructive: McpConfig = { settings: { approveTools: true }, mcpServers: { demo: { approveTools: "destructive" } } };
+
+    expect(isToolCallApprovalRequired(globalDestructive, "demo", unmarked)).toBe(false);
+    expect(isToolCallApprovalRequired(serverDestructive, "demo", readOnly)).toBe(false);
+    expect(isToolCallApprovalRequired(serverDestructive, "demo", unmarked)).toBe(true);
+    const mistyped = { mcpServers: { demo: { approveTools: "destrucive" } } } as unknown as McpConfig;
+    expect(isToolCallApprovalRequired(mistyped, "demo", readOnly)).toBe(true);
+  });
+
+  it("names the server's live destructive or read-only hint in the prompt on proxy and direct calls", async () => {
+    const proxy = createState({ approveTools: true });
+    proxy.state.toolMetadata.set("demo", [{ ...tool, annotations: { destructiveHint: true } }]);
+    await executeCall(proxy.state, tool.name, {});
+    expect(proxy.select.mock.calls[0]?.[0]).toContain("marks this tool as destructive");
+
+    const direct = createState({ approveTools: true });
+    // The registration-time spec carries no hints; the connected server now advertises one.
+    direct.state.manager.getConnection("demo")!.tools = [{ name: "search-records", annotations: { destructiveHint: true } }];
+    const execute = createDirectToolExecutor(() => direct.state, () => null, {
+      serverName: "demo",
+      originalName: "search-records",
+      prefixedName: "demo_search-records",
+      description: "Search records",
+    });
+    await execute("call-1", {}, undefined, undefined, {} as never);
+    expect(direct.select.mock.calls[0]?.[0]).toContain("marks this tool as destructive");
+  });
+
   it("caches only Allow for session decisions", async () => {
-    const session = createState({ approveTools: true, decision: "Allow for session" });
+    const persist = vi.fn();
+    const session = createState({ approveTools: true, decision: "Allow for session", persist });
     await ensureToolCallApproved(session.state, "demo", tool, { record: { id: "safe", type: "demo" } }, undefined);
     await ensureToolCallApproved(session.state, "demo", tool, { record: { type: "demo", id: "safe" } }, undefined);
     await ensureToolCallApproved(session.state, "demo", tool, { record: { id: "other", type: "demo" } }, undefined);
     expect(session.select).toHaveBeenCalledTimes(2);
     expect(session.state.approvedToolCalls.size).toBe(2);
+    expect(persist).toHaveBeenCalledTimes(2);
+    expect(persist.mock.calls[0]?.[0]).toMatchObject({
+      version: 1,
+      kind: "tool",
+      decision: "allow_for_session",
+      serverName: "demo",
+      originalToolName: "search-records",
+      definitionHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      argsHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(persist.mock.calls[0]?.[0]).not.toHaveProperty("args");
 
-    const once = createState({ approveTools: true, decision: "Allow once" });
+    const oncePersist = vi.fn();
+    const once = createState({ approveTools: true, decision: "Allow once", persist: oncePersist });
     await ensureToolCallApproved(once.state, "demo", tool, {}, undefined);
     await ensureToolCallApproved(once.state, "demo", tool, {}, undefined);
     expect(once.select).toHaveBeenCalledTimes(2);
     expect(once.state.approvedToolCalls.size).toBe(0);
+    expect(oncePersist).not.toHaveBeenCalled();
+  });
+
+  it("invalidates persisted grants when the tool definition changes", async () => {
+    const persist = vi.fn();
+    const session = createState({ approveTools: true, decision: "Allow for session", persist });
+    const args = { query: "safe" };
+
+    await ensureToolCallApproved(session.state, "demo", tool, args, undefined);
+    await ensureToolCallApproved(session.state, "demo", { ...tool, inputSchema: { type: "number" } }, args, undefined);
+    await ensureToolCallApproved(session.state, "demo", { ...tool, inputSchema: tool.inputSchema, uiResourceUri: "ui://demo/other" }, args, undefined);
+
+    expect(session.select).toHaveBeenCalledTimes(3);
+    expect(persist).toHaveBeenCalledTimes(3);
+    expect(new Set(persist.mock.calls.map(([record]) => record.definitionHash)).size).toBe(3);
   });
 
   it("lets a broker allow a gated call without showing the built-in prompt", async () => {
@@ -294,7 +394,7 @@ describe("tool approval", () => {
 
       expect(callTool).toHaveBeenCalledWith(
         expect.objectContaining({ name: "search-records", arguments: expected }),
-        undefined,
+        { onprogress: expect.any(Function), resetTimeoutOnProgress: true },
       );
     }
   });
@@ -316,14 +416,16 @@ describe("tool approval", () => {
     const broker = vi.fn((request: McpToolApprovalRequest) => {
       expect(request.claim(() => "allow_for_session")).toBe(true);
     });
-    const { state } = createState({ approveTools: true, broker });
+    const persist = vi.fn();
+    const { state } = createState({ approveTools: true, broker, persist });
 
     await ensureToolCallApproved(state, "demo", tool, {}, undefined);
     await ensureToolCallApproved(state, "demo", tool, {}, undefined);
     await ensureToolCallApproved(state, "demo", tool, { query: "other" }, undefined);
 
-    expect(broker).toHaveBeenCalledTimes(2);
+    expect(broker).toHaveBeenCalledTimes(3);
     expect(state.approvedToolCalls.size).toBe(2);
+    expect(persist).toHaveBeenCalledTimes(2);
   });
 
   it("requires brokers to claim synchronously", async () => {

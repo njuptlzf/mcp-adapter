@@ -83,6 +83,8 @@ describe("resource tool binary materialization", () => {
     expect(text).not.toContain(blob);
     expect(readFileSync(path, "utf8")).toBe("binary resource content");
     expect(readResource).toHaveBeenCalledWith({ uri: resourceUri }, undefined);
+    // The call reports the reader's registered name, so a held search-mode reader can be activated by it.
+    expect(result.details).toMatchObject({ server: "demo", resourceUri, canonicalTool: metadata.name });
   });
 
   it("materializes binary direct resource results", async () => {

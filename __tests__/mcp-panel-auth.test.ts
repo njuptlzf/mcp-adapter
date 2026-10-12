@@ -311,4 +311,49 @@ describe("mcp-panel auth actions", () => {
     expect(output).not.toContain("github");
     panel.dispose();
   });
+
+  it("imports sign-ins from Pi with ctrl+p and reconnects the imported servers", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" },
+      },
+    };
+    const callbacks = createCallbacks("needs-auth");
+    callbacks.importPiSignIns = vi.fn(() => ({ imported: ["github"], failed: [] }));
+    const panel = createMcpPanel(config, createCache(config), new Map(), callbacks, { requestRender: () => {} }, () => {});
+    expect(stripAnsi(panel.render(160).join("\n"))).toContain("ctrl+p import sign-ins from Pi");
+
+    panel.handleInput("\x10");
+    await Promise.resolve();
+
+    expect(callbacks.importPiSignIns).toHaveBeenCalledTimes(1);
+    expect(callbacks.reconnect).toHaveBeenCalledWith("github");
+    const output = stripAnsi(panel.render(160).join("\n"));
+    expect(output).toContain("Imported sign-ins from Pi for github");
+    expect(output).not.toContain("ctrl+p import sign-ins from Pi");
+    panel.dispose();
+  });
+
+  it("reconnects the servers that imported and keeps the action when another import fails", async () => {
+    const config: McpConfig = {
+      mcpServers: {
+        github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" },
+        gitlab: { url: "https://gitlab.example.com/mcp", auth: "oauth" },
+      },
+    };
+    const callbacks = createCallbacks("needs-auth");
+    callbacks.importPiSignIns = vi.fn(() => ({ imported: ["github"], failed: [{ server: "gitlab", error: "store unavailable" }] }));
+    const panel = createMcpPanel(config, null, new Map(), callbacks, { requestRender: () => {} }, () => {});
+
+    panel.handleInput("\x10");
+    await Promise.resolve();
+
+    expect(callbacks.reconnect).toHaveBeenCalledTimes(1);
+    expect(callbacks.reconnect).toHaveBeenCalledWith("github");
+    const output = stripAnsi(panel.render(200).join("\n"));
+    expect(output).toContain("Imported sign-ins from Pi for github");
+    expect(output).toContain("Failed to import the sign-in from Pi for gitlab: store unavailable");
+    expect(output).toContain("ctrl+p import sign-ins from Pi");
+    panel.dispose();
+  });
 });

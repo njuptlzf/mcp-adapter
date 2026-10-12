@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createMcpPanel } from "../mcp-panel.ts";
 import { createMcpSetupPanel, type SetupPanelCallbacks } from "../mcp-setup-panel.ts";
 import { createPanelKeys } from "../panel-keys.ts";
-import type { McpDiscoverySummary } from "../config.ts";
+import { KNOWN_SERVER_PRESETS, type McpDiscoverySummary } from "../config.ts";
 import type { McpConfig, McpPanelCallbacks } from "../types.ts";
 
 const CTRL_P = "\x10";
@@ -18,6 +18,14 @@ const ENTER = "\r";
 
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+function moveSetupCursorTo(panel: { render(width: number): string[]; handleInput(data: string): void }, label: string, key = DOWN): void {
+  for (let presses = 0; presses < 40; presses += 1) {
+    if (panel.render(200).some((line) => stripAnsi(line).includes(`› ${label}`))) return;
+    panel.handleInput(key);
+  }
+  throw new Error(`Setup cursor never reached ${label}`);
 }
 
 function createEmacsKeybindings(): KeybindingsManager {
@@ -72,6 +80,7 @@ function createEmptyDiscovery(): McpDiscoverySummary {
     conflicts: [],
     fingerprint: "test",
     repoPrompt: { configured: false },
+    knownServerPresets: KNOWN_SERVER_PRESETS,
   };
 }
 
@@ -79,13 +88,13 @@ function createSetupCallbacks(): SetupPanelCallbacks {
   const preview = { path: "/tmp/x", existed: false, changed: true, beforeText: "", afterText: "", diffText: "" };
   return {
     previewImports: () => preview,
-    previewStarterProject: () => preview,
+    previewStarterConfig: () => preview,
     previewRepoPrompt: () => null,
     previewKnownServer: () => preview,
     adoptImports: async () => ({ added: [], path: "/tmp/x" }),
-    scaffoldProjectConfig: vi.fn(async () => ({ path: "/tmp/x" })),
-    addRepoPrompt: async () => ({ path: "/tmp/x", serverName: "repoprompt" }),
-    addKnownServer: async (preset) => ({ path: "/tmp/x", serverName: preset.name }),
+    scaffoldConfig: vi.fn(async () => ({ path: "/tmp/x" })),
+    addRepoPrompt: vi.fn(async () => ({ path: "/tmp/x", serverName: "repoprompt" })),
+    addKnownServer: vi.fn(async (preset) => ({ path: "/tmp/x", serverName: preset.name })),
     openPath: async () => {},
     markSetupCompleted: () => {},
   };
@@ -217,7 +226,7 @@ describe("mcp-panel custom keybindings", () => {
     panel.handleInput(CTRL_S);
     expect(done).not.toHaveBeenCalled();
     panel.handleInput(CTRL_P);
-    expect(done).toHaveBeenCalledWith({ changes: new Map(), cancelled: false });
+    expect(done).toHaveBeenCalledWith({ changes: new Map(), disabledChanges: new Map(), cancelled: false });
     panel.dispose();
   });
 
@@ -258,13 +267,66 @@ describe("mcp-setup-panel custom keybindings", () => {
       () => {},
     );
 
-    // Actions for this discovery: view-example, scaffold-project, show-precedence, close.
+    // Select global target, then scaffold the selected normal config path.
     panel.handleInput(CTRL_N);
+    panel.handleInput(ENTER);
+    moveSetupCursorTo(panel, "Scaffold ~/.config/mcp/mcp.json", CTRL_N);
+    await Promise.resolve();
+    await Promise.resolve();
     panel.handleInput(ENTER);
     await Promise.resolve();
     await Promise.resolve();
-    expect(callbacks.scaffoldProjectConfig).toHaveBeenCalledTimes(1);
+    expect(callbacks.scaffoldConfig).toHaveBeenCalledWith("global");
     panel.dispose();
+  });
+
+  it("adds known servers to the selected shared config target", async () => {
+    const callbacks = createSetupCallbacks();
+    const panel = createMcpSetupPanel(
+      createEmptyDiscovery(),
+      callbacks,
+      {
+        mode: "setup",
+        onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false },
+      },
+      { requestRender: () => {} },
+      () => {},
+    );
+
+    panel.handleInput(DOWN);
+    panel.handleInput(ENTER);
+    moveSetupCursorTo(panel, "DeepWiki");
+    panel.handleInput(ENTER);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(callbacks.addKnownServer).toHaveBeenCalledWith(expect.objectContaining({ id: "deepwiki" }), "global");
+    panel.dispose();
+  });
+
+  it("adds desktop app servers to the global config and says whether they are reachable", async () => {
+    const figma = KNOWN_SERVER_PRESETS.find(({ id }) => id === "figma")!;
+    for (const [added, message] of [
+      [{ reachable: true }, "A server is answering at http://127.0.0.1:3845/mcp."],
+      [{ reachable: false }, "Nothing is answering at http://127.0.0.1:3845/mcp yet. To enable it, open a Design file in Figma, switch to Dev Mode (Shift+D), and click 'Enable desktop MCP server' in the inspect panel."],
+      [{ reachable: true, ignoredBecause: "another config file disables figma" }, "Pi won't use it: another config file disables figma."],
+    ] as const) {
+      const callbacks = createSetupCallbacks();
+      callbacks.addKnownServer = vi.fn(async (preset) => ({ path: "/tmp/x", serverName: preset.name, ...added }));
+      const panel = createMcpSetupPanel(
+        { ...createEmptyDiscovery(), knownServerPresets: [figma] },
+        callbacks,
+        { mode: "setup", onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false } },
+        { requestRender: () => {} },
+        () => {},
+      );
+
+      moveSetupCursorTo(panel, "Figma (desktop)");
+      panel.handleInput(ENTER);
+      await vi.waitFor(() => expect(stripAnsi(panel.render(400).join("\n"))).toContain(`Added Figma (desktop) to /tmp/x. ${message}`));
+      expect(callbacks.addKnownServer).toHaveBeenCalledWith(figma, "global");
+      panel.dispose();
+    }
   });
 
   it("keeps setup previews usable at mobile width", () => {
@@ -279,17 +341,14 @@ describe("mcp-setup-panel custom keybindings", () => {
       () => {},
     );
 
-    // Actions for this discovery: view-example, scaffold-project, show-precedence, known presets, close.
-    panel.handleInput(DOWN);
-    panel.handleInput(DOWN);
-    panel.handleInput(DOWN);
+    moveSetupCursorTo(panel, "Scaffold .mcp.json");
     const lines = panel.render(37);
     const output = lines.join("\n");
 
     expect(Math.max(...lines.map((line) => visibleWidth(line)))).toBeLessThanOrEqual(37);
-    expect(output).toContain("DeepWiki");
-    expect(output).toContain("write preview");
-    expect(output).toContain("Enter select");
+    expect(output).toContain("› Scaffold .mcp.json");
+    expect(output).toContain("Creates /tmp/x");
+    expect(output).toContain("enter select");
     panel.dispose();
   });
 
@@ -301,20 +360,24 @@ describe("mcp-setup-panel custom keybindings", () => {
         mode: "setup",
         onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false },
       },
-      { requestRender: () => {} },
+      // A tall terminal leaves room for the full precedence details.
+      { requestRender: () => {}, terminal: { rows: 60 } },
       () => {},
     );
 
-    // Actions for this discovery: view-example, scaffold-project, show-precedence, close.
-    panel.handleInput(DOWN);
-    panel.handleInput(DOWN);
-    const output = panel.render(100).join("\n");
+    moveSetupCursorTo(panel, "Config precedence");
+    const output = panel.render(200).join("\n");
 
+    expect(output).toContain("Recommended shared config:");
+    expect(output).toContain("project/team: .mcp.json");
+    expect(output).toContain("all projects: ~/.config/mcp/mcp.json");
+    expect(output).toContain("Advanced compatibility and adapter-owned layers:");
     expect(output).toContain("Read order (later entries win):");
     expect(output).toContain("0. detected host configs (opt-in lowest-precedence fallback)");
     expect(output).toContain("2. ~/.agents/mcp.json");
     expect(output).toContain("3. ~/.agents/mcp/mcp.json");
-    expect(output).toContain("6. .pi/mcp.json");
+    expect(output).toContain("5. configured ancestor root to parent(cwd), farthest first (opt-in)");
+    expect(output).toContain("7. cwd/.pi/mcp-adapter.json");
     panel.dispose();
   });
 
@@ -332,15 +395,14 @@ describe("mcp-setup-panel custom keybindings", () => {
           mode: "setup",
           onboardingState: { version: 1, sharedConfigHintShown: false, setupCompleted: false },
         },
-        { requestRender: () => {} },
+        { requestRender: () => {}, terminal: { rows: 60 } },
         () => {},
       );
 
-      panel.handleInput(DOWN);
-      panel.handleInput(DOWN);
-      const output = panel.render(100).join("\n");
+      moveSetupCursorTo(panel, "Config precedence");
+      const output = panel.render(200).join("\n");
 
-      expect(output).toContain("6. .arc/mcp.json");
+      expect(output).toContain("7. cwd/.arc/mcp-adapter.json");
       panel.dispose();
     } finally {
       if (originalPackageDir === undefined) {

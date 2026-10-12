@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import stripJsonComments from "strip-json-comments";
 
@@ -38,12 +39,12 @@ function getAgentDir() {
 }
 
 const AGENT_DIR = getAgentDir();
-const PI_CONFIG_PATH = path.join(AGENT_DIR, "mcp.json");
+const PI_CONFIG_PATH = path.join(AGENT_DIR, "mcp-adapter.json");
 const GENERIC_GLOBAL_CONFIG_PATH = path.join(HOME, ".config", "mcp", "mcp.json");
 const AGENTS_GLOBAL_CONFIG_PATH = path.join(HOME, ".agents", "mcp.json");
 const AGENTS_NESTED_GLOBAL_CONFIG_PATH = path.join(HOME, ".agents", "mcp", "mcp.json");
 const PROJECT_CONFIG_PATH = path.resolve(process.cwd(), ".mcp.json");
-const PROJECT_PI_CONFIG_PATH = path.resolve(process.cwd(), getConfigDirName(), "mcp.json");
+const PROJECT_PI_CONFIG_PATH = path.resolve(process.cwd(), getConfigDirName(), "mcp-adapter.json");
 
 const IMPORT_PATHS = {
   cursor: [path.join(HOME, ".cursor", "mcp.json")],
@@ -74,36 +75,47 @@ function printHelp(log = console.log) {
   log("  pi-mcp-adapter init --dry-run");
   log("  pi-mcp-adapter init --discover-host-configs  Opt in to host config fallback discovery");
   log("");
+  log("Check configured servers (exits 1 when an enabled server fails):");
+  log("  pi-mcp-adapter doctor         Connect each enabled server and report its state and tool count");
+  log("  pi-mcp-adapter doctor --json  Print the same report as a JSON array");
+  log("");
   log("Bearer token storage (servers configured with auth: \"bearer\" and bearerTokenStore: true):");
   log("  pi-mcp-adapter token set <server>     Store a token read from stdin (masked prompt or pipe; never argv)");
   log("  pi-mcp-adapter token status <server>  Report whether a stored token matches the configured URL");
   log("  pi-mcp-adapter token remove <server>  Remove the stored token");
+  log("");
+  log("Jev API key storage (SYSTEMONE_ENDPOINT selects the provider endpoint):");
+  log("  pi-mcp-adapter key set systemone     Store a key read from stdin (masked prompt or pipe; never argv)");
+  log("  pi-mcp-adapter key status systemone  Report the effective credential source without revealing it");
+  log("  pi-mcp-adapter key remove systemone  Remove the stored key");
 }
 
 function readJsonFile(filePath) {
-  return JSON.parse(stripJsonComments(fs.readFileSync(filePath, "utf-8"), { trailingCommas: true }));
+  const raw = fs.readFileSync(filePath, "utf-8");
+  const text = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+  return text.trim() === "" ? {} : JSON.parse(stripJsonComments(text, { trailingCommas: true }));
 }
 
 function loadPiConfig() {
-  if (!fs.existsSync(PI_CONFIG_PATH)) {
+  if (!fs.lstatSync(PI_CONFIG_PATH, { throwIfNoEntry: false })) {
     return { mcpServers: {} };
   }
 
   const raw = readJsonFile(PI_CONFIG_PATH);
-  const mcpServers = raw.mcpServers ?? raw["mcp-servers"] ?? {};
-  if (!mcpServers || typeof mcpServers !== "object" || Array.isArray(mcpServers)) {
-    throw new Error(`Invalid MCP config at ${PI_CONFIG_PATH}: expected \"mcpServers\" to be an object`);
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new Error(`Invalid MCP config at ${PI_CONFIG_PATH}: top-level value must be an object`);
   }
-
-  const normalized = { ...raw };
-  delete normalized["mcp-servers"];
-
-  const imports = Array.isArray(raw.imports) ? raw.imports.filter((value) => typeof value === "string") : undefined;
-  return {
-    ...normalized,
-    mcpServers,
-    imports,
-  };
+  for (const key of ["mcpServers", "mcp-servers", "settings"]) {
+    const value = raw[key];
+    if (value !== undefined && (!value || typeof value !== "object" || Array.isArray(value))) {
+      throw new Error(`Invalid MCP config at ${PI_CONFIG_PATH}: ${key} must be an object`);
+    }
+  }
+  if (raw.imports !== undefined && (!Array.isArray(raw.imports) || raw.imports.some((value) => typeof value !== "string"))) {
+    throw new Error(`Invalid MCP config at ${PI_CONFIG_PATH}: imports must be an array of strings`);
+  }
+  const { "mcp-servers": legacyServers, ...normalized } = raw;
+  return { ...normalized, mcpServers: raw.mcpServers ?? legacyServers ?? {} };
 }
 
 function findAvailableImports() {
@@ -126,9 +138,9 @@ function printDiscovery(log, imports) {
     ["User-global standard MCP", GENERIC_GLOBAL_CONFIG_PATH],
     ["User-global .agents MCP", AGENTS_GLOBAL_CONFIG_PATH],
     ["User-global .agents nested MCP", AGENTS_NESTED_GLOBAL_CONFIG_PATH],
-    ["Pi global override", PI_CONFIG_PATH],
+    ["MCP adapter global override", PI_CONFIG_PATH],
     ["Project standard MCP", PROJECT_CONFIG_PATH],
-    ["Project Pi override", PROJECT_PI_CONFIG_PATH],
+    ["Project MCP adapter override", PROJECT_PI_CONFIG_PATH],
   ];
 
   for (const [label, filePath] of paths) {
@@ -166,8 +178,8 @@ async function runInit(argv, log = console.log) {
 
   const discoverySettingChanged = discoverHostConfigs && existingConfig.settings?.hostConfigDiscovery !== "on";
   if (importsToAdd.length === 0 && !discoverySettingChanged) {
-    log("\nNo Pi config changes needed.");
-    log("Standard MCP configs are discovered automatically, and host-specific imports are already configured or unavailable.");
+    log("\nNo MCP adapter config changes needed.");
+    log("Standard MCP configs are discovered automatically. Pi's mcp.json files are reserved for built-in MCP; adapter settings belong in mcp-adapter.json.");
     return 0;
   }
 
@@ -179,10 +191,10 @@ async function runInit(argv, log = console.log) {
   };
 
   if (importsToAdd.length > 0) {
-    log(`\nDetected host configs to import into Pi: ${importsToAdd.join(", ")}`);
+    log(`\nDetected host configs to import into the MCP adapter: ${importsToAdd.join(", ")}`);
   }
   if (discoverySettingChanged) {
-    log("Opting in to host-specific fallback discovery (standard and Pi-owned configs still take precedence).");
+    log("Opting in to host-specific fallback discovery (standard and adapter-owned configs still take precedence).");
   }
 
   if (dryRun) {
@@ -192,7 +204,7 @@ async function runInit(argv, log = console.log) {
 
   writePiConfig(nextConfig);
   log(`Updated ${PI_CONFIG_PATH}`);
-  log("Pi will now keep reading standard MCP configs automatically, while these imports cover host-specific config formats.");
+  log("The adapter reads standard MCP configs automatically and stores adapter-specific imports in mcp-adapter.json; Pi's mcp.json is never read by the adapter.");
   if (discoverySettingChanged) {
     log("Host config discovery is explicit and does not write to or execute commands from external host files.");
   }
@@ -202,20 +214,20 @@ async function runInit(argv, log = console.log) {
 async function importTokenModules(error) {
   try {
     const [store, config, utils] = await Promise.all([
-      import("./mcp-bearer-store.ts"),
-      import("./config.ts"),
-      import("./utils.ts"),
+      import("./dist/mcp-bearer-store.js"),
+      import("./dist/config.js"),
+      import("./dist/utils.js"),
     ]);
     return { store, config, utils };
   } catch (err) {
-    error("Token commands need a Node.js version that can load TypeScript modules (Node 22.18+ or 23+).");
+    error("Unable to load token command modules.");
     error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
     return undefined;
   }
 }
 
-function readTokenFromStdin(stdin) {
-  if (stdin.isTTY) return readTokenMasked(stdin);
+function readSecretFromStdin(stdin, prompt = "Enter bearer token (input hidden): ") {
+  if (stdin.isTTY) return readSecretMasked(stdin, prompt);
   return new Promise((resolve, reject) => {
     let data = "";
     stdin.setEncoding("utf8");
@@ -228,9 +240,9 @@ function readTokenFromStdin(stdin) {
 }
 
 // Raw-mode masked prompt: the token never echoes to the terminal.
-function readTokenMasked(stdin) {
+function readSecretMasked(stdin, prompt) {
   return new Promise((resolve, reject) => {
-    process.stderr.write("Enter bearer token (input hidden): ");
+    process.stderr.write(prompt);
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding("utf8");
@@ -306,7 +318,7 @@ async function runToken(argv, log, error, stdin) {
   }
 
   if (action === "set") {
-    const token = await readTokenFromStdin(stdin);
+    const token = await readSecretFromStdin(stdin);
     if (!token) {
       error("No token provided on stdin.");
       return 1;
@@ -352,6 +364,309 @@ async function runToken(argv, log, error, stdin) {
   return 0;
 }
 
+async function runKey(argv, log, error, stdin) {
+  const [action, provider, ...extra] = argv;
+  // `typesafe` is the pre-endpoint provider name, kept for existing scripts.
+  if (!["set", "status", "remove"].includes(action) || (provider !== "systemone" && provider !== "typesafe")) {
+    error("Usage: pi-mcp-adapter key <set|status|remove> systemone");
+    error("`key set` reads the API key from stdin only. Never pass the key as an argument.");
+    return 1;
+  }
+  if (extra.length > 0) {
+    error("Unexpected extra arguments. The API key must not be passed on the command line; pipe it on stdin or use the interactive prompt.");
+    return 1;
+  }
+  let store;
+  try { store = await import("./dist/jev-key-store.js"); }
+  catch (err) {
+    error("Unable to load Jev key command module.");
+    error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+  const resolution = store.resolveJevEndpoint();
+  if (resolution.status === "unavailable") {
+    error("SYSTEMONE_ENDPOINT is set but invalid, so no key can be stored or read for it.");
+    error(resolution.message);
+    return 1;
+  }
+  const endpoint = resolution.endpoint;
+
+  if (action === "status") {
+    const status = store.resolveJevCredential(process.env, endpoint);
+    if (status.status === "present") { log(`source=${status.source}`); log(`endpoint=${endpoint.href}`); return 0; }
+    if (status.status === "unavailable") { error(`unavailable: ${status.message}`); return 1; }
+    log("missing");
+    return 1;
+  }
+  if (action === "set") {
+    const apiKey = await readSecretFromStdin(stdin, `Enter Jev API key for ${endpoint.href} (input hidden): `);
+    if (!apiKey) { error("No API key provided on stdin."); return 1; }
+    try { store.saveJevApiKey(apiKey, endpoint); }
+    catch (err) { error(err instanceof Error ? err.message : "Jev API key could not be stored."); return 1; }
+    log("Jev API key stored in the OS secure credential store.");
+    log(`endpoint=${endpoint.href}`);
+  } else {
+    try { store.removeJevApiKey(endpoint); }
+    catch (err) { error(err instanceof Error ? err.message : "Jev API key could not be removed."); return 1; }
+    log("Jev API key removed from the OS secure credential store.");
+  }
+  if (Object.hasOwn(process.env, "SYSTEMONE_API_KEY")) log("Note: SYSTEMONE_API_KEY is present and overrides the stored key.");
+  else if (endpoint.origin === store.OPENROUTER_ORIGIN && Object.hasOwn(process.env, "OPENROUTER_API_KEY")) log("Note: OPENROUTER_API_KEY is present and overrides the stored key.");
+  else if (Object.hasOwn(process.env, "TYPESAFE_API_KEY")) log(endpoint.href === store.JEV_DEFAULT_ENDPOINT
+    ? "Note: TYPESAFE_API_KEY is present and overrides the stored key."
+    : `Note: TYPESAFE_API_KEY is ignored for ${endpoint.href}; it is a TypeSafe credential and is never sent there.`);
+  return 0;
+}
+
+const DOCTOR_CONNECT_TIMEOUT_MS = 15_000;
+
+// A second layer behind describeConnectError: messages can still name configured values.
+// Values under 4 characters are flags such as DEBUG=1, and redacting them would garble the text.
+function redactDoctorMessage(text, definition, utils) {
+  const configured = [definition.bearerToken, definition.oauth?.clientSecret, ...Object.values(definition.headers ?? {}), ...Object.values(definition.env ?? {})];
+  if (definition.bearerTokenEnv) configured.push(process.env[definition.bearerTokenEnv]);
+  if (typeof definition.url === "string") {
+    try {
+      configured.push(...new URL(utils.interpolateEnvVars(definition.url)).searchParams.values());
+    } catch {
+      // An invalid URL is reported without its value.
+    }
+  }
+  const secrets = configured
+    .filter((value) => typeof value === "string")
+    .flatMap((value) => [value, utils.interpolateEnvVars(value)])
+    .flatMap((value) => [value, ...value.split(/\s+/)])
+    .filter((value) => value.length >= 4)
+    .sort((left, right) => right.length - left.length);
+  let redacted = text;
+  for (const secret of secrets) redacted = redacted.replaceAll(secret, "***");
+  return redacted;
+}
+
+// Doctor prints only facts the adapter composes, never server-originated text such as HTTP
+// response bodies or child stderr: those can carry secrets that no configured value reveals.
+function describeConnectError(err, definition, url) {
+  if (!definition.url) {
+    // server-manager appends the child's stderr as `${message} (${stderr})`, keeping the original as cause.
+    const base = err.cause instanceof Error && err.message.startsWith(`${err.cause.message} (`) ? err.cause : err;
+    const message = typeof base.code === "number" ? `server returned JSON-RPC error ${base.code}` : base.message;
+    return definition.command ? `${message} — run the command directly to see its output` : message;
+  }
+  // Adapter-composed failures of secret commands and CA files, thrown before any response.
+  if (/^(Failed to resolve MCP server|HTTP request headers command|MCP caFile|Missing environment variable in MCP caFile)/.test(err.message)) {
+    return err.message;
+  }
+  let status;
+  const codes = new Set();
+  const pending = [err];
+  const seen = new Set();
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (typeof current !== "object" || current === null || seen.has(current)) continue;
+    seen.add(current);
+    if (typeof current.status === "number") status ??= current.status;
+    status ??= /\(HTTP (\d{3})\)/.exec(current.message ?? "")?.[1];
+    if (typeof current.code === "string" && /^E[A-Z]+$/.test(current.code)) codes.add(current.code);
+    pending.push(current.cause, current.data?.cause, ...(current instanceof AggregateError ? current.errors : []));
+  }
+  const parts = [...(status ? [`HTTP ${status}`] : []), ...codes];
+  // server-manager appends the probe classification to the original message, keeping it as cause.
+  const suffix = err.cause instanceof Error && err.message.startsWith(err.cause.message) ? err.message.slice(err.cause.message.length) : "";
+  if (suffix.startsWith(" — probe: ")) parts.push(suffix.slice(3));
+  if (codes.has("ECONNREFUSED") && ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname)) {
+    const configured = definition.url.replace(/[?#].*$/s, "").replace(/^([a-z][a-z\d+.-]*:\/\/)[^/]*@/i, "$1");
+    parts.push(`Nothing is listening at ${configured}. Start the app or local process that serves this MCP server.`);
+  }
+  return parts.length > 0 ? parts.join(" — ") : "connection failed";
+}
+
+const PI_CORE_PACKAGE = "@earendil-works/pi-coding-agent";
+
+// Pi is a peer dependency and doesn't resolve when this CLI is installed as a Pi package, so fall
+// back to the Pi install behind the first `pi` on PATH, the binary the doctor runs for `pi --version`.
+async function importPiCore() {
+  try {
+    return await import(PI_CORE_PACKAGE);
+  } catch (err) {
+    const names = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").map((ext) => `pi${ext}`) : ["pi"];
+    const bin = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)
+      .flatMap((dir) => names.map((name) => path.join(dir, name)))
+      .find((file) => {
+        try {
+          fs.accessSync(file, fs.constants.X_OK);
+          return fs.statSync(file).isFile();
+        } catch {
+          return false;
+        }
+      });
+    if (!bin) throw err;
+    const isPiCore = (dir) => {
+      const file = path.join(dir, "package.json");
+      return fs.existsSync(file) && JSON.parse(fs.readFileSync(file, "utf8")).name === PI_CORE_PACKAGE;
+    };
+    let root;
+    if (/\.(cmd|ps1)$/i.test(bin)) {
+      // Windows npm shims sit beside the prefix's node_modules and name the package they launch.
+      const shimmed = path.join(path.dirname(bin), "node_modules", PI_CORE_PACKAGE);
+      if (/node_modules[\\/]@earendil-works[\\/]pi-coding-agent[\\/]/i.test(fs.readFileSync(bin, "utf8")) && isPiCore(shimmed)) root = shimmed;
+    } else {
+      // npm links bin/pi to a file inside Pi's package; only the package that owns that file counts.
+      for (let dir = path.dirname(fs.realpathSync(bin)); !root; dir = path.dirname(dir)) {
+        if (isPiCore(dir)) root = dir;
+        else if (path.dirname(dir) === dir) break;
+      }
+    }
+    if (!root) throw err;
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+    const target = pkg.exports?.["."];
+    const entry = typeof target === "string" ? target : target?.import ?? pkg.main;
+    return import(pathToFileURL(path.join(root, entry)).href);
+  }
+}
+
+async function runDoctor(argv, log, error) {
+  const json = argv[0] === "--json";
+  if (argv.length > (json ? 1 : 0)) {
+    error("Usage: pi-mcp-adapter doctor [--json]");
+    return 1;
+  }
+  let config, trust, manager, auth, authFlow, utils, agentDir;
+  try {
+    [config, trust, manager, auth, authFlow, utils, agentDir] = await Promise.all([
+      import("./dist/config.js"),
+      import("./dist/project-server-trust.js"),
+      import("./dist/server-manager.js"),
+      import("./dist/mcp-auth.js"),
+      import("./dist/mcp-auth-flow.js"),
+      import("./dist/utils.js"),
+      import("./dist/agent-dir.js"),
+    ]);
+  } catch (err) {
+    error("Unable to load doctor command modules.");
+    error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
+    return 1;
+  }
+
+  const cwd = process.cwd();
+  // Pi 0.99+ owns ~/.pi/agent/mcp.json and .pi/mcp.json; older Pi used those names for adapter config.
+  const piVersion = spawnSync("pi", ["--version"], { encoding: "utf8", timeout: 5_000, shell: process.platform === "win32" }).stdout ?? "";
+  const [major, minor] = piVersion.trim().split(".").map(Number);
+  const piSupportsMcp = major > 0 || minor >= 99;
+  config.setPiMcpConfigEnabled(piSupportsMcp);
+  if (!piSupportsMcp && [config.getPiMcpGlobalConfigPath(), config.getProjectPiMcpConfigPath(cwd)].some((file) => fs.existsSync(file))) {
+    error("Pi 0.99 or later wasn't found on PATH, so Pi's own mcp.json files were not checked.");
+  }
+  const loaded = config.loadMcpConfigWithSources(undefined, cwd);
+  let projectTrusted = false;
+  if (loaded.projectServers.size > 0) {
+    try {
+      const pi = await importPiCore();
+      // Past this check Pi first runs project_trust extension handlers, which doctor can't, so only a stored "trusted" decision counts.
+      if (typeof pi.hasTrustRequiringProjectResources === "function" && !pi.hasTrustRequiringProjectResources(cwd)) {
+        projectTrusted = true;
+      } else {
+        projectTrusted = new pi.ProjectTrustStore(agentDir.getAgentDir()).get(cwd) === true;
+      }
+    } catch (err) {
+      error(`Could not read Pi's project trust, so project servers are treated as untrusted: ${utils.formatTerminalError(err)}`);
+    }
+  }
+  const { config: effective, blockedServers } = await trust.applyProjectServerTrust(loaded, {
+    cwd,
+    hasUI: false,
+    isProjectTrusted: () => projectTrusted,
+  });
+  const authOptions = auth.getAuthStorageOptions(effective.settings?.oauthDir, cwd, effective.settings?.oauthCredentialStore);
+  const serverManager = new manager.McpServerManager(cwd);
+  serverManager.setDefaultRequestTimeoutMs(effective.settings?.requestTimeoutMs);
+  serverManager.setAuthStorageOptions(authOptions);
+
+  const check = async (name, definition, signal) => {
+    const block = blockedServers.get(name);
+    if (block) return { state: "blocked", message: trust.describeProjectServerBlock(block.reason) };
+    if (definition.disabled === true) return { state: "disabled" };
+    // The doctor has no Pi model registry to read the provider token from, so it never connects these servers.
+    if (definition.url && typeof definition.auth === "object") {
+      return { state: "needs-auth", message: `signs in with a Pi provider: run /login ${definition.auth.provider} in Pi` };
+    }
+    const needsSignIn = { state: "needs-auth", message: `sign-in required: run /mcp-auth ${name} in Pi` };
+    let anonymous = false;
+    let url;
+    if (definition.url) {
+      try {
+        url = utils.resolveServerUrl(definition);
+      } catch {
+        const missing = typeof definition.url === "string" ? utils.getMissingEnvVars(definition.url) : [];
+        return { state: "failed", message: missing.length > 0 ? `URL uses unset environment variables: ${missing.join(", ")}` : "URL is invalid" };
+      }
+      // Report a missing sign-in from stored credentials instead of starting OAuth.
+      if (authFlow.supportsOAuth(definition)) {
+        const stored = auth.inspectAuthForUrl(name, url, authOptions);
+        if (stored.status === "unavailable") return { state: "failed", message: stored.message };
+        // A record without tokens is an unfinished sign-in.
+        if (stored.status === "absent" || !(stored.entry.tokens?.accessToken || stored.entry.tokens?.refreshToken)) {
+          if (definition.auth === "oauth") return needsSignIn;
+          anonymous = true;
+        }
+      }
+    }
+    // Anonymous attempts get no OAuth provider, and debug stderr would bypass redaction.
+    const connectDefinition = { ...definition, debug: false, ...(anonymous ? { oauth: false } : {}) };
+    try {
+      const connection = await serverManager.connect(name, connectDefinition, signal);
+      return connection.status === "needs-auth" ? needsSignIn : { state: "ok", tools: connection.tools.length };
+    } catch (err) {
+      if (anonymous && [err, err?.cause].some(manager.isUnauthorizedHttpError)) return needsSignIn;
+      return { state: "failed", message: describeConnectError(err, definition, url) };
+    }
+  };
+
+  const results = await Promise.all(Object.entries(effective.mcpServers).map(async ([name, definition]) => {
+    // The deadline covers the whole check, including server-manager's follow-up probe.
+    const controller = new AbortController();
+    let timer;
+    const timedOut = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        resolve({ state: "failed", message: `no response within ${DOCTOR_CONNECT_TIMEOUT_MS / 1000}s` });
+      }, DOCTOR_CONNECT_TIMEOUT_MS);
+    });
+    const result = await Promise.race([
+      check(name, definition, controller.signal).catch((err) => ({ state: "failed", message: utils.formatTerminalError(err) })),
+      timedOut,
+    ]);
+    clearTimeout(timer);
+    return {
+      name,
+      state: result.state,
+      tools: result.tools ?? null,
+      message: result.message ? utils.sanitizeTerminalText(redactDoctorMessage(result.message, definition, utils)) : null,
+    };
+  }));
+
+  // Report first: closing waits for timed-out attempts to settle and can fail.
+  let closed = true;
+  try {
+    if (json) {
+      log(JSON.stringify(results, null, 2));
+    } else {
+      if (results.length === 0) log("No MCP servers configured.");
+      for (const result of results) {
+        const tools = result.tools === null ? "" : `, ${result.tools} tool${result.tools === 1 ? "" : "s"}`;
+        log(`${utils.sanitizeTerminalText(result.name)}: ${result.state}${tools}${result.message ? ` — ${result.message}` : ""}`);
+      }
+    }
+  } finally {
+    try {
+      await serverManager.closeAll();
+    } catch (err) {
+      closed = false;
+      error(`Some MCP connections did not close cleanly: ${utils.formatTerminalError(err)}`);
+    }
+  }
+  return !closed || results.some((result) => result.state === "failed" || result.state === "needs-auth") ? 1 : 0;
+}
+
 export async function main(argv = process.argv.slice(2), log = console.log, error = console.error, stdin = process.stdin) {
   const [command, ...rest] = argv;
 
@@ -362,6 +677,14 @@ export async function main(argv = process.argv.slice(2), log = console.log, erro
 
   if (command === "token") {
     return runToken(rest, log, error, stdin);
+  }
+
+  if (command === "key") {
+    return runKey(rest, log, error, stdin);
+  }
+
+  if (command === "doctor") {
+    return runDoctor(rest, log, error);
   }
 
   if (command === "install") {

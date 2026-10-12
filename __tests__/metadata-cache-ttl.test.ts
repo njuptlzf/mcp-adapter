@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { McpServerManager } from "../server-manager.ts";
-import { computeServerHash, isServerCacheValid, loadMetadataCache } from "../metadata-cache.ts";
+import { computeServerHash, isServerCacheValid, loadMetadataCache, saveMetadataCache } from "../metadata-cache.ts";
 import { updateMetadataCache } from "../init.ts";
+import { resolveDirectTools } from "../direct-tools.ts";
 import type { ServerCacheEntry, ServerEntry } from "../types.ts";
 
 const BASE_TIME = 1_700_000_000_000;
@@ -51,11 +52,21 @@ describe("metadata cache ttl hints", () => {
     expect(isServerCacheValid(entry(server, 1_000, 1_000), server)).toBe(false);
   });
 
-  it("never lets a declared ttl extend the default max age", () => {
+  it("does not expire entries by age alone, only by a declared ttl", () => {
     const server = definition();
 
-    expect(isServerCacheValid(entry(server, 8 * DAY_MS, 14 * DAY_MS), server)).toBe(false);
-    expect(isServerCacheValid(entry(server, 6 * DAY_MS, 14 * DAY_MS), server)).toBe(true);
+    expect(isServerCacheValid(entry(server, 30 * DAY_MS), server)).toBe(true);
+    expect(isServerCacheValid(entry(server, 8 * DAY_MS, 14 * DAY_MS), server)).toBe(true);
+    expect(isServerCacheValid(entry(server, 15 * DAY_MS, 14 * DAY_MS), server)).toBe(false);
+    expect(isServerCacheValid(entry(server, 8 * DAY_MS, 14 * DAY_MS), server, 7 * DAY_MS)).toBe(false);
+  });
+
+  it("does not reuse private entries from the persistent cache", () => {
+    const server = definition();
+    const fresh = entry(server, 0, 5_000);
+
+    expect(isServerCacheValid({ ...fresh, cacheScope: "private" }, server)).toBe(false);
+    expect(isServerCacheValid({ ...fresh, cacheScope: "public" }, server)).toBe(true);
   });
 
   it("keeps list hints at the result and cache-entry levels, not on tools", async () => {
@@ -91,5 +102,96 @@ describe("metadata cache ttl hints", () => {
     const cached = loadMetadataCache()?.servers.demo;
     expect(cached).toMatchObject({ ttlMs: 5_000, cacheScope: "private" });
     expect(cached?.tools[0]).toEqual({ name: "search" });
+  });
+
+  it("persists a successful empty resource list as authoritative across reload", () => {
+    const server = { ...definition(), directTools: true as const };
+    saveMetadataCache({
+      version: 1,
+      servers: {
+        demo: {
+          ...entry(server, 0),
+          resources: [{ name: "old", uri: "file://old" }],
+        },
+      },
+    });
+
+    updateMetadataCache({
+      config: { mcpServers: { demo: server } },
+      manager: {
+        getConnection: () => ({
+          status: "connected",
+          tools: [{ name: "search" }],
+          resources: [],
+          resourceDiscoveryFailed: false,
+          prompts: [],
+        }),
+      },
+    } as any, "demo");
+
+    const reloaded = loadMetadataCache()?.servers.demo;
+    expect(reloaded?.resources).toEqual([]);
+    expect(reloaded && isServerCacheValid(reloaded, server)).toBe(true);
+    expect(resolveDirectTools({ mcpServers: { demo: server } }, loadMetadataCache(), "server")
+      .map(tool => tool.originalName)).not.toContain("read_old");
+  });
+
+  it.each([
+    { command: "node", args: ["other-server.js"] },
+    { ...definition(), exposeResources: false },
+  ])("does not retain runtime resources across configuration changes: %j", (replacement) => {
+    const server = { ...definition(), directTools: true as const };
+    const connection = {
+      status: "connected", definition: server,
+      tools: [{ name: "search" }], resources: [{ name: "old", uri: "file://old" }],
+      resourceDiscoveryFailed: false,
+    };
+    const state = {
+      config: { mcpServers: { demo: server } },
+      manager: { getConnection: () => connection },
+      sessionMetadata: new Map<string, ServerCacheEntry>(),
+    };
+    updateMetadataCache(state as any, "demo");
+    expect(state.sessionMetadata.get("demo")?.resources).toHaveLength(1);
+    state.config.mcpServers.demo = { ...replacement, directTools: true };
+    connection.definition = state.config.mcpServers.demo;
+    connection.resources = [];
+    connection.resourceDiscoveryFailed = true;
+    updateMetadataCache(state as any, "demo");
+    expect(state.sessionMetadata.get("demo")?.resources).toEqual([]);
+    expect(loadMetadataCache()?.servers.demo.resources).toEqual([]);
+  });
+
+  it("does not revive invalid zero-TTL resources after failed discovery", () => {
+    const server = { ...definition(), directTools: true as const };
+    saveMetadataCache({
+      version: 1,
+      servers: {
+        demo: {
+          ...entry(server, 0, 0),
+          resources: [{ name: "old", uri: "file://old" }],
+        },
+      },
+    });
+
+    updateMetadataCache({
+      config: { mcpServers: { demo: server } },
+      manager: {
+        getConnection: () => ({
+          status: "connected",
+          tools: [{ name: "search" }],
+          resources: [],
+          resourceDiscoveryFailed: true,
+          prompts: [],
+        }),
+      },
+    } as any, "demo");
+
+    const reloaded = loadMetadataCache()?.servers.demo;
+    expect(reloaded?.resources).toEqual([]);
+    expect(reloaded).not.toHaveProperty("ttlMs");
+    expect(reloaded && isServerCacheValid(reloaded, server)).toBe(true);
+    expect(resolveDirectTools({ mcpServers: { demo: server } }, loadMetadataCache(), "server")
+      .map(tool => tool.originalName)).not.toContain("read_old");
   });
 });
