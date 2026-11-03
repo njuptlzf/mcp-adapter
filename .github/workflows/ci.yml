@@ -77,8 +77,13 @@ jobs:
         env:
           RECHECK_BACKEND: java
         run: node -e "const assert = require('node:assert/strict'); const fs = require('node:fs'); const manifest = require.resolve('recheck-jar/package.json'); const jar = manifest.replace(/package\.json$/, 'recheck.jar'); assert.notEqual(jar, manifest); assert.ok(jar.endsWith('\\recheck.jar')); assert.ok(fs.statSync(jar).isFile()); assert.equal(require('recheck').checkSync('(a+)+$', '').status, 'vulnerable');"
+      # Fork note: these steps call test:vitest, not npm test — the fork's
+      # `test` script chains test:prebuild (examples/interactive-visualizer
+      # bundle) and this job never installs the example's deps (chart.js,
+      # @modelcontextprotocol/ext-apps), so the prebuild fails here. The
+      # Linux job runs the example build explicitly, so its `npm test` is fine.
       - name: Run !command secrets through Git Bash
-        run: npm test -- --run __tests__/command-secret-shell.test.ts
+        run: npm run test:vitest -- __tests__/command-secret-shell.test.ts
       # Linux CI skips this test because its file system is case-sensitive.
       - name: Share project-server approvals across path casings
-        run: npm test -- --run __tests__/project-server-trust.test.ts -t "different casing"
+        run: npm run test:vitest -- __tests__/project-server-trust.test.ts -t "different casing"
