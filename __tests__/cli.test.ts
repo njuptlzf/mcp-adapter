@@ -4,9 +4,10 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { execFile, spawnSync } from "node:child_process";
+import * as nodeModule from "node:module";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -421,90 +422,17 @@ describe("cli token helper", () => {
   });
 });
 
-describe("cli System One key helper", () => {
-  beforeEach(() => {
-    vi.resetModules();
-    process.env.PI_MCP_ADAPTER_TEST_AUTH_STORE = "memory";
-    delete process.env.SYSTEMONE_API_KEY;
-    delete process.env.TYPESAFE_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
-    delete process.env.SYSTEMONE_ENDPOINT;
-  });
-
-  function keyStdin(text: string): NodeJS.ReadStream {
-    return Readable.from([text]) as unknown as NodeJS.ReadStream;
-  }
-
-  it("sets, reports, and removes a key without revealing it", async () => {
-    const { main } = await import("../cli.js");
-    const { resetTestSecureKeyring } = await import("../dist/secure-keyring.js");
-    resetTestSecureKeyring();
-    const logs: string[] = [];
-    expect(await main(["key", "set", "systemone"], line => logs.push(line), () => {}, keyStdin("cli-secret\n"))).toBe(0);
-    expect(logs.join("\n")).not.toContain("cli-secret");
-    const status: string[] = [];
-    expect(await main(["key", "status", "systemone"], line => status.push(line), () => {}, keyStdin(""))).toBe(0);
-    expect(status).toEqual(["source=keyring", "endpoint=https://api.typesafe.ai/v1/systemone"]);
-    expect(await main(["key", "remove", "systemone"], () => {}, () => {}, keyStdin(""))).toBe(0);
-  });
-
-  it("stores per endpoint and keeps the legacy provider alias working", async () => {
-    const { main } = await import("../cli.js");
-    const { resetTestSecureKeyring } = await import("../dist/secure-keyring.js");
-    resetTestSecureKeyring();
-    process.env.SYSTEMONE_ENDPOINT = "https://opencode.ai/zen/v1/systemone";
-    expect(await main(["key", "set", "typesafe"], () => {}, () => {}, keyStdin("zen-secret\n"))).toBe(0);
-    const status: string[] = [];
-    expect(await main(["key", "status", "typesafe"], line => status.push(line), () => {}, keyStdin(""))).toBe(0);
-    expect(status).toEqual(["source=keyring", "endpoint=https://opencode.ai/zen/v1/systemone"]);
-    delete process.env.SYSTEMONE_ENDPOINT;
-    expect(await main(["key", "status", "systemone"], () => {}, () => {}, keyStdin(""))).toBe(1);
-  });
-
-  it("refuses to store a key when the configured endpoint is invalid", async () => {
-    const { main } = await import("../cli.js");
-    process.env.SYSTEMONE_ENDPOINT = "http://evil.test/v1/systemone";
-    const errors: string[] = [];
-    expect(await main(["key", "set", "systemone"], () => {}, line => errors.push(line), keyStdin("never-stored\n"))).toBe(1);
-    expect(errors.join("\n")).toContain("SYSTEMONE_ENDPOINT is set but invalid");
-    expect(errors.join("\n")).not.toContain("never-stored");
-  });
-
-  it("explains that a legacy TypeSafe key is ignored on another endpoint", async () => {
-    const { main } = await import("../cli.js");
-    process.env.SYSTEMONE_ENDPOINT = "https://opencode.ai/zen/v1/systemone";
-    process.env.TYPESAFE_API_KEY = "legacy-secret";
-    const logs: string[] = [];
-    expect(await main(["key", "remove", "systemone"], line => logs.push(line), () => {}, keyStdin(""))).toBe(0);
-    expect(logs.join("\n")).toContain("ignored for https://opencode.ai/zen/v1/systemone");
-    expect(logs.join("\n")).not.toContain("legacy-secret");
-  });
-
-  it("explains that OPENROUTER_API_KEY overrides a stored key on OpenRouter", async () => {
-    const { main } = await import("../cli.js");
-    process.env.SYSTEMONE_ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
-    process.env.OPENROUTER_API_KEY = "openrouter-secret";
-    const logs: string[] = [];
-    expect(await main(["key", "remove", "systemone"], line => logs.push(line), () => {}, keyStdin(""))).toBe(0);
-    expect(logs.join("\n")).toContain("OPENROUTER_API_KEY is present and overrides");
-    expect(logs.join("\n")).not.toContain("openrouter-secret");
-  });
-
-  it("rejects argv secrets and explains an environment override after removal", async () => {
+describe("cli key command", () => {
+  it("is gone: semantic search uses Pi's own logins", async () => {
     const { main } = await import("../cli.js");
     const errors: string[] = [];
-    expect(await main(["key", "set", "systemone", "argv-secret"], () => {}, line => errors.push(line), keyStdin(""))).toBe(1);
-    expect(errors.join("\n")).not.toContain("argv-secret");
-    expect(errors.join("\n")).toContain("must not be passed");
-    process.env.TYPESAFE_API_KEY = "environment-secret";
-    const logs: string[] = [];
-    expect(await main(["key", "remove", "systemone"], line => logs.push(line), () => {}, keyStdin(""))).toBe(0);
-    expect(logs.join("\n")).toContain("TYPESAFE_API_KEY is present and overrides");
-    expect(logs.join("\n")).not.toContain("environment-secret");
+    expect(await main(["key", "status", "systemone"], () => {}, line => errors.push(line))).toBe(1);
+    expect(errors).toEqual(["Unknown command: key"]);
   });
 });
 
-describe("cli doctor", () => {
+// Each test spawns the CLI, which can take seconds under load; match the doctor() child timeout.
+describe("cli doctor", { timeout: 30_000 }, () => {
   const cliPath = resolve("cli.js");
   const fixtureUrl = pathToFileURL(resolve("__tests__/fixtures/tools-only-server.mjs")).href;
   const servers: Server[] = [];
@@ -562,6 +490,18 @@ describe("cli doctor", () => {
     expect(old.stderr).toContain("Pi's own mcp.json files were not checked");
   });
 
+  it("lists settings OpenCode ignores under an imported server", async () => {
+    const context = setup({ imports: ["opencode"], mcpServers: {} });
+    writeJson(join(context.home, ".config", "opencode", "opencode.json"), {
+      mcp: { calendar: { type: "local", command: [process.execPath, "-e", "process.exit(1)"], args: ["--x"] } },
+    });
+
+    const result = await doctor([], context);
+
+    expect(result.stdout).toContain(`calendar: failed`);
+    expect(result.stdout).toContain(`\n  Ignored OpenCode settings: args\n`);
+  });
+
   it("exits 1 and explains a refused local server", async () => {
     const url = await listen(() => {});
     await new Promise((done) => servers.pop()!.close(done));
@@ -575,6 +515,27 @@ describe("cli doctor", () => {
     expect(result.stdout).toContain(`Nothing is listening at ${url}`);
     expect(result.stdout).toContain(`Nothing is listening at ${pathSecretUrl}`);
     expect(result.stdout).not.toContain("path-secret-value");
+  });
+
+  it("says whether a server that timed out stalled while connecting or while listing tools", { timeout: 45_000 }, async () => {
+    // Answers initialize, then never answers tools/list.
+    const listStall = `require("node:readline").createInterface({ input: process.stdin }).on("line", (line) => {
+      const { id, method } = JSON.parse(line);
+      const reply = (body) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, ...body }) + "\\n");
+      if (method === "server/discover") reply({ error: { code: -32601, message: "not supported" } });
+      if (method === "initialize") reply({ result: { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "stall", version: "1.0.0" } } });
+    });`;
+    const context = setup({
+      mcpServers: {
+        connectStall: { command: process.execPath, args: ["-e", "process.stdin.resume()"] },
+        listStall: { command: process.execPath, args: ["-e", listStall] },
+      },
+    });
+
+    const result = await doctor([], context);
+
+    expect(result.stdout).toContain("connectStall: failed — did not finish connecting within 15s");
+    expect(result.stdout).toContain("listStall: failed — connected, but did not finish listing its tools, resources and prompts within 15s");
   });
 
   it("reports OAuth servers without a sign-in and never starts an OAuth flow", async () => {
@@ -691,6 +652,23 @@ describe("cli doctor", () => {
     expect(result.stdout).toContain("project: blocked — blocked: project server approval required");
   });
 
+  it.skipIf(process.platform === "win32")("reads project trust from a Pi managed install whose launcher is on PATH", async () => {
+    const agent = mkdtempSync(join(tmpdir(), "pi-mcp-doctor-agent-"));
+    mkdirSync(join(agent, "install"));
+    writeFileSync(join(agent, "install", "current-version"), "1.0.4\n");
+    fakePiCore(join(agent, "install", "releases", "1.0.4", "node_modules", "@earendil-works", "pi-coding-agent"));
+    mkdirSync(join(agent, "bin"));
+    writeFileSync(join(agent, "bin", "pi"), "#!/bin/sh\necho 1.0.4\n", { mode: 0o755 });
+    const bin = mkdtempSync(join(tmpdir(), "pi-mcp-doctor-bin-"));
+    symlinkSync(join(agent, "bin", "pi"), join(bin, "pi"));
+    const context = setup({ mcpServers: {} }, { mcpServers: { project: { command: "unused" } } });
+
+    const result = await doctor([], context, { PATH: `${bin}:${process.env.PATH}` }, cliWithoutPi());
+
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("project: blocked — blocked: project server approval required");
+  });
+
   it.skipIf(process.platform === "win32")("ignores a Pi package that doesn't own the pi on PATH", async () => {
     const prefix = mkdtempSync(join(tmpdir(), "pi-mcp-doctor-prefix-"));
     fakePiCore(join(prefix, "node_modules", "@earendil-works", "pi-coding-agent"));
@@ -729,6 +707,36 @@ describe("cli doctor", () => {
     }
   });
 
+  it("names the field of an invalid tool list without printing what the server sent", async () => {
+    const url = await listen((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => { body += chunk; });
+      request.on("end", () => {
+        const message = body ? JSON.parse(body) : {};
+        if (request.method !== "POST" || message.id === undefined) {
+          response.writeHead(request.method === "POST" ? 202 : 405).end();
+          return;
+        }
+        const result = message.method === "initialize"
+          ? { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "bad-list", version: "1.0.0" } }
+          : { tools: [
+            { name: "ok", inputSchema: { type: "object" } },
+            { name: "bad", inputSchema: { type: "object" }, annotations: "annotation-secret-value" },
+            // JSON.parse reads 1e999 as Infinity, which fails validation under a key the server chose.
+            { name: "badKey", inputSchema: { type: "object", properties: { "property-secret-name": "INFINITY" } } },
+          ] };
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }).replace('"INFINITY"', "1e999"));
+      });
+    });
+
+    const result = await doctor([], setup({ mcpServers: { badList: { url } } }));
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("badList: failed — server sent an invalid tools/list result: tools[1].annotations (expected object), tools[2].inputSchema.properties");
+    expect(result.stdout + result.stderr).not.toMatch(/annotation-secret-value|property-secret-name/);
+  });
+
   it("reports tool counts and leaves no server process running after exit", async () => {
     const pidFile = join(tmpdir(), `pi-mcp-doctor-pid-${process.pid}-${Date.now()}`);
     const context = setup({
@@ -745,5 +753,20 @@ describe("cli doctor", () => {
     expect(result.stdout).toContain("off: disabled");
     const pid = Number(readFileSync(pidFile, "utf-8"));
     expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
+  });
+
+  // module.registerHooks needs Node 22.15+/23.5+; the package supports Node 20.
+  it.skipIf(!("registerHooks" in nodeModule))("runs on a Pi install, where the typebox peer doesn't resolve", async () => {
+    const context = setup({
+      mcpServers: { tools: { command: process.execPath, args: [fileURLToPath(fixtureUrl)] } },
+      scriptTools: { echo: { description: "Echo", file: "echo.js", inputSchema: { type: "object" } } },
+    });
+    const hook = pathToFileURL(resolve("__tests__/fixtures/no-typebox-hook.mjs")).href;
+
+    const result = await doctor([], context, { NODE_OPTIONS: `--import=${hook}` });
+
+    expect(result.stderr).not.toContain("Unable to load");
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("tools: ok, 1 tool");
   });
 });

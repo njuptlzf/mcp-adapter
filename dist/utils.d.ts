@@ -1,5 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { McpConfig, McpToolAnnotations, ServerEntry } from "./types.ts";
+/** Check whether an HTTP server configuration permits OAuth. */
+export declare function supportsOAuth(definition: ServerEntry): boolean;
 export declare function stripUtf8Bom(raw: string): string;
 export declare function parseJsonWithComments(raw: string): unknown;
 /** Resolve a candidate only when its real path stays within the real root. */
@@ -15,6 +17,13 @@ export declare function interpolateEnvVars(value: string, environment: NodeJS.Pr
 export declare function getMissingEnvVars(value: string, environment?: NodeJS.ProcessEnv): string[];
 export declare function toStringRecord(value: unknown): Record<string, string> | undefined;
 export declare function interpolateEnvRecord(values: Record<string, string> | undefined, environment?: NodeJS.ProcessEnv): Record<string, string> | undefined;
+/**
+ * On Windows, the bash used to run `!command` values: Git Bash in its standard
+ * install locations, then bash.exe on PATH (skipping the legacy WSL launcher),
+ * as Pi does. Undefined elsewhere or when none is found, so callers keep the
+ * platform default shell.
+ */
+export declare function getWindowsCommandBash(): string | undefined;
 /** Resolve a secret value, executing only a single leading `!` command marker. */
 export declare function resolveCommandSecret(value: string, context: string): string;
 export declare function resolveCommandSecret(value: undefined, context: string): undefined;
@@ -29,6 +38,8 @@ export declare function resolveBearerToken(definition: Pick<ServerEntry, "bearer
 /** Remove OSC control strings, including payloads that have no terminator. */
 export declare function stripOscSequences(text: string): string;
 export declare function sanitizeTerminalText(text: string): string;
+/** Keep the full destination clickable when Pi wraps the visible label. */
+export declare function terminalHyperlink(label: string, url: string): string;
 export declare function formatTerminalError(error: unknown): string;
 export declare function truncateAtWord(text: string, target: number): string;
 /** Request `_meta` key that lets MCP servers correlate a call with the Pi tool call that made it. */

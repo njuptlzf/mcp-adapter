@@ -1,4 +1,4 @@
-import { Client, type GetPromptResult, type ListToolsResult, type ReadResourceResult, type McpSubscription, type SubscriptionFilter, type RequestOptions, type UrlElicitationRequiredError } from "@modelcontextprotocol/client";
+import { Client, type GetPromptResult, type ListToolsResult, type ReadResourceResult, type McpSubscription, type SubscriptionFilter, type ElicitRequestFormParams, type ElicitRequestURLParams, type ElicitResult, type RequestOptions, type UrlElicitationRequiredError } from "@modelcontextprotocol/client";
 import { type McpTool, type McpResource, type McpPrompt, type ServerDefinition, type ServerStreamResultPatchNotification, type Transport, type McpTraceSettings, type McpListenState } from "./types.ts";
 import { type McpOAuthRuntime } from "./mcp-auth-flow.ts";
 import { type AuthStorageOptions } from "./mcp-auth.ts";
@@ -53,6 +53,9 @@ type UiStreamListener = (serverName: string, notification: ServerStreamResultPat
 type MetadataListChangedListener = (serverName: string, reason: string) => void;
 type ListenStateChangedListener = (serverName: string, state: McpListenState) => void;
 type ResourceUpdatedListener = (serverName: string, uri: string) => void;
+/** Awaited before the replaced connection is disposed, so work on it can move to the fresh one first. */
+type ConnectionReplacedListener = (serverName: string, fresh: ServerConnection) => Promise<void>;
+type ConnectionInitializedListener = (serverName: string) => void;
 export type ToolRefreshResult = "updated" | "unchanged" | "superseded" | "refresh-timeout";
 export declare function isTransientHttpConnectError(error: unknown): boolean;
 export declare class McpServerManager {
@@ -67,6 +70,8 @@ export declare class McpServerManager {
     private samplingConfig;
     private metadataListChangedListener;
     private listenStateChangedListener;
+    private connectionReplacedListener;
+    private connectionInitializedListener;
     private resourceUpdatedListeners;
     private pendingMetadataPublications;
     private elicitationConfig;
@@ -82,13 +87,23 @@ export declare class McpServerManager {
     private traceWriter;
     private providerToken;
     private stopped;
-    /** Default cwd for stdio servers without an explicit config `cwd`. */
+    /** Session cwd: the root sent to servers, and the default cwd for stdio servers without a config `cwd`. */
     constructor(defaultCwd?: string | undefined);
     setSamplingConfig(config: ServerSamplingConfig | undefined): void;
     setMetadataListChangedListener(listener: MetadataListChangedListener | undefined): void;
     setListenStateChangedListener(listener: ListenStateChangedListener | undefined): void;
+    setConnectionReplacedListener(listener: ConnectionReplacedListener | undefined): void;
+    /** Called once a connection attempt's initialize handshake succeeds, before tool discovery. */
+    setConnectionInitializedListener(listener: ConnectionInitializedListener | undefined): void;
     publishMetadataChanged(name: string, expectedConnection: ServerConnection, reason: string): boolean;
     setElicitationConfig(config: ServerElicitationConfig | undefined): void;
+    /** Shows a server-supplied MCP form with Pi's dialogs. Undefined when this session cannot prompt. */
+    promptFormElicitation(name: string, params: ElicitRequestFormParams, signal?: AbortSignal): Promise<ElicitResult | undefined>;
+    /**
+     * A prompt that shows an adapter-supplied URL with the URL-elicitation consent dialog and opens
+     * it on accept. Undefined when this session cannot open URLs: headless, non-TUI or shut down.
+     */
+    urlElicitationPrompt(name: string): ((params: ElicitRequestURLParams, signal?: AbortSignal) => Promise<ElicitResult>) | undefined;
     setRuntimeSignal(signal: AbortSignal | undefined): void;
     setDefaultRequestTimeoutMs(timeoutMs: number | undefined): void;
     setTraceConfig(settings: McpTraceSettings | undefined): void;
@@ -136,6 +151,8 @@ export declare class McpServerManager {
     private enrichHttpConnectionError;
     private connectClientWithAbort;
     private buildClientCapabilities;
+    /** The session directory as the server's only root, unless there is no session cwd or the server opted out. */
+    private rootsFor;
     private createClient;
     private handleToolsListChanged;
     private handlePromptsListChanged;

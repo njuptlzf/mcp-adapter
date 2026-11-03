@@ -352,7 +352,7 @@ async function probeAuthDiscovery(serverUrl: string, definition?: ServerEntry, s
     const { resourceMetadataUrl, scope } = extractWWWAuthenticateParams(response)
     await response.body?.cancel().catch(() => {})
     return { ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}), ...(scope ? { scope } : {}) }
-  } catch (error) {
+  } catch {
     if (signal?.aborted) throwIfAborted(signal)
     return {}
   } finally {
@@ -933,6 +933,7 @@ export async function completeAuth(
 
   let keepPendingForRetry = false
   let caughtError: unknown
+  let failed = false
   try {
     const fetchFn = createOAuthFetch(pendingAuth.serverUrl, pendingAuth.getHeaders, signal)
     pendingAuth.authProvider.setAuthFetch(fetchFn)
@@ -965,23 +966,20 @@ export async function completeAuth(
     if (result !== "AUTHORIZED") {
       throw new UnauthorizedError("Failed to authorize")
     }
-    return "authenticated"
   } catch (error) {
+    failed = true
     caughtError = error
-    throw error
-  } finally {
-    if (!keepPendingForRetry) {
-      try {
-        await clearPendingAuthAndReleaseIfIdle(runtime, serverName, oauthState, authStorageOptions)
-      } catch (cleanupError) {
-        if (caughtError !== undefined) {
-          throw new AggregateError([caughtError, cleanupError], "OAuth completion cleanup failed")
-        }
-        throw cleanupError
-      }
-      if (caughtError === undefined) pendingAuth.authority()
-    }
   }
+  if (!keepPendingForRetry) {
+    try {
+      await clearPendingAuthAndReleaseIfIdle(runtime, serverName, oauthState, authStorageOptions)
+    } catch (cleanupError) {
+      throw failed ? new AggregateError([caughtError, cleanupError], "OAuth completion cleanup failed") : cleanupError
+    }
+    if (!failed) pendingAuth.authority()
+  }
+  if (failed) throw caughtError
+  return "authenticated"
 }
 
 /**
@@ -1242,29 +1240,6 @@ export async function removeAuth(serverName: string, options: AuthenticateOption
   } finally {
     releaseRevocation()
   }
-}
-
-/**
- * Check if OAuth is supported for a server configuration.
- * OAuth is supported for HTTP servers unless explicitly disabled.
- * 
- * @param definition - The server definition
- * @returns True if OAuth is supported
- */
-export function supportsOAuth(definition: ServerEntry): boolean {
-  // OAuth requires a URL
-  if (!definition.url) return false
-  
-  // Explicitly disabled via auth: false or oauth: false
-  if (definition.auth === false) return false
-  if (definition.oauth === false) return false
-  if (definition.auth === "oauth") return true
-  
-  // Configured custom headers take precedence over implicit OAuth auto-detection.
-  if (definition.headers && Object.keys(definition.headers).length > 0) return false
-
-  // OAuth is enabled when auth is not specified (auto-detect)
-  return definition.auth === undefined
 }
 
 /**

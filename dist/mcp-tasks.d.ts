@@ -21,8 +21,8 @@
  * the connected 2026-07-28 server advertises the extension, so non-task
  * servers keep the exact pre-existing call path.
  */
-import type { Client, CreateMessageRequest, CreateMessageResult, ElicitRequest, ElicitResult, Transport } from "@modelcontextprotocol/client";
-import { type RawClientDispatch, type TaskEnabledSession } from "@modelcontextprotocol/ext-tasks/client";
+import type { Client, CreateMessageRequest, CreateMessageResult, ElicitRequest, ElicitResult, RequestOptions, Transport } from "@modelcontextprotocol/client";
+import { type ApplicationRoot, type RawClientDispatch, type TaskEnabledSession } from "@modelcontextprotocol/ext-tasks/client";
 import type { ServerDefinition } from "./types.ts";
 export declare const TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks";
 /**
@@ -75,6 +75,8 @@ export interface AttachTaskSessionOptions {
     clientCapabilities: Record<string, unknown>;
     onElicitation?: (request: ElicitRequest, signal?: AbortSignal) => Promise<ElicitResult>;
     onSampling?: (request: CreateMessageRequest, signal?: AbortSignal) => Promise<CreateMessageResult>;
+    /** What a task's roots input request gets; the same list the connection's roots/list handler returns. */
+    roots?: ApplicationRoot[] | undefined;
 }
 export interface TaskSessionAttachment {
     session: TaskEnabledSession;
@@ -100,3 +102,33 @@ export interface TaskToolCallOptions {
  * underlying JSON-RPC error, and aborting cancels the remote task.
  */
 export declare function callToolViaTaskSession(session: TaskEnabledSession, options: TaskToolCallOptions): Promise<Record<string, unknown>>;
+type ToolCallExecution = Awaited<ReturnType<TaskEnabledSession["callTool"]>>;
+export type BackgroundToolExecution = Extract<ToolCallExecution, {
+    kind: "task";
+}>;
+export type StartedTask = {
+    kind: "task";
+    execution: BackgroundToolExecution;
+    taskId: string;
+};
+export type StartedToolCall = {
+    kind: "result";
+    result: Record<string, unknown>;
+} | StartedTask;
+/**
+ * Like callToolViaTaskSession, but returns a task-backed execution as soon as
+ * the server hands out its task. The caller owns the returned execution.
+ * Aborting `signal` before the handle arrives cancels the task; aborting it
+ * afterwards doesn't touch it.
+ */
+export declare function startToolViaTaskSession(session: TaskEnabledSession, options: TaskToolCallOptions): Promise<StartedToolCall>;
+type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
+/**
+ * The `call` a tool call makes on `conn`. With `onTask`, a call its server answers with a
+ * task hands the task to `onTask` as soon as it starts and resolves with an empty result.
+ */
+export declare function callToolOn(conn: {
+    client: Client;
+    taskSession?: TaskEnabledSession | undefined;
+}, signal: AbortSignal | undefined, onTask: ((task: StartedTask) => void) | undefined): (params: Parameters<Client["callTool"]>[0], options: RequestOptions | undefined) => Promise<ClientCallToolResult>;
+export {};

@@ -2,41 +2,66 @@ import type { AgentToolResult, ToolInfo } from "@earendil-works/pi-coding-agent"
 import { UrlElicitationRequiredError, type Client, type JsonSchemaType, type JsonSchemaValidator, type Progress, type RequestOptions } from "@modelcontextprotocol/client";
 import { createRequire } from "node:module";
 import type { McpExtensionState } from "./state.ts";
-import type { ToolMetadata, McpContent } from "./types.ts";
+import type { ToolMetadata } from "./types.ts";
 import { getServerPrefix, getToolNameCandidates, isServerDisabled, parseUiPromptHandoff, resolveToolPrefix, type ServerEntry } from "./types.ts";
 import { getConfigWatch } from "./config-watch.ts";
-import { lazyConnect, markKeepAliveAfterConnect, notifyToolMetadataUpdated, updateServerMetadata, updateMetadataCache, getFailureAgeSeconds, updateStatusBar, clearFailure, recordFailure } from "./init.ts";
-import { abortable, throwIfAborted } from "./abort.ts";
+import { lazyConnect, markKeepAliveAfterConnect, notifyToolMetadataUpdated, updateServerMetadata, updateMetadataCache, getFailureAgeSeconds, updateStatusBar, clearFailure, recordFailure, repageExecutorCatalog, cacheExecutorSignature } from "./init.ts";
+import { throwIfAborted } from "./abort.ts";
 import { combineAbortSignals, isAbortError } from "./runtime-owner.ts";
-import { buildToolMetadata, getToolNames, formatSchema } from "./tool-metadata.ts";
+import { buildToolMetadata, cacheReader, executorAppToolsLine, executorCatalogOf, getToolNames, formatSchema, isPlainTypeSchema, ownTools } from "./tool-metadata.ts";
 import { renderTsShape } from "./ts-shape.ts";
 import { getObservedOutput, observedOutputRecorder, renderOutputShape } from "./output-shape.ts";
 import { reconstructPromptMetadata } from "./metadata-cache.ts";
 import { resolveMcpResultContent, transformMcpResourceContents } from "./tool-registrar.ts";
-import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions, scriptPipeHint } from "./mcp-output-guard.ts";
+import { guardMcpOutput, guardMcpText, guardedMcpDetails, resolveMcpOutputGuardOptions } from "./mcp-output-guard.ts";
 import { maybeStartUiSession, summarizeUiSessionResult, type UiSessionRuntime } from "./ui-session.ts";
-import { formatAuthRequiredMessage, formatMcpStatus, normalizeToolArguments, resolveServerUrl, truncateAtWord, withToolCallIdMeta } from "./utils.ts";
-import { authenticate, completeAuthFromInput, getAuthStatus, startAuth, supportsOAuth } from "./mcp-auth-flow.ts";
+import { formatAuthRequiredMessage, formatMcpStatus, normalizeToolArguments, resolveServerUrl, supportsOAuth, truncateAtWord, withToolCallIdMeta } from "./utils.ts";
+import { authenticate, completeAuthFromInput, getAuthStatus, startAuth } from "./mcp-auth-flow.ts";
 import { SessionRecoveryAuthRequiredError, withSessionRecovery } from "./session-recovery.ts";
-import { callToolViaTaskSession } from "./mcp-tasks.ts";
-import { callToolPausingForElicitation } from "./elicitation-handler.ts";
-import { paginate, rankSuggestions, rankToolMatches, resolveSearchKeywords, type RankedToolMatch } from "./search-ranking.ts";
-import { ensureToolCallApproved, isToolCallApprovalRequired, type ToolCallApprovalResult } from "./tool-approval.ts";
+import { callToolOn, type StartedTask } from "./mcp-tasks.ts";
+import { backgroundTaskHandle } from "./task-jobs.ts";
+import { callToolAnsweringExecutorPauses, isExecutorConnection } from "./executor-pauses.ts";
+import { executorCallParams, executorUnknownToolMatches, executorUnknownToolText, unwrapExecutorCallResult } from "./executor-app-tools.ts";
+import { canonicalPath } from "./executor-accounts.ts";
+import { describeExecutorAppTool, isExecutorCatalogConnection, isExecutorCatalogEntry } from "./executor-catalog.ts";
+import { paginate, rankSuggestions, rankToolMatches, resolveSearchKeywords, scoreToolMatch, type RankedToolMatch } from "./search-ranking.ts";
+import { approvalBlockedResult, ensureToolCallApproved, isToolCallApprovalRequired, type ToolCallApprovalResult } from "./tool-approval.ts";
 import { describeFailure, isServerInActiveFailureBackoff } from "./failure-backoff.ts";
-import { semanticSearch, type SemanticSearchBackend, type SemanticSearchEvaluator } from "./semantic-search.ts";
+import { classifierRegistryOf, semanticSearch, type SemanticClassifierRegistry, type SemanticSearchBackend } from "./semantic-search.ts";
 import { getInputRequiredNeedsUiDetails } from "./errors.ts";
 import { createJsonSchemaValidator } from "./json-schema-validator.ts";
 import { describeProjectServerBlock, disabledServerReason } from "./project-server-trust.ts";
+import { findScriptTool } from "./script-tool-surface.ts";
+import { extractionServers } from "./extraction-settings.ts";
+
+// index.ts reaches extraction through this lazily loaded module, so startup does not load it.
+export { applyExtraction, parseExtractFields } from "./extraction.ts";
 
 type ProxyToolResult = AgentToolResult<Record<string, unknown>>;
+/**
+ * Runs a resolved, connected and validated proxy call as a nested Pi call of the tool registered
+ * for it, so Pi's hooks see the real tool. Resolves to undefined to keep the call in the proxy.
+ */
+export type NestedCallHandOff = (call: {
+  serverName: string;
+  toolMeta: ToolMetadata;
+  args: Record<string, unknown> | undefined;
+  callIdentity: Record<string, string>;
+}) => Promise<ProxyToolResult | undefined>;
 type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
 type ClientReadResourceResult = Awaited<ReturnType<Client["readResource"]>>;
 
 const require = createRequire(import.meta.url);
 const proxyArgumentValidators = new WeakMap<object, JsonSchemaValidator<unknown>>();
 const MAX_REGEX_SEARCH_QUERY_LENGTH = 256;
+// Semantic scores are probabilities, and most hits after the first sit near zero, so only hits within this
+// factor of the top one get a schema. Measured on queries that have a right tool: when one hit was this far ahead,
+// it was the right one in 59 of 59 cases across Jev and Clef; two close hits both get a schema.
+const STRONG_MATCH_RATIO = 4;
+// The `server` of a script tool's search match, which belongs to no server.
+const SCRIPT_TOOL_SERVER = "mcp__script";
 
-function proxyArgumentValidationError(inputSchema: unknown, args: unknown): string | null {
+function proxyArgumentValidationError(inputSchema: unknown, args: unknown): string | null | undefined {
   if (!inputSchema || typeof inputSchema !== "object" || Array.isArray(inputSchema)) return null;
   try {
     let validate = proxyArgumentValidators.get(inputSchema);
@@ -47,8 +72,8 @@ function proxyArgumentValidationError(inputSchema: unknown, args: unknown): stri
     const result = validate(args);
     return result.valid ? null : result.errorMessage ?? "arguments do not match the advertised input schema";
   } catch {
-    // Preserve server-side validation for schema dialects the adapter cannot evaluate.
-    return null;
+    // Undefined: the adapter cannot evaluate this schema's dialect, so the server validates it.
+    return undefined;
   }
 }
 const INSTRUCTIONS_PREVIEW_LENGTH = 300;
@@ -226,7 +251,7 @@ function emitAuthStatus(state: McpExtensionState, serverName: string, status: "a
     {
       customType: "mcp-oauth-status",
       content: [{ type: "text", text: message }],
-      display: message,
+      display: true,
       details: {
         server: serverName,
         status,
@@ -524,7 +549,8 @@ export function executeStatus(state: McpExtensionState): ProxyToolResult {
       status = "cached";
     }
 
-    const toolCount = status === "failed" ? 0 : metadata?.length ?? 0;
+    // Executor's app tools are counted on their own line, in mcp({ server }) and /mcp-adapter.
+    const toolCount = status === "failed" ? 0 : ownTools(metadata).length;
 
     const listenState = connection?.status === "connected" ? connection.listenState : "disconnected";
     servers.push({
@@ -810,7 +836,77 @@ export function resolveDescribeTarget(
   };
 }
 
+// A canonical path the cached catalog doesn't have may name an app tool Executor added since: the
+// catalog is paged again (at most once per server a minute) and the path looked up once more.
+async function findExecutorAppToolAfterRepage(
+  state: McpExtensionState,
+  toolName: string,
+  serverName: string | undefined,
+  signal: AbortSignal | undefined,
+): Promise<{ server: string; tool: ToolMetadata } | undefined> {
+  const path = canonicalPath(toolName);
+  if (!path.includes(".")) return undefined;
+  const readCache = cacheReader();
+  const isExecutorServer = (name: string) => {
+    if (state.toolMetadata.get(name)?.some(tool => tool.executorPath !== undefined)) return true;
+    const connection = state.manager.getConnection(name);
+    if (connection?.status === "connected") return isExecutorCatalogConnection(connection);
+    // A server that isn't connected, even one whose cached catalog is empty: its cached listing says.
+    const entry = state.sessionMetadata?.get(name) ?? readCache()?.servers[name];
+    return entry !== undefined && isExecutorCatalogEntry(entry);
+  };
+  const servers = serverName !== undefined
+    ? [serverName]
+    : Object.keys(state.config.mcpServers).filter(name => !isServerDisabled(state.config.mcpServers[name]) && isExecutorServer(name));
+  for (const server of servers) {
+    if (!isExecutorServer(server) || !(await lazyConnect(state, server, signal))) continue;
+    await repageExecutorCatalog(state, server, signal);
+    throwIfAborted(signal);
+    const tool = state.toolMetadata.get(server)?.find(candidate => candidate.executorPath !== undefined && candidate.originalName === path);
+    if (tool) return { server, tool };
+  }
+  return undefined;
+}
+
+function cachedExecutorAppTool(state: McpExtensionState, serverName: string, path: string) {
+  return executorCatalogOf(state, serverName)?.tools.find(tool => tool?.path === path);
+}
+
+// An app tool whose input type Executor cut short gets its full signature from one Executor
+// `describe`, kept on the catalog entry so the next describe needs no call.
+async function executorSignatureText(state: McpExtensionState, described: ProxyToolResult, signal?: AbortSignal): Promise<string | undefined> {
+  const details = described.details as { error?: unknown; server?: string; tool?: ToolMetadata } | undefined;
+  const serverName = details?.server;
+  const path = details?.tool?.executorPath;
+  if (details?.error !== undefined || serverName === undefined || path === undefined) return undefined;
+  const cached = cachedExecutorAppTool(state, serverName, path);
+  if (!cached?.inputTruncated) return undefined;
+  if (typeof cached.signature === "string") return `Full signature:\n${cached.signature}`;
+  if (!(await lazyConnect(state, serverName, signal))) return `Executor's full signature is unavailable: server "${serverName}" is not connected.`;
+  const connection = state.manager.getConnection(serverName)!;
+  const timeout = state.config.mcpServers[serverName]?.requestTimeoutMs;
+  let answer: Awaited<ReturnType<typeof describeExecutorAppTool>>;
+  try {
+    answer = await describeExecutorAppTool({
+      client: connection.client,
+      path,
+      ...(signal ? { signal } : {}),
+      ...(timeout !== undefined && Number.isFinite(timeout) && timeout > 0 ? { timeout } : {}),
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    // The description already built still stands; only the signature is missing.
+    const message = error instanceof Error ? error.message : String(error);
+    return `Executor's full signature is unavailable: ${message.replace(/\.$/, "")}.`;
+  }
+  if ("missing" in answer) return executorUnknownToolText(path, answer.matches);
+  cacheExecutorSignature(state, serverName, path, answer.signature);
+  return `Full signature:\n${answer.signature}`;
+}
+
 export function executeDescribe(state: McpExtensionState, toolName: string, serverOverride?: string): ProxyToolResult {
+  const script = serverOverride === undefined ? findScriptToolMeta(state, toolName) : undefined;
+  if (script) return describeScriptTool(state, toolName, script);
   const target = resolveDescribeTarget(state, toolName, serverOverride);
   if ("error" in target) return target.error;
   const { server: serverName, tool: toolMeta } = target;
@@ -825,15 +921,7 @@ export function executeDescribe(state: McpExtensionState, toolName: string, serv
   const hints = formatToolHints(toolMeta);
   if (hints) text += `Hints: ${hints}\n`;
   text += `\n${toolMeta.description || "(no description)"}\n`;
-
-  if (toolMeta.inputSchema && !toolMeta.resourceUri) {
-    const shape = renderTsShape(toolMeta.inputSchema);
-    text += shape === null ? `\nParameters:\n${formatSchema(toolMeta.inputSchema)}` : `\nShape:\n${shape}`;
-  } else if (toolMeta.resourceUri) {
-    text += `\nNo parameters required (resource tool).`;
-  } else {
-    text += `\nNo parameters defined.`;
-  }
+  text += describeInputSchema(toolMeta);
 
   const observed = toolMeta.resourceUri ? undefined : getObservedOutput(state, serverName, toolMeta);
   if (observed) {
@@ -847,6 +935,63 @@ export function executeDescribe(state: McpExtensionState, toolName: string, serv
   };
 }
 
+function describeInputSchema(toolMeta: ToolMetadata): string {
+  if (toolMeta.inputSchema && !toolMeta.resourceUri) {
+    const shape = renderTsShape(toolMeta.inputSchema);
+    return shape !== null && isPlainTypeSchema(toolMeta.inputSchema)
+      ? `\nShape:\n${shape}`
+      : `\nInput schema (JSON Schema):\n\`\`\`json\n${JSON.stringify(toolMeta.inputSchema, null, 2)}\n\`\`\``;
+  }
+  return toolMeta.resourceUri ? `\nNo parameters required (resource tool).` : `\nNo parameters defined.`;
+}
+
+// A script tool, shaped like an MCP tool's metadata so search ranks and renders it the same way.
+function scriptToolMeta(spec: { name: string; definition: { description: string; inputSchema?: Record<string, unknown> } }): ToolMetadata {
+  const { description, inputSchema } = spec.definition;
+  return { name: spec.name, originalName: spec.name, description, ...(inputSchema ? { inputSchema } : {}) };
+}
+
+function findScriptToolMeta(state: McpExtensionState, name: string): { tool: ToolMetadata; toolName: string } | undefined {
+  const spec = findScriptTool(state.listScriptTools?.() ?? [], name);
+  return spec ? { tool: scriptToolMeta(spec), toolName: spec.toolName } : undefined;
+}
+
+function scriptToolMatches(state: McpExtensionState, score: (tool: ToolMetadata) => number | null): RankedToolMatch[] {
+  return (state.listScriptTools?.() ?? []).flatMap((spec) => {
+    const tool = scriptToolMeta(spec);
+    const matched = score(tool);
+    return matched === null ? [] : [{ server: SCRIPT_TOOL_SERVER, tool, score: matched, scriptTool: true as const }];
+  });
+}
+
+// A script tool wins over an MCP tool of the same name; the result says how to reach the MCP one.
+function describeScriptTool(state: McpExtensionState, requested: string, script: { tool: ToolMetadata; toolName: string }): ProxyToolResult {
+  let text = `${script.tool.name} (script tool)\nPi tool: ${script.toolName}\n\n${script.tool.description}\n${describeInputSchema(script.tool)}`;
+  const shadowed = resolveDescribeTarget(state, requested);
+  if (!("error" in shadowed)) {
+    text += `\n\n"${requested}" also names an MCP tool on server "${shadowed.server}". Describe it with mcp({ describe: "${requested}", server: "${shadowed.server}" }).`;
+  }
+  return {
+    content: [{ type: "text" as const, text: text.trim() }],
+    details: { mode: "describe", scriptTool: script.tool.name, tool: script.tool },
+  };
+}
+
+export async function executeGuardedDescribe(state: McpExtensionState, toolName: string, serverOverride?: string, signal?: AbortSignal): Promise<ProxyToolResult> {
+  const described = executeDescribe(state, toolName, serverOverride);
+  const signature = await executorSignatureText(state, described, combineAbortSignals(state.owner?.signal, signal));
+  const result = signature === undefined ? described : {
+    ...described,
+    content: described.content.map((block, index) => index === 0 && block.type === "text" ? { ...block, text: `${block.text}\n\n${signature}` } : block),
+  };
+  const guarded = await guardMcpOutput(result.content, resolveMcpOutputGuardOptions(state.config.settings));
+  return {
+    ...result,
+    content: guarded.content,
+    details: { ...result.details, ...guardedMcpDetails(guarded) },
+  };
+}
+
 function renderSearchResults(
   state: McpExtensionState,
   query: string,
@@ -854,7 +999,7 @@ function renderSearchResults(
   showSchemas: boolean,
   limit: number,
   offset: number,
-  matches: Array<{ server: string; tool: ToolMetadata; score: number }>,
+  matches: RankedToolMatch[],
   backend?: SemanticSearchBackend,
 ): ProxyToolResult {
   const page = paginate(matches, offset, limit);
@@ -866,7 +1011,7 @@ function renderSearchResults(
         .sort((a, b) => a.localeCompare(b));
     const scope = server ? ` in "${server}"` : "";
     const msg = backend?.requested === "semantic" && backend.used === "semantic" && backend.abstained
-      ? `Jev found no suitable tool for "${query}"${scope}`
+      ? `${backend.model} found no suitable tool for "${query}"${scope}`
       : `No tools matching "${query}"${scope}`;
     const connectingMessage = connectingServers.length === 1
       ? ` Server "${connectingServers[0]}" is still connecting; retry in a moment.`
@@ -884,35 +1029,49 @@ function renderSearchResults(
   }
 
   let text = `Found ${page.total} tool${page.total === 1 ? "" : "s"} matching "${query}":\n\n`;
+  const strongFloor = backend?.used === "semantic" ? matches[0]!.score / STRONG_MATCH_RATIO : undefined;
+  const extractable = extractionServers(state.config.settings);
+  let demoted = false;
   for (const match of page.items) {
-    const approvalMarker = isToolCallApprovalRequired(state.config, match.server, match.tool, state.toolMetadata)
-      ? " (requires approval)"
-      : "";
-    if (showSchemas) {
-      text += `${match.tool.name}${approvalMarker}\n`;
+    // A script tool's own calls ask for approval, never the script tool itself.
+    let marker = match.scriptTool
+      ? " (script tool)"
+      : isToolCallApprovalRequired(state.config, match.server, match.tool, state.toolMetadata) ? " (requires approval)" : "";
+    if (!match.scriptTool && extractable.includes(match.server)) marker += " (extract allowed)";
+    const full = showSchemas && (strongFloor === undefined || match.score >= strongFloor);
+    demoted ||= showSchemas && !full;
+    if (full) {
+      text += `${match.tool.name}${marker}\n`;
       text += `  ${match.tool.description || "(no description)"}\n`;
       if (match.tool.inputSchema && !match.tool.resourceUri) {
         const shape = renderTsShape(match.tool.inputSchema);
         text += shape === null
           ? `\n  Parameters:\n${formatSchema(match.tool.inputSchema, "    ")}\n`
           : `\n  Shape:\n${shape.split("\n").map(line => `    ${line}`).join("\n")}\n`;
+        if (shape === null || !isPlainTypeSchema(match.tool.inputSchema)) {
+          const describe = match.scriptTool ? { describe: match.tool.name } : { describe: match.tool.name, server: match.server };
+          text += `  Parameter summary only. Full input schema: mcp(${JSON.stringify(describe)})\n`;
+        }
       } else if (match.tool.resourceUri) {
         text += "  No parameters (resource tool).\n";
       }
       text += "\n";
     } else {
-      text += `- ${match.tool.name}${approvalMarker}`;
+      text += `- ${match.tool.name}${marker}`;
       if (match.tool.description) text += ` - ${truncateAtWord(match.tool.description, 50)}`;
       text += "\n";
     }
   }
   if (page.hasMore) text += `\n${page.items.length} of ${page.total} — offset: ${page.nextOffset} for more\n`;
+  if (demoted) text += `\nShapes shown for the strongest matches only; mcp({ describe, server }) shows any other.\n`;
 
   return {
     content: [{ type: "text" as const, text: text.trim() }],
     details: {
       mode: "search",
-      matches: page.items.map(match => ({ server: match.server, tool: match.tool.name, score: match.score })),
+      matches: page.items.map(match => match.scriptTool
+        ? { scriptTool: match.tool.name, score: match.score }
+        : { server: match.server, tool: match.tool.name, score: match.score }),
       count: page.total, hasMore: page.hasMore, nextOffset: page.nextOffset, query,
       ...(backend ? { backend } : {}),
     },
@@ -925,8 +1084,7 @@ export interface ToolSearchInput {
   server?: string | undefined;
   searchMode?: unknown;
   signal?: AbortSignal | undefined;
-  semanticEvaluator?: SemanticSearchEvaluator | undefined;
-  observedSources?: readonly string[];
+  classifier?: SemanticClassifierRegistry | undefined;
 }
 
 /** Ranked matches, unpaginated; each surface pages and renders them its own way. */
@@ -948,7 +1106,7 @@ export function findTools(state: McpExtensionState, input: ToolSearchInput): Too
     return failure("Semantic search cannot be combined with regex search.", { error: "invalid_search_mode", query });
   }
   if (searchMode === "semantic") {
-    return semanticSearch(state, query, server, input.signal, input.semanticEvaluator, input.observedSources).then(result => result.ok
+    return semanticSearch(state, query, server, input.signal, input.classifier).then(result => result.ok
       ? { matches: result.matches, backend: result.backend }
       : failure(`Semantic search failed: ${result.error.message}`, { error: result.error.code, message: result.error.message, query }));
   }
@@ -991,6 +1149,8 @@ export function findTools(state: McpExtensionState, input: ToolSearchInput): Too
         if (matched) matches.push({ server: serverName, tool, score: 0 });
       }
     }
+    // Script tools belong to no server, so a search scoped to one lists none.
+    if (!server) matches.push(...scriptToolMatches(state, tool => pattern.test(tool.name) || pattern.test(tool.description) ? 0 : null));
     return { matches };
   }
 
@@ -1002,7 +1162,12 @@ export function findTools(state: McpExtensionState, input: ToolSearchInput): Too
         .sort((a, b) => a.tool.name.localeCompare(b.tool.name)),
     };
   }
-  return { matches: rankToolMatches(state, query, server) };
+  const ranked = rankToolMatches(state, query, server);
+  if (server) return { matches: ranked };
+  // Scored as "script", not "mcp__script", which would make any query with "mcp" match every script tool.
+  const scripts = scriptToolMatches(state, tool => scoreToolMatch(tool, "script", query));
+  if (scripts.length === 0) return { matches: ranked };
+  return { matches: [...ranked, ...scripts].sort((a, b) => b.score - a.score || a.tool.name.localeCompare(b.tool.name)) };
 }
 
 export function executeSearch(
@@ -1015,12 +1180,12 @@ export function executeSearch(
   offset = 0,
   searchMode: "lexical" | "semantic" = "lexical",
   signal?: AbortSignal,
-  semanticEvaluator?: SemanticSearchEvaluator,
+  modelRegistry?: unknown,
 ): ProxyToolResult | Promise<ProxyToolResult> {
   const render = (outcome: ToolSearchOutcome): ProxyToolResult => "error" in outcome
     ? outcome.error
     : renderSearchResults(state, query, server, includeSchemas !== false, limit, offset, outcome.matches, outcome.backend);
-  const outcome = findTools(state, { query, regex, server, searchMode, signal, semanticEvaluator });
+  const outcome = findTools(state, { query, regex, server, searchMode, signal, classifier: classifierRegistryOf(modelRegistry) });
   return outcome instanceof Promise ? outcome.then(render) : render(outcome);
 }
 
@@ -1088,20 +1253,28 @@ export function executeList(state: McpExtensionState, server: string): ProxyTool
       cachedNote = ` (lazy: tools from cache, not connected yet — mcp({ connect: "${server}" }) to connect)`;
     }
   }
-  let text = `${server} (${toolNames.length} tools${cachedNote}):${descriptionText}\n\n`;
+  // Executor's app tools are counted in one line, not listed: there can be a thousand.
+  const serverTools = ownTools(metadata);
+  const appToolsLine = executorAppToolsLine(state, server);
+  let text = `${server} (${serverTools.length} tools${cachedNote}):${descriptionText}\n\n`;
 
-  for (const toolMeta of metadata ?? []) {
+  for (const toolMeta of serverTools) {
     const truncated = truncateAtWord(toolMeta.description, 50);
     text += `- ${toolMeta.name}${formatParameterNames(toolMeta)}`;
     if (truncated) text += ` - ${truncated}`;
     text += "\n";
   }
+  if (appToolsLine) text += `${appToolsLine}\n`;
 
   text += instructionsText;
 
   return {
     content: [{ type: "text" as const, text: text.trim() }],
-    details: { mode: "list", server, tools: toolNames, count: toolNames.length, hasInstructions: Boolean(instructions) },
+    details: {
+      mode: "list", server, tools: serverTools.map(toolMeta => toolMeta.name), count: serverTools.length,
+      ...(appToolsLine ? { executorAppTools: toolNames.length - serverTools.length } : {}),
+      hasInstructions: Boolean(instructions),
+    },
   };
 }
 
@@ -1126,6 +1299,25 @@ function formatParameterNames(toolMeta: ToolMetadata): string {
     ...names.filter(name => !requiredSet.has(name)).map(name => `${name}?`),
   ];
   return `(${ordered.join(", ")})`;
+}
+
+/** `mcp({ cancelTask })`: stops a background task the model started; no tool approval, like `/mcp-adapter tasks stop`. */
+export async function executeCancelTask(state: McpExtensionState, key: string): Promise<ProxyToolResult> {
+  const reply = (text: string, error?: string) => ({
+    content: [{ type: "text" as const, text }],
+    details: { mode: "cancelTask", task: key, ...(error === undefined ? {} : { error }) },
+  });
+  if (state.backgroundTasks === undefined) {
+    return reply("Background MCP tasks run only in the interactive terminal, so there is no task to cancel.", "no_background_tasks");
+  }
+  try {
+    if (!await state.backgroundTasks.stop(key, "the agent")) {
+      return reply(`No running MCP task "${key}". It may have finished already, and its result arrives as a message.`, "not_found");
+    }
+  } catch (error) {
+    return reply(`Could not cancel MCP task "${key}": ${error instanceof Error ? error.message : String(error)}`, "cancel_failed");
+  }
+  return reply(`Cancel requested for MCP task "${key}". A message that starts "MCP task" confirms it.`);
 }
 
 export function executeInstructions(state: McpExtensionState, server: string): ProxyToolResult {
@@ -1216,6 +1408,7 @@ export async function executeConnect(state: McpExtensionState, serverName: strin
     } else {
       state.serverInstructions.delete(serverName);
     }
+    // Also puts this session's Executor app tools back into the metadata buildToolMetadata just replaced.
     updateMetadataCache(state, serverName);
     const restored = clearFailure(state, serverName, "proxy-connect");
     if (!restored) notifyToolMetadataUpdated(state, serverName, "proxy-connect");
@@ -1250,6 +1443,7 @@ export async function executeCall(
   // Internal consumers own successful data delivery; origin remains approval metadata only.
   internalDelivery?: { onSuccess: (data: unknown) => void },
   toolCallId?: string,
+  handOff?: NestedCallHandOff,
 ): Promise<ProxyToolResult> {
   const ownedSignal = combineAbortSignals(state.owner?.signal, signal);
   throwIfAborted(ownedSignal);
@@ -1437,6 +1631,14 @@ export async function executeCall(
     }
   }
 
+  if (!toolMeta) {
+    const repaged = await findExecutorAppToolAfterRepage(state, toolName, serverName, ownedSignal);
+    if (repaged) {
+      serverName = repaged.server;
+      toolMeta = repaged.tool;
+    }
+  }
+
   if (!serverName || !toolMeta) {
     const nativeTool = !serverOverride
       ? getPiTools?.().find((tool) => tool.name === toolName && tool.name !== "mcp")
@@ -1453,6 +1655,8 @@ export async function executeCall(
     let msg = `Tool "${toolName}" not found.`;
     if (available.length > 0) {
       msg += ` Server "${hintServer}" has: ${available.join(", ")}`;
+      const appToolsLine = executorAppToolsLine(state, hintServer!);
+      if (appToolsLine) msg += `, ${appToolsLine}`;
     } else {
       msg += ` Use mcp({ search: "..." }) to search.`;
     }
@@ -1552,8 +1756,9 @@ export async function executeCall(
       toolMeta = match;
       if (!toolMeta) {
         const available = getToolNames(state, serverName);
+        const appToolsLine = executorAppToolsLine(state, serverName);
         const hint = available.length > 0
-          ? `Available tools on "${serverName}": ${available.join(", ")}`
+          ? `Available tools on "${serverName}": ${available.join(", ")}${appToolsLine ? `, ${appToolsLine}` : ""}`
           : `Server "${serverName}" has no tools.`;
         const suggestions = rankSuggestions(state, toolName, 5, serverName);
         const suggestionText = suggestions.length > 0 ? ` Did you mean: ${suggestions.join(", ")}` : "";
@@ -1591,6 +1796,21 @@ export async function executeCall(
     };
   }
 
+  // After connect and validation, which the nested leg repeats cheaply; before approval, which only it runs.
+  // Pi validates handed-off arguments itself, so a schema only the server can evaluate stays in the proxy.
+  const serverValidatesArguments = validationError === undefined;
+  if (handOff && !serverValidatesArguments) {
+    // Held in flight while Pi's tool_call hooks, such as a permission dialog, run before the nested leg.
+    state.manager.incrementInFlight(serverName);
+    let handedOff: ProxyToolResult | undefined;
+    try {
+      handedOff = await handOff({ serverName, toolMeta, args: normalizedArgs, callIdentity });
+    } finally {
+      state.manager.decrementInFlight(serverName);
+    }
+    if (handedOff) return handedOff;
+  }
+
   let uiSession: UiSessionRuntime | null = null;
   // openUi: false runs the tool as if it declared no UI.
   const uiResourceUri = state.config.mcpServers[serverName]?.openUi === false ? undefined : toolMeta.uiResourceUri;
@@ -1601,7 +1821,11 @@ export async function executeCall(
     toolMeta.originalName,
   );
 
-  const outputGuardOptions = resolveMcpOutputGuardOptions(state.config.settings);
+  // A script gets the server's whole result; Pi limits what the script returns to the model.
+  // The script never reads details, so the raw result is left out of them instead of copied unbounded.
+  const toScript = state.deliversToScript?.(toolCallId) === true;
+  const outputGuardOptions = { ...resolveMcpOutputGuardOptions(state.config.settings), ...(toScript ? { enabled: false } : {}) };
+  const appendStructuredContent = state.config.mcpServers[serverName]?.appendStructuredContent !== false;
   const recoverAuthConnection = async () => {
     const current = state.manager.getConnection(serverName);
     if (current?.status === "connected") return current;
@@ -1629,6 +1853,8 @@ export async function executeCall(
   };
 
   let approval: ToolCallApprovalResult | undefined;
+  // A call handed to the background task registry leaves its in-flight count there.
+  let backgrounded = false;
   try {
     // In flight from here so an idle check cannot close the server while the approval dialog is open.
     state.manager.touch(serverName);
@@ -1642,19 +1868,8 @@ export async function executeCall(
       origin ?? (toolMeta.resourceUri ? "resource" : "proxy"),
     );
     if (approval.ok === false) {
-      const denied = approval.reason === "denied";
-      const message = denied
-        ? `The user declined approval to run MCP tool "${toolMeta.originalName}" on server "${serverName}".`
-        : `MCP tool "${toolMeta.originalName}" on server "${serverName}" is approval-gated and requires an interactive session.`;
-      return {
-        content: [{ type: "text" as const, text: message }],
-        details: {
-          mode: "call",
-          error: denied ? "approval_denied" : "approval_required",
-          server: serverName,
-          tool: toolMeta.originalName,
-        },
-      };
+      const blocked = approvalBlockedResult(approval, serverName, toolMeta.originalName);
+      return { ...blocked, details: { mode: "call", ...blocked.details } };
     }
 
     if (toolMeta.resourceUri) {
@@ -1703,7 +1918,36 @@ export async function executeCall(
 
     const requestMeta = withToolCallIdMeta(uiSession?.requestMeta, toolCallId);
     const recordOutput = observedOutputRecorder(state, serverName, toolMeta.originalName);
-    const result = await withSessionRecovery<ClientCallToolResult>(
+    const callParams = toolMeta.executorPath !== undefined
+      ? executorCallParams(toolMeta.executorPath, normalizedArgs)
+      : { name: toolMeta.originalName, arguments: normalizedArgs };
+    // A delivered task result names its call in details.task instead of the call identity.
+    const renderResult = async (
+      result: Record<string, unknown>,
+      identity: Record<string, unknown> = { mode: "call", ...callIdentity },
+      suffix?: string,
+    ) => {
+      const content = resolveMcpResultContent(result, state.owner?.signal, appendStructuredContent);
+      const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
+      const guarded = await guardMcpOutput(outputContent, {
+        ...outputGuardOptions,
+        ...(suffix === undefined ? {} : { suffix }),
+        ...(result.isError ? { prefix: "Error: ", emptyTextFallback: "Tool execution failed" } : {}),
+        rawMcpResult: toScript ? undefined : result,
+      });
+      return {
+        content: guarded.content,
+        details: { ...identity, ...(result.isError ? { error: "tool_error" } : {}), ...guardedMcpDetails(guarded) },
+      };
+    };
+    // Only a call the model made goes to the background; code callers (scripts, other extensions,
+    // internal consumers) and the MCP-UI and Executor flows need the value itself.
+    const backgroundTasks = origin !== "script" && state.calledByModel?.(toolCallId) === true
+      && !internalDelivery && !uiResourceUri && toolMeta.executorPath === undefined
+      ? state.backgroundTasks
+      : undefined;
+    let startedTask: StartedTask | undefined;
+    const callResult = await withSessionRecovery<ClientCallToolResult>(
       {
         manager: state.manager,
         config: state.config,
@@ -1713,26 +1957,48 @@ export async function executeCall(
       serverName,
       async (conn) => {
         await state.manager.ensureListen?.(serverName, conn);
-        if (conn.taskSession) {
-          return await callToolViaTaskSession(conn.taskSession, {
-            name: toolMeta.originalName,
-            args: normalizedArgs ?? {},
-            meta: requestMeta,
-            signal: ownedSignal,
-            requestTimeoutMs: requestOptions?.timeout,
-          }) as unknown as ClientCallToolResult;
-        }
-        return abortable(callToolPausingForElicitation(conn.client, {
-          name: toolMeta.originalName,
-          arguments: normalizedArgs,
-          _meta: requestMeta,
-        }, requestOptions), ownedSignal);
+        return callToolAnsweringExecutorPauses({
+          conn,
+          manager: state.manager,
+          serverName,
+          params: { ...callParams, _meta: requestMeta },
+          toolName: toolMeta.originalName,
+          requestOptions,
+          signal: ownedSignal,
+          call: callToolOn(conn, ownedSignal, backgroundTasks && !isExecutorConnection(conn) ? (task) => { startedTask = task; } : undefined),
+        });
       },
     );
-    if (!result.isError) recordOutput(result as Record<string, unknown>);
+    if (startedTask !== undefined) {
+      const { taskId, execution } = startedTask;
+      void backgroundTasks!.start({
+        server: serverName,
+        tool: toolMeta.originalName,
+        taskId,
+        execution,
+        render: async (result) => {
+          if (!result.isError) recordOutput(result);
+          return renderResult(result, {});
+        },
+        guard: (text) => guardMcpText(text, outputGuardOptions),
+      });
+      backgrounded = true;
+      const handle = backgroundTaskHandle(serverName, toolMeta.originalName, taskId, state.proxyToolAvailable?.() === true);
+      return { content: handle.content, details: { mode: "call", ...callIdentity, task: handle.task } };
+    }
+    const result = toolMeta.executorPath !== undefined ? unwrapExecutorCallResult(toolMeta.executorPath, callResult) : callResult;
+    const executorMatches = toolMeta.executorPath !== undefined ? executorUnknownToolMatches(toolMeta.executorPath, callResult) : undefined;
+    if (executorMatches) {
+      await repageExecutorCatalog(state, serverName, ownedSignal);
+      return {
+        content: [{ type: "text" as const, text: executorUnknownToolText(toolMeta.originalName, executorMatches) }],
+        details: { mode: "call", error: "tool_not_found", ...callIdentity, requestedTool: toolName, suggestions: executorMatches },
+      };
+    }
+    if (!result.isError) recordOutput(result);
 
     if (uiResourceUri) {
-      uiSession?.sendToolResult(result as unknown as import("@modelcontextprotocol/client").CallToolResult);
+      uiSession?.sendToolResult(result as import("@modelcontextprotocol/client").CallToolResult);
     }
 
     if (!result.isError && internalDelivery) {
@@ -1741,53 +2007,12 @@ export async function executeCall(
       return { content: [], details: { mode: "call", ...callIdentity } };
     }
 
-    if (uiResourceUri) {
-      if (result.isError) {
-        const content = resolveMcpResultContent(result as Record<string, unknown>, state.owner?.signal);
-        const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
-        const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, prefix: "Error: ", emptyTextFallback: "Tool execution failed", rawMcpResult: result });
-        return {
-          content: guarded.content,
-          details: { mode: "call", error: "tool_error", ...callIdentity, ...guardedMcpDetails(guarded) },
-        };
-      }
-
-      const content = resolveMcpResultContent(result as Record<string, unknown>, state.owner?.signal);
-      const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
-      const uiSummary = summarizeUiSessionResult(uiSession);
-      const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, suffix: `\n\n${uiSummary.message}`, rawMcpResult: result });
-      return {
-        content: guarded.content,
-        details: {
-          mode: "call",
-          ...guardedMcpDetails(guarded),
-          ...callIdentity,
-          uiOpen: uiSummary.uiOpen,
-          uiViewer: uiSummary.uiViewer,
-          uiUrl: uiSummary.uiUrl,
-        },
-      };
+    if (uiResourceUri && !result.isError) {
+      const { message, uiOpen, uiViewer, uiUrl } = summarizeUiSessionResult(uiSession);
+      return await renderResult(result, { mode: "call", ...callIdentity, uiOpen, uiViewer, uiUrl }, `\n\n${message}`);
     }
 
-    if (result.isError) {
-      const content = resolveMcpResultContent(result as Record<string, unknown>, state.owner?.signal);
-      const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
-      const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, prefix: "Error: ", emptyTextFallback: "Tool execution failed", rawMcpResult: result });
-      return {
-        content: guarded.content,
-        details: { mode: "call", error: "tool_error", ...callIdentity, ...guardedMcpDetails(guarded) },
-      };
-    }
-
-    const content = resolveMcpResultContent(result as Record<string, unknown>, state.owner?.signal);
-    const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
-    // Runtime event-bus callers ("script" origin) are extensions, not the model, so they get no hint.
-    const pipeHint = scriptPipeHint(origin !== "script" && state.scriptTool, outputContent);
-    const guarded = await guardMcpOutput(outputContent, { ...outputGuardOptions, ...pipeHint, rawMcpResult: result });
-    return {
-      content: guarded.content,
-      details: { mode: "call", ...guardedMcpDetails(guarded), ...callIdentity },
-    };
+    return await renderResult(result);
   } catch (error) {
     // Approval errors, such as an abort while the dialog is open, propagate unchanged.
     if (!approval) throw error;
@@ -1832,7 +2057,7 @@ export async function executeCall(
     if (uiSession?.reused) {
       uiSession.close();
     }
-    state.manager.decrementInFlight(serverName);
+    if (!backgrounded) state.manager.decrementInFlight(serverName);
     state.manager.touch(serverName);
   }
 }

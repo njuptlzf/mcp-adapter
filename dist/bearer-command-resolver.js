@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { getWindowsCommandBash } from "./utils.js";
 const DEFAULT_TTL_MS = 5 * 60_000;
 const ENV_TTL_MS = "PI_MCP_ADAPTER_BEARER_COMMAND_TTL_MS";
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -16,12 +17,15 @@ function runCommand(command, context, signal) {
         let output = Buffer.alloc(0);
         let settled = false;
         let terminating = false;
-        const child = spawn(command.slice(1), {
-            shell: true,
+        const options = {
             stdio: ["ignore", "pipe", "ignore"],
             windowsHide: true,
             detached: USE_PROCESS_GROUP,
-        });
+        };
+        const bash = getWindowsCommandBash();
+        const child = bash === undefined
+            ? spawn(command.slice(1), { ...options, shell: true })
+            : spawn(bash, ["-c", command.slice(1)], { ...options, shell: false });
         const kill = async () => {
             if (child.pid === undefined)
                 return;

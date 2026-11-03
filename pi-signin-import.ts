@@ -1,11 +1,10 @@
 import { readFileSync } from "node:fs";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getPiMcpAuthPath, isPiMcpConfigEnabled } from "./config.ts";
-import { supportsOAuth } from "./mcp-auth-flow.ts";
 import { getAuthStorageOptions, inspectAuthForUrl, saveAuthEntry, type AuthEntry, type AuthStorageOptions, type StoredClientInfo } from "./mcp-auth.ts";
 import { loadOnboardingState, markPiSignInImportAsked } from "./onboarding-state.ts";
 import { isServerDisabled, type McpConfig } from "./types.ts";
-import { resolveServerUrl, sanitizeTerminalText } from "./utils.ts";
+import { resolveServerUrl, sanitizeTerminalText, supportsOAuth } from "./utils.ts";
 
 interface PiSignInImport {
   serverName: string;
@@ -110,11 +109,12 @@ export function importPiSignIn(candidate: PiSignInImport, authStorageOptions: Au
  * "Sign in again" leaves everything as it is, so the user signs in later with /mcp-auth.
  */
 export async function offerPiSignInImports(
-  ctx: Pick<ExtensionContext, "hasUI" | "ui" | "cwd">,
+  ctx: Pick<ExtensionContext, "hasUI" | "mode" | "ui" | "cwd">,
   config: McpConfig,
   signal?: AbortSignal,
 ): Promise<void> {
-  if (!ctx.hasUI) return;
+  // RPC sessions also have a UI, but Pi reads RPC input only after session_start, so a dialog here never resolves.
+  if (!ctx.hasUI || ctx.mode !== "tui") return;
   const authStorageOptions = getAuthStorageOptions(config.settings?.oauthDir, ctx.cwd, config.settings?.oauthCredentialStore);
   const asked = loadOnboardingState().piSignInImportsAsked ?? [];
   const candidates = matchPiSignIns(config, authStorageOptions)

@@ -183,9 +183,9 @@ describe("tool approval", () => {
   it("returns approval_denied without throwing or invoking proxy or direct tools", async () => {
     const persist = vi.fn();
     const proxy = createState({ approveTools: true, decision: "Deny", persist });
-    await expect(executeCall(proxy.state, tool.name, {})).resolves.toMatchObject({
-      details: { error: "approval_denied", server: "demo", tool: "search-records" },
-    });
+    const denied = await executeCall(proxy.state, tool.name, {});
+    expect(denied.content[0].text).toBe('MCP tool "search-records" on server "demo" was blocked by the approval gate; it was not executed. This does not by itself mean the user rejected it.\nReason: The user denied it in the approval dialog.');
+    expect(denied.details).toMatchObject({ error: "approval_denied", server: "demo", tool: "search-records", reason: "The user denied it in the approval dialog." });
     expect(proxy.callTool).not.toHaveBeenCalled();
     expect(persist).not.toHaveBeenCalled();
 

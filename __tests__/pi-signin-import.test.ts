@@ -54,9 +54,10 @@ describe("importing sign-ins from Pi's built-in MCP", () => {
     writeFileSync(piAuthPath, `${JSON.stringify(entries, null, 2)}\n`, "utf-8");
   }
 
-  function createCtx(choice: string | undefined, hasUI = true) {
+  function createCtx(choice: string | undefined, hasUI = true, mode = "tui") {
     return {
       hasUI,
+      mode,
       cwd: root,
       ui: { select: vi.fn(async () => choice), notify: vi.fn() },
     } as any;
@@ -124,6 +125,25 @@ describe("importing sign-ins from Pi's built-in MCP", () => {
     expect(connection.status).toBe("connected");
     expect(authorizations).toContain("Bearer pi-access");
     await connection.client.close();
+  });
+
+  it("checks for sign-in imports without loading the OAuth runtime", async () => {
+    vi.doMock("../mcp-auth-flow.ts", () => {
+      throw new Error("Sign-in discovery must not load the OAuth runtime");
+    });
+    try {
+      writePiAuth({});
+      const { offerPiSignInImports } = await loadModules();
+      const ctx = createCtx(IMPORT);
+
+      await offerPiSignInImports(ctx, {
+        mcpServers: { docs: { url: "https://docs.example/mcp", auth: "oauth" } },
+      });
+
+      expect(ctx.ui.select).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock("../mcp-auth-flow.ts");
+    }
   });
 
   it("never offers a sign-in stored for a different URL", async () => {
@@ -201,17 +221,20 @@ describe("importing sign-ins from Pi's built-in MCP", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("Could not import Pi's sign-in for docs"), "error");
   });
 
-  it("does nothing without a UI or with the encrypted-file credential store", async () => {
+  it("does nothing without a UI, in RPC mode, or with the encrypted-file credential store", async () => {
     writePiAuth({ "https://docs.example/mcp": piEntry("https://docs.example/mcp") });
     const { offerPiSignInImports, findPiSignInImports, getAuthForUrl } = await loadModules();
     const config: McpConfig = { mcpServers: { docs: { url: "https://docs.example/mcp", auth: "oauth" } } };
     const headless = createCtx(IMPORT, false);
+    const rpc = createCtx(IMPORT, true, "rpc");
     const encrypted = createCtx(IMPORT);
 
     await offerPiSignInImports(headless, config);
+    await offerPiSignInImports(rpc, config);
     await offerPiSignInImports(encrypted, { ...config, settings: { oauthCredentialStore: "encrypted-file" } });
 
     expect(headless.ui.select).not.toHaveBeenCalled();
+    expect(rpc.ui.select).not.toHaveBeenCalled();
     expect(encrypted.ui.select).not.toHaveBeenCalled();
     expect(findPiSignInImports(config, { credentialStore: "encrypted-file" })).toEqual([]);
     expect(getAuthForUrl("docs", "https://docs.example/mcp")).toBeUndefined();

@@ -5,6 +5,8 @@ import type { SamplingHandlerOptions } from "../sampling-handler.ts";
 
 const mocks = vi.hoisted(() => ({
   complete: vi.fn(),
+  streamSimple: vi.fn(),
+  result: vi.fn(),
 }));
 
 const usage = {
@@ -57,8 +59,10 @@ function createOptions(overrides: Partial<SamplingHandlerOptions> = {}): Samplin
     modelRegistry: {
       getAvailable: vi.fn(() => [model]),
       complete: mocks.complete,
+      streamSimple: mocks.streamSimple,
     },
     getCurrentModel: vi.fn(() => undefined),
+    getThinkingLevel: vi.fn(() => "off" as const),
     getSignal: vi.fn(() => undefined),
     ...overrides,
   };
@@ -82,7 +86,7 @@ function createSamplingRequest(params: CreateMessageRequest["params"]): CreateMe
 
 describe("sampling handler", () => {
   beforeEach(() => {
-    mocks.complete.mockReset().mockResolvedValue({
+    mocks.result.mockReset().mockResolvedValue({
       role: "assistant",
       content: [{ type: "text", text: "Bonjour" }],
       api: "anthropic-messages",
@@ -92,6 +96,7 @@ describe("sampling handler", () => {
       stopReason: "stop",
       timestamp: 1,
     });
+    mocks.streamSimple.mockReset().mockImplementation(() => ({ result: mocks.result }));
   });
 
   it("converts approved MCP sampling requests into pi-ai completions", async () => {
@@ -104,7 +109,7 @@ describe("sampling handler", () => {
       metadata: { locale: "fr" },
     }));
 
-    expect(mocks.complete).toHaveBeenCalledWith(
+    expect(mocks.streamSimple).toHaveBeenCalledWith(
       model,
       {
         systemPrompt: "Translate tersely.",
@@ -131,6 +136,43 @@ describe("sampling handler", () => {
     });
   });
 
+  it("samples with the session thinking level so reasoning-only endpoints accept the request", async () => {
+    const { handleSamplingRequest } = await import("../sampling-handler.ts");
+    await handleSamplingRequest(createOptions({ getThinkingLevel: () => "high" }), createSamplingRequest({
+      messages: [{ role: "user", content: { type: "text", text: "Hello" } }],
+      maxTokens: 50,
+      metadata: { reasoning_budget: 4096 },
+    }));
+
+    expect(mocks.streamSimple.mock.calls[0][2]).toEqual({
+      maxTokens: 50,
+      metadata: { reasoning_budget: 4096 },
+      reasoning: "high",
+    });
+  });
+
+  it("leaves reasoning unset when the session thinking level is off", async () => {
+    await runBasicSampling({ getThinkingLevel: () => "off" });
+
+    expect(mocks.streamSimple.mock.calls[0][2]).not.toHaveProperty("reasoning");
+  });
+
+  it("falls back to complete without reasoning on Pi versions without streamSimple", async () => {
+    const { handleSamplingRequest } = await import("../sampling-handler.ts");
+    mocks.complete.mockReset().mockImplementation(() => mocks.result());
+    const result = await handleSamplingRequest(createOptions({
+      modelRegistry: { getAvailable: () => [model], complete: mocks.complete },
+      getThinkingLevel: () => "high",
+    }), createSamplingRequest({
+      messages: [{ role: "user", content: { type: "text", text: "Hello" } }],
+      maxTokens: 50,
+      metadata: { locale: "fr" },
+    }));
+
+    expect(result.content).toEqual({ type: "text", text: "Bonjour" });
+    expect(mocks.complete.mock.calls[0][2]).toEqual({ maxTokens: 50, metadata: { locale: "fr" } });
+  });
+
   it("requires UI approval unless auto-approve is enabled", async () => {
     const { handleSamplingRequest } = await import("../sampling-handler.ts");
 
@@ -138,7 +180,7 @@ describe("sampling handler", () => {
       createOptions({ autoApprove: false, ui: undefined }),
       createSamplingRequest({ messages: [], maxTokens: 50 }),
     )).rejects.toThrow("MCP sampling requires interactive approval");
-    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.streamSimple).not.toHaveBeenCalled();
   });
 
   it("asks for approval with inspectable request and response content", async () => {
@@ -164,11 +206,12 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [haiku, opus]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: "haiku" }] });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(haiku);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(haiku);
   });
 
   it("matches model preference hints case-insensitively after trimming", async () => {
@@ -176,11 +219,12 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [haiku, opus]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: " HAIKU " }] });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(haiku);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(haiku);
   });
 
   it("matches model preference hints against display names", async () => {
@@ -188,11 +232,12 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [geminiFlash, opus]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: "2.5 Flash" }] });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(geminiFlash);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(geminiFlash);
   });
 
   it("matches model preference hints against provider/id", async () => {
@@ -200,11 +245,12 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [geminiFlash, opus]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: "google/gemini" }] });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(geminiFlash);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(geminiFlash);
   });
 
   it("preserves preference order across multiple model hints", async () => {
@@ -212,26 +258,30 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [haiku, geminiFlash, opus]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: "gemini" }, { name: "haiku" }] });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(geminiFlash);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(geminiFlash);
   });
 
   it("propagates completion errors without falling back to another candidate", async () => {
-    const complete = vi.fn().mockRejectedValue(new Error("Provider is not configured: anthropic"));
+    const streamSimple = vi.fn(() => ({
+      result: () => Promise.reject(new Error("Provider is not configured: anthropic")),
+    }));
 
     await expect(runBasicSampling({
       modelRegistry: {
         getAvailable: vi.fn(() => [haiku, opus]),
-        complete,
+        complete: mocks.complete,
+        streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     }, { hints: [{ name: "haiku" }] })).rejects.toThrow("Provider is not configured: anthropic");
 
-    expect(complete).toHaveBeenCalledTimes(1);
-    expect(complete.mock.calls[0][0]).toBe(haiku);
+    expect(streamSimple).toHaveBeenCalledTimes(1);
+    expect(streamSimple.mock.calls[0]?.[0]).toBe(haiku);
   });
 
   it("preserves current-model-first selection when no hints are provided", async () => {
@@ -239,11 +289,12 @@ describe("sampling handler", () => {
       modelRegistry: {
         getAvailable: vi.fn(() => [haiku]),
         complete: mocks.complete,
+        streamSimple: mocks.streamSimple,
       },
       getCurrentModel: vi.fn(() => opus),
     });
 
-    expect(mocks.complete.mock.calls[0][0]).toBe(opus);
+    expect(mocks.streamSimple.mock.calls[0][0]).toBe(opus);
   });
 
   it("rejects unsupported sampling features loudly", async () => {
@@ -265,6 +316,6 @@ describe("sampling handler", () => {
       includeContext: "thisServer",
     }))).rejects.toThrow("MCP sampling context inclusion is not supported");
 
-    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.streamSimple).not.toHaveBeenCalled();
   });
 });

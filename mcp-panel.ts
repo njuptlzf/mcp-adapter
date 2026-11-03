@@ -2,7 +2,7 @@ import { Container, Text, matchesKey, truncateToWidth, visibleWidth, type Compon
 import { copyToClipboard, type Theme } from "@earendil-works/pi-coding-agent";
 import { createPanelKeys, type PanelKeybindings, type PanelKeys } from "./panel-keys.ts";
 import { createMcpPanelTheme, McpPanelFrame, type McpPanelTheme } from "./mcp-panel-theme.ts";
-import { getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix } from "./types.ts";
+import { describeIgnoredSettings, getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix } from "./types.ts";
 import type { McpConfig, McpPanelCallbacks, McpPanelResult, ServerEntry, ServerProvenance, ToolPrefix } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { sanitizeTerminalText, stripOscSequences } from "./utils.ts";
@@ -86,7 +86,7 @@ interface ServerState {
   expanded: boolean;
   source: "user" | "project" | "import";
   importKind?: string;
-  ignoredSettings?: string[];
+  ignoredSettings?: string;
   signInProvider?: string;
   includeTools?: string[];
   excludeTools?: string[];
@@ -207,8 +207,7 @@ class McpPanelView implements Component {
             }
           }
           if ((isCursor || server.expanded) && server.ignoredSettings) {
-            const text = `Ignored Pi mcp.json settings: ${server.ignoredSettings.join(", ")}`;
-            for (const line of this.wrapText(sanitizeDisplayText(text), innerWidth - 6)) {
+            for (const line of this.wrapText(sanitizeDisplayText(server.ignoredSettings), innerWidth - 6)) {
               this.addRow(`    ${this.theme.hint(line)}`, innerWidth);
             }
           }
@@ -497,14 +496,7 @@ class McpPanel {
       const cachedEntry = this.cache?.servers?.[serverName];
       const serverCache = cachedEntry && isServerCacheValid(cachedEntry, definition) ? cachedEntry : undefined;
 
-      const globalDirect = config.settings?.directTools;
-      let toolFilter: true | string[] | false = false;
-      const selected = definition.directTools !== undefined ? definition.directTools : globalDirect;
-      if (selected === "search") {
-        toolFilter = true; // search-activated tools are still direct tools for the panel
-      } else if (selected !== undefined) {
-        toolFilter = selected;
-      }
+      const isConfiguredDirect = this.configuredDirectSelector(definition);
 
       const tools: ToolState[] = [];
       if (serverCache && !this.authOnly && !isServerDisabled(definition)) {
@@ -514,7 +506,7 @@ class McpPanel {
             continue;
           }
 
-          const isDirect = toolFilter === true || (Array.isArray(toolFilter) && toolFilter.includes(tool.name));
+          const isDirect = isConfiguredDirect(tool.name);
           tools.push({
             name: tool.name,
             description: tool.description ?? "",
@@ -530,7 +522,7 @@ class McpPanel {
               continue;
             }
 
-            const isDirect = toolFilter === true || (Array.isArray(toolFilter) && toolFilter.includes(baseName));
+            const isDirect = isConfiguredDirect(baseName);
             const ct: CachedTool = {
               name: baseName,
               ...(resource.description !== undefined ? { description: resource.description } : {}),
@@ -562,7 +554,7 @@ class McpPanel {
         expanded: false,
         source: prov?.kind ?? "user",
         ...(prov?.importKind !== undefined ? { importKind: prov.importKind } : {}),
-        ...(prov?.ignoredSettings !== undefined ? { ignoredSettings: prov.ignoredSettings } : {}),
+        ...(prov?.ignoredSettings !== undefined ? { ignoredSettings: describeIgnoredSettings(prov)! } : {}),
         ...(typeof definition.auth === "object" ? { signInProvider: definition.auth.provider } : {}),
         ...(definition.includeTools !== undefined ? { includeTools: definition.includeTools } : {}),
         ...(definition.excludeTools !== undefined ? { excludeTools: definition.excludeTools } : {}),
@@ -1045,9 +1037,19 @@ class McpPanel {
     return candidates;
   }
 
+  /** Whether a tool is direct under the server's saved selection (`"search"` counts as all). */
+  private configuredDirectSelector(definition: ServerEntry): (toolName: string) => boolean {
+    const selected = definition.directTools !== undefined ? definition.directTools : this.config.settings?.directTools;
+    if (selected === true || selected === "search") return () => true;
+    if (Array.isArray(selected)) return (toolName) => selected.includes(toolName);
+    return () => false;
+  }
+
   private rebuildServerTools(server: ServerState, entry: ServerCacheEntry): void {
-    const existingState = new Map<string, boolean>();
-    for (const t of server.tools) existingState.set(t.name, t.isDirect);
+    const existingState = new Map<string, ToolState>();
+    for (const t of server.tools) existingState.set(t.name, t);
+    const definition = this.config.mcpServers[server.name];
+    const isConfiguredDirect = definition ? this.configuredDirectSelector(definition) : () => false;
 
     const newTools: ToolState[] = [];
     for (const tool of entry.tools ?? []) {
@@ -1057,12 +1059,12 @@ class McpPanel {
       }
 
       const prev = existingState.get(tool.name);
-      const isDirect = prev !== undefined ? prev : false;
+      const configured = isConfiguredDirect(tool.name);
       newTools.push({
         name: tool.name,
         description: tool.description ?? "",
-        isDirect,
-        wasDirect: prev !== undefined ? server.tools.find((t) => t.name === tool.name)?.wasDirect ?? false : false,
+        isDirect: prev?.isDirect ?? configured,
+        wasDirect: prev?.wasDirect ?? configured,
         estimatedTokens: estimateTokens(tool),
       });
     }
@@ -1075,7 +1077,7 @@ class McpPanel {
         }
 
         const prev = existingState.get(baseName);
-        const isDirect = prev !== undefined ? prev : false;
+        const configured = isConfiguredDirect(baseName);
         const ct: CachedTool = {
           name: baseName,
           ...(resource.description !== undefined ? { description: resource.description } : {}),
@@ -1083,8 +1085,8 @@ class McpPanel {
         newTools.push({
           name: baseName,
           description: resource.description ?? `Read resource: ${resource.uri}`,
-          isDirect,
-          wasDirect: prev !== undefined ? server.tools.find((t) => t.name === baseName)?.wasDirect ?? false : false,
+          isDirect: prev?.isDirect ?? configured,
+          wasDirect: prev?.wasDirect ?? configured,
           estimatedTokens: estimateTokens(ct),
         });
       }

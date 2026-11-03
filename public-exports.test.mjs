@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -103,6 +103,42 @@ test("public metadata, config, and type helpers load in plain Node from node_mod
   }
 });
 
+test("public config loads scriptTools in plain Node, and the types export ScriptToolDefinition", async () => {
+  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "pi-mcp-public-script-tools-"));
+  try {
+    await extractPackedPackage(fixtureRoot);
+    const configPath = path.join(fixtureRoot, "scripts.json");
+    await writeFile(configPath, JSON.stringify({
+      scriptTools: {
+        close_stale: { description: "Close stale issues", file: "./close-stale.js" },
+        Broken: { description: "Bad name", file: "./broken.js" },
+      },
+    }));
+    const result = spawnSync(process.execPath, [
+      "--input-type=module",
+      "--eval",
+      [
+        'const config = await import("pi-mcp-adapter/config");',
+        `const loaded = config.loadMcpConfig(${JSON.stringify(configPath)}, process.cwd());`,
+        'process.stdout.write(JSON.stringify(loaded.scriptTools));',
+      ].join("\n")
+    ], {
+      cwd: fixtureRoot,
+      env: { ...process.env, HOME: fixtureRoot, PI_CODING_AGENT_DIR: path.join(fixtureRoot, "agent") },
+      encoding: "utf8"
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      close_stale: { description: "Close stale issues", file: path.join(fixtureRoot, "close-stale.js") },
+    });
+    const types = await readFile(path.join(fixtureRoot, "node_modules", "pi-mcp-adapter", "dist", "types.d.ts"), "utf8");
+    assert.match(types, /export interface ScriptToolDefinition \{/);
+    assert.match(types, /scriptTools\?: Record<string, ScriptToolDefinition>;/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("token CLI avoids package-local TypeScript imports under node_modules", async () => {
   const fixtureRoot = await mkdtemp(path.join(tmpdir(), "pi-mcp-token-cli-"));
   try {
@@ -154,31 +190,6 @@ test("doctor CLI loads built server modules from the packed package", async () =
     });
     assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
     assert.deepEqual(JSON.parse(result.stdout).map(({ name, state }) => [name, state]), [["local", "failed"]]);
-  } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-  }
-});
-
-test("System One key CLI loads built secure-store modules from the packed package", async () => {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), "pi-mcp-key-cli-"));
-  try {
-    await extractPackedPackage(fixtureRoot);
-    const result = spawnSync(process.execPath, ["--input-type=module", "--eval", [
-      'const { main } = await import("./node_modules/pi-mcp-adapter/cli.js");',
-      'const { Readable } = await import("node:stream");',
-      'const run = (args, input = "") => { const logs = []; const errors = []; return main(args, line => logs.push(line), line => errors.push(line), Readable.from([input])).then(code => ({ code, logs, errors })); };',
-      'const set = await run(["key", "set", "systemone"], "packed-secret\\n");',
-      'if (set.code !== 0 || JSON.stringify(set).includes("packed-secret")) process.exit(2);',
-      'const status = await run(["key", "status", "systemone"]);',
-      'if (status.code !== 0 || status.logs[0] !== "source=keyring") process.exit(3);',
-      'const remove = await run(["key", "remove", "systemone"]);',
-      'if (remove.code !== 0) process.exit(4);',
-    ].join("\n")], {
-      cwd: fixtureRoot,
-      env: { ...process.env, PI_MCP_ADAPTER_TEST_AUTH_STORE: "memory", SYSTEMONE_API_KEY: undefined, TYPESAFE_API_KEY: undefined },
-      encoding: "utf8",
-    });
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

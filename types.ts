@@ -493,8 +493,12 @@ export interface ServerEntry {
   searchKeywords?: Record<string, string[]>;
   // Require interactive approval before calling matching MCP tools/resources.
   approveTools?: boolean | "destructive" | string[];
-  /** Set to false to never open MCP App UIs for this server's tools; results stay inline. */
+  /** Set to false to tell this server the host has no MCP App UI; its tools run and return results inline. */
   openUi?: boolean;
+  /** Set to false to stop showing structuredContent after a result that already has content. */
+  appendStructuredContent?: boolean;
+  /** Set to false to not send this server the session directory as its root. */
+  roots?: boolean;
   // Debug
   debug?: boolean;  // Show server stderr (default: false)
   /** Enable metadata-only JSONL protocol tracing for this server. */
@@ -587,7 +591,17 @@ export const MCP_TOOL_APPROVAL_REQUEST_EVENT = "pi-mcp-adapter:tool-approval-req
 
 export type McpToolApprovalOrigin = "proxy" | "direct" | "script" | "resource" | "iframe";
 export type McpToolApprovalDecision = "allow_once" | "allow_for_session" | "deny" | "abstain";
-export type McpToolApprovalHandler = () => McpToolApprovalDecision | Promise<McpToolApprovalDecision>;
+/**
+ * A denial that carries the approver's reason into the result of the same
+ * call. Only valid when the request advertised `supportsDenyReason`; any other
+ * object is treated as a plain "deny".
+ */
+export interface McpToolApprovalDenial {
+  decision: "deny";
+  reason: string;
+}
+export type McpToolApprovalHandlerResult = McpToolApprovalDecision | McpToolApprovalDenial;
+export type McpToolApprovalHandler = () => McpToolApprovalHandlerResult | Promise<McpToolApprovalHandlerResult>;
 
 export interface McpToolApprovalRequest {
   requestId: string;
@@ -597,10 +611,10 @@ export interface McpToolApprovalRequest {
   args: Record<string, unknown>;
   origin: McpToolApprovalOrigin;
   signal?: AbortSignal;
+  /** Capability: a handler may return { decision: "deny", reason } instead of "deny". */
+  supportsDenyReason: true;
   claim(handler: McpToolApprovalHandler): boolean;
 }
-
-export type { JevAnswer, JevErrorCode, JevEvaluateInput, JevEvaluationData, JevEvaluationEnvelope, JevJson, JevQuestion } from "./jev-contracts.ts";
 
 export interface McpSettings {
   /** Admission policy for unapproved project-local MCP servers. Only user-global config may set this. */
@@ -608,6 +622,8 @@ export interface McpSettings {
   toolPrefix?: ToolPrefix;
   /** Allow agents to persist remote MCP endpoints with the install action. Defaults to true. */
   allowInstall?: boolean;
+  /** Allow agents to save a script as a script tool with the save-script action, after you approve it. Defaults to true. */
+  allowScriptToolSave?: boolean;
   /** Show the plug prefix in MCP status and connection text (default: true). Set to false to disable it. */
   showStatusIcon?: boolean;
   /** Footer status verbosity: full details, compact connected/enabled count, or no footer status. Defaults to full. */
@@ -639,30 +655,25 @@ export interface McpSettings {
   directToolResultDetails?: "lean" | "bounded";
   /** Show the advisory when 75 or more direct tools resolve. Defaults to true. */
   warnOnLargeDirectTools?: boolean;
-  /** Register the MCP-only JavaScript scripting tool and its manual skill. Defaults to false. */
-  scriptMode?: boolean;
-  /** `"model"` points the model at the mcp-scripting skill from the mcpScript description. Defaults to `"manual"`: `/skill:mcp-scripting` only. */
-  scriptSkill?: "manual" | "model";
   /** Expose MCP resources as tools (default: true). Set to false to disable globally across all servers. */
   exposeResources?: boolean;
-  /** Optional Jev (System One) integrations. A valid key enables semantic search; script evaluation remains disabled by default. */
-  jev?: false | {
-    semanticSearch?: boolean;
-    scriptEvaluation?: boolean;
-    /** Restrict semantic-search metadata and allow script-evaluation sources. Semantic search defaults to every enabled server. */
+  /** Semantic tool search through a Pi classifier model. `false` turns it off. */
+  semanticSearch?: false | {
+    /** Servers whose tool metadata may be sent. Omitted: every enabled server. `[]`: none (search refuses). */
     allowedServers?: string[];
+    /** Pi classifier model as "provider/id", e.g. "openrouter/typesafe/jev-1.13". Split at the first "/". */
     model?: string;
-    requestTimeoutMs?: number;
-    maxRetries?: number;
-    maxStateBytes?: number;
-    maxQuestionsPerRequest?: number;
-    maxEvaluationsPerScript?: number;
-    maxEvaluationBytesPerScript?: number;
-    /** Cumulative provider-reported input plus output tokens per script. Defaults to 32768. */
-    maxEvaluationTokensPerScript?: number;
-    /** Maximum semantic candidates per request. Defaults to 127; range 2..127. */
-    semanticCandidateLimit?: number;
-    semanticMinProbability?: number;
+    /** Candidates per request, 2..127. Default 127. */
+    candidateLimit?: number;
+    /** Abstain below this top probability, 0..1. Default 0.2. */
+    minProbability?: number;
+  };
+  /** Read typed values from MCP tool results with an extraction model. Off unless set. Sends tool results to the provider. */
+  extraction?: false | {
+    /** Servers whose tool results may be sent. Required, at least one. */
+    allowedServers: string[];
+    /** "cloudflare-workers-ai/clairic" or "cloudflare-ai-gateway/clairic". Unset: the first of those two Pi has a credential for. */
+    model?: string;
   };
   /** Render MCP tool results as compact self-rendered rows by default, or as the legacy boxed row. */
   toolResultRendering?: "compact" | "boxed";
@@ -721,12 +732,24 @@ export interface ClaudePluginConfig {
   skills?: boolean;
 }
 
+/** One entry of `scriptTools`: a saved script that becomes a Pi tool. The key is the tool's name. */
+export interface ScriptToolDefinition {
+  description: string;
+  /** The script file. A loaded config holds it as an absolute path. */
+  file: string;
+  /** JSON Schema for the tool's arguments, with `type: "object"`. Without it the tool takes none. */
+  inputSchema?: Record<string, unknown>;
+  /** Declare the tool to the model directly. By default only codemode and tool_search reach it. */
+  declare?: boolean;
+}
+
 // Root config
 export interface McpConfig {
   mcpServers: Record<string, ServerEntry>;
   imports?: ImportKind[];
   settings?: McpSettings;
   claudePlugins?: ClaudePluginConfig[];
+  scriptTools?: Record<string, ScriptToolDefinition>;
 }
 
 export interface McpAdapterOptions {
@@ -748,6 +771,8 @@ export interface ToolMetadata {
   outputSchema?: unknown; // Server schema for structuredContent (stored for describe)
   uiStreamMode?: UiStreamMode;
   annotations?: McpToolAnnotations;
+  /** An Executor app tool: the exact path from Executor's `search`, which its `call` takes. `originalName` is the canonical path. */
+  executorPath?: string;
 }
 
 /** Behavior hints a server declared on a tool. Hints, not guarantees. */
@@ -779,14 +804,25 @@ export interface DirectToolSpec {
   resourceUri?: string;
   uiResourceUri?: string;
   uiStreamMode?: UiStreamMode;
+  /** An Executor app tool: the exact path from Executor's `search`, which its `call` takes. `originalName` is the canonical path. */
+  executorPath?: string;
 }
 
 export interface ServerProvenance {
   path: string;
   kind: "user" | "project" | "import";
   importKind?: string;
-  /** Settings from Pi's `mcp.json` that the adapter could not translate for this server. */
+  /** Settings from Pi's `mcp.json` that the adapter could not translate, or that OpenCode ignores in an imported server. */
   ignoredSettings?: string[];
+  /** Set when `ignoredSettings` came from an imported OpenCode server rather than Pi's `mcp.json`. */
+  ignoredSettingsSource?: "opencode";
+}
+
+/** The line `/mcp-adapter` and `doctor` show for a server's ignored settings. */
+export function describeIgnoredSettings(provenance: ServerProvenance | undefined): string | undefined {
+  if (!provenance?.ignoredSettings) return undefined;
+  const file = provenance.ignoredSettingsSource === "opencode" ? "OpenCode" : "Pi mcp.json";
+  return `Ignored ${file} settings: ${provenance.ignoredSettings.join(", ")}`;
 }
 
 export interface McpAuthResult {
@@ -818,6 +854,30 @@ export interface CachedPrompt {
   arguments?: { name: string; description?: string; required?: boolean }[];
 }
 
+/**
+ * Most Executor app tools kept and registered per server. Pi rebuilds its whole tool registry on
+ * every registration, so registering N tools costs O(N²). Paging stops here, and every read of a
+ * cached catalog takes no more, whatever the cache holds.
+ * @internal
+ */
+export const EXECUTOR_APP_TOOL_CAP = 1_000;
+
+/** One tool of an Executor app, as Executor's `search` lists it. */
+export interface CachedExecutorAppTool {
+  /** The exact path `search` returned, such as `tools.github.issues.list`. */
+  path: string;
+  /** The path without Executor's `tools.` prefix, such as `github.issues.list`. */
+  canonicalPath: string;
+  /** The first line of the tool's description. */
+  description: string;
+  /** The tool's input as a one-line TypeScript type; Executor gives no JSON Schema. */
+  inputType: string;
+  /** Executor cut `inputType`; `describe` has the whole signature. */
+  inputTruncated?: true;
+  /** The full TypeScript signature from Executor's `describe`. */
+  signature?: string;
+}
+
 export interface ServerCacheEntry {
   configHash: string;
   tools: CachedTool[];
@@ -834,6 +894,17 @@ export interface ServerCacheEntry {
   outputShapes?: Record<string, { source: "structuredContent" | "jsonText"; shape: unknown }>;
   /** Startup discovery failed for this config; the entry has no catalog. */
   discoveryFailed?: true;
+  /**
+   * An Executor server's app tools, in Executor's catalog order, up to `cap`. `total` counts every tool
+   * the catalog had. `unavailableApps` names the apps Executor could not list, with Executor's reason.
+   */
+  executorApps?: {
+    tools: CachedExecutorAppTool[];
+    total: number;
+    cap: number;
+    fetchedAt: number;
+    unavailableApps?: { name: string; reason?: string }[];
+  };
   cachedAt: number;
 }
 

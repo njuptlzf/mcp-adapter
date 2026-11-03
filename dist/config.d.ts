@@ -1,5 +1,6 @@
+import { type AgentPathResolver } from "./interfaces/agent-paths.ts";
 import { type AgentPluginSummary } from "./agent-plugin-loader.ts";
-import { type HostConfigDiscovery, type McpConfig, type ServerEntry, type ImportKind, type ServerProvenance } from "./types.ts";
+import { type HostConfigDiscovery, type McpConfig, type ServerEntry, type ImportKind, type ScriptToolDefinition, type ServerProvenance } from "./types.ts";
 export interface KnownServerPreset {
     id: string;
     name: string;
@@ -92,6 +93,12 @@ export interface ConfigWritePreview {
     diffText: string;
 }
 export type SharedConfigTarget = "project" | "global";
+/**
+ * Fork seam (pre-v2.29 sync feature, restored during the v5.2.0 merge): the
+ * agent-pluggable global config path. `interfaces/agent-paths.ts` is the
+ * fork's universal-host contract; upstream's config.ts has no resolver seam.
+ */
+export declare function getAgentGlobalConfigPath(resolver?: AgentPathResolver, overridePath?: string): string;
 export declare function getPiGlobalConfigPath(overridePath?: string): string;
 export declare function getPiMcpGlobalConfigPath(): string;
 export declare function getGenericGlobalConfigPath(): string;
@@ -113,6 +120,13 @@ export interface ProjectServerSource {
 export interface LoadedMcpConfig {
     config: McpConfig;
     projectServers: Map<string, ProjectServerSource>;
+    /** Script tools whose entry came from a project config file, by name. Always set by loadMcpConfigWithSources. */
+    projectScriptTools?: Map<string, ProjectServerSource>;
+    /**
+     * One line per script tool a config file defines but the adapter did not load, with the reason.
+     * Kept apart from the migration notices, which also reach `mcp({})`. Always set by loadMcpConfigWithSources.
+     */
+    scriptToolIssues?: string[];
     projectServerPolicy: "ask" | "allow";
 }
 export declare const MCP_CONFIG_SOURCE_METADATA: unique symbol;
@@ -121,13 +135,21 @@ export declare function loadMcpConfigWithSources(overridePath?: string, cwd?: st
 export declare function resolveConfiguredClaudePluginMcp(config: McpConfig, cwd?: string): McpConfig;
 export declare function discoverConfiguredClaudePluginSkills(config: McpConfig, cwd?: string): string[];
 export declare function getConfigSources(overridePath?: string, cwd?: string): ConfigSourceSpec[];
+export declare function isExclusiveConfigMode(): boolean;
 /** Returns why the entry is skipped when Pi would reject it or the adapter can't run it. */
 export declare function translatePiMcpServer(name: string, value: unknown): {
     entry: ServerEntry;
     ignored: string[];
 } | string;
+/**
+ * A line diff of two texts. By default every line is listed; with `context`, only changed lines and
+ * that many lines around them, in `@@` hunks.
+ */
+export declare function buildUnifiedDiff(beforeText: string, afterText: string, options?: {
+    context?: number;
+}): string;
 export declare function writeSharedConfigText(filePath: string, text: string): void;
-export declare function writeJevSemanticSearchConfig(overridePath: string | undefined, cwd: string, allowedServers: string[], effectiveJev?: unknown): {
+export declare function writeSemanticSearchConfig(overridePath: string | undefined, cwd: string, allowedServers: string[], effectiveSettings?: unknown): {
     path: string;
     changed: boolean;
 };
@@ -153,6 +175,11 @@ export declare function previewStarterProjectConfig(cwd?: string): ConfigWritePr
 export declare function writeStarterProjectConfig(cwd?: string): string;
 export declare function previewSharedServerEntry(filePath: string, serverName: string, entry: ServerEntry): ConfigWritePreview;
 export declare function writeSharedServerEntry(filePath: string, serverName: string, entry: ServerEntry): string;
+/** The file's text before and after the entry is written, for a diff the caller bounds. */
+export declare function previewScriptToolEntryTexts(filePath: string, name: string, entry: ScriptToolDefinition): Pick<ConfigWritePreview, "existed" | "beforeText" | "afterText">;
+/** The file's `scriptTools` entry for `name` as written, or undefined when it has none. */
+export declare function readScriptToolEntry(filePath: string, name: string): unknown;
+export declare function writeScriptToolEntry(filePath: string, name: string, entry: ScriptToolDefinition): string;
 export declare function getServerProvenance(overridePath?: string, cwd?: string): Map<string, ServerProvenance>;
 export declare function writeDirectToolsConfig(changes: Map<string, true | string[] | false>, provenance: Map<string, ServerProvenance>, fullConfig: McpConfig, onFileWritten?: () => void): void;
 export declare function resolveConfiguredOAuthDir(raw: unknown, cwd?: string): string | undefined;

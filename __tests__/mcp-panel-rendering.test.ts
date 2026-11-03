@@ -315,6 +315,48 @@ describe("mcp-panel rendering", () => {
     reopenedPanel.dispose();
   });
 
+  it.each([
+    { directTools: ["search"] as string[] | true, row: "example  1/2" },
+    { directTools: true as string[] | true, row: "example  2/2" },
+  ])("keeps configured direct tools ($directTools) selected after reconnect", async ({ directTools, row }) => {
+    const config: McpConfig = {
+      mcpServers: {
+        example: { command: "mock", directTools },
+      },
+    };
+    const cache: MetadataCache = { version: 1, servers: {} };
+    const refreshedEntry = {
+      configHash: computeServerHash(config.mcpServers.example),
+      cachedAt: Date.now(),
+      tools: [{ name: "search" }, { name: "fetch" }],
+      resources: [],
+    };
+    let connectionStatus: "idle" | "connected" = "idle";
+    const callbacks: McpPanelCallbacks = {
+      ...createCallbacks(),
+      reconnect: async () => {
+        connectionStatus = "connected";
+        return true;
+      },
+      getConnectionStatus: () => connectionStatus,
+      refreshCacheAfterReconnect: () => refreshedEntry,
+    };
+    const done = vi.fn<(result: McpPanelResult) => void>();
+    const panel = createMcpPanel(config, cache, new Map(), callbacks, { requestRender: () => {} }, done);
+
+    panel.handleInput("\x12");
+    await Promise.resolve();
+
+    const output = stripAnsi(panel.render(100).join("\n"));
+    expect(output).toContain(row);
+    expect(output).not.toContain("(unsaved)");
+
+    panel.handleInput("\x13");
+    expect(done).toHaveBeenCalledTimes(1);
+    expect(done.mock.calls[0][0].changes.has("example")).toBe(false);
+    panel.dispose();
+  });
+
   it("keeps dirty changes and closes when Keep & Close is confirmed", () => {
     const config = createConfig();
     const done = vi.fn<(result: McpPanelResult) => void>();

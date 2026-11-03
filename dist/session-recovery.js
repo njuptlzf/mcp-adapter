@@ -24,7 +24,7 @@ import { ProtocolError, SdkHttpError, UnauthorizedError } from "@modelcontextpro
 import { logger } from "./logger.js";
 import { throwIfAborted } from "./abort.js";
 import { isServerDisabled } from "./types.js";
-import { supportsOAuth } from "./mcp-auth-flow.js";
+import { supportsOAuth } from "./utils.js";
 import { invalidateAuthEntryCache } from "./mcp-auth.js";
 /**
  * True when `err` is a stale Streamable HTTP session signal for a request

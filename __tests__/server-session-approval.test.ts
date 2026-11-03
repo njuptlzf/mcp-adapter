@@ -38,7 +38,7 @@ describe("server-wide runtime approval", () => {
     }
     expect(select).toHaveBeenCalledTimes(1);
     select.mockResolvedValue("Deny");
-    expect(await approve(state, "other")).toEqual({ ok: false, reason: "denied" });
+    expect(await approve(state, "other")).toEqual({ ok: false, reason: "denied", denyReason: "The user denied it in the approval dialog." });
     expect(select).toHaveBeenCalledTimes(2);
     expect(state.approvedToolCalls.size).toBe(0);
     expect(persist).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ describe("server-wide runtime approval", () => {
     if (change === "replace") state.config.mcpServers.demo = { command: "demo" };
     else state.config.mcpServers.demo.command = "changed";
     select.mockResolvedValue("Deny");
-    expect(await approve(state)).toEqual({ ok: false, reason: "denied" });
+    expect(await approve(state)).toEqual({ ok: false, reason: "denied", denyReason: "The user denied it in the approval dialog." });
     expect(state.approvedServers?.size).toBe(0);
   });
 
@@ -124,6 +124,6 @@ describe("server-wide runtime approval", () => {
     await expect(approve(state)).rejects.toThrow();
     const next = fixture();
     next.select.mockResolvedValue("Deny");
-    expect(await approve(next.state)).toEqual({ ok: false, reason: "denied" });
+    expect(await approve(next.state)).toEqual({ ok: false, reason: "denied", denyReason: "The user denied it in the approval dialog." });
   });
 });

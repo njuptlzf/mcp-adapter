@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   completeAuthFromInput: vi.fn(),
   getAuthStatus: vi.fn(),
   startAuth: vi.fn(),
-  supportsOAuth: vi.fn(),
   lazyConnect: vi.fn(),
   updateServerMetadata: vi.fn(),
   updateMetadataCache: vi.fn(),
@@ -20,7 +19,6 @@ vi.mock("../mcp-auth-flow.ts", () => ({
   completeAuthFromInput: mocks.completeAuthFromInput,
   getAuthStatus: mocks.getAuthStatus,
   startAuth: mocks.startAuth,
-  supportsOAuth: mocks.supportsOAuth,
 }));
 
 vi.mock("../init.ts", () => ({
@@ -65,7 +63,6 @@ describe("manual OAuth proxy actions", () => {
     mocks.startAuth.mockReset().mockResolvedValue({
       authorizationUrl: "https://auth.example.com/authorize?redirect_uri=http%3A%2F%2Flocalhost%3A19876%2Fcallback",
     });
-    mocks.supportsOAuth.mockReset().mockImplementation((definition) => definition.auth === "oauth");
     mocks.updateStatusBar.mockReset();
     mocks.clearFailure.mockReset().mockImplementation((state: any, serverName: string) => {
       state.failureTracker.delete(serverName);

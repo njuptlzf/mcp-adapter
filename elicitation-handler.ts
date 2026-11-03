@@ -17,6 +17,7 @@ import type { JsonSchemaType } from "@modelcontextprotocol/client";
 import open from "open";
 import { abortable, throwIfAborted } from "./abort.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
+import { terminalHyperlink } from "./utils.ts";
 
 export type ElicitationValue = string | number | boolean | string[] | undefined;
 type FormProperty = ElicitRequestFormParams["requestedSchema"]["properties"][string];
@@ -48,6 +49,16 @@ export function registerElicitationHandler(client: Client, options: ElicitationH
   promptPauses.set(client, state);
   client.setRequestHandler("elicitation/create", request =>
     whilePromptOpen(state, () => handleElicitationRequest(options, request)));
+}
+
+/**
+ * Runs a prompt the adapter opens itself for a server (such as an Executor approval) with the
+ * same deadline pause a server-initiated elicitation gets, so concurrent calls on that client
+ * do not time out while the user reads the dialog.
+ */
+export async function whileAdapterPromptOpen<T>(client: Client | undefined, run: () => Promise<T>): Promise<T> {
+  const state = client && promptPauses.get(client);
+  return state ? whilePromptOpen(state, run) : run();
 }
 
 async function whilePromptOpen<T>(state: PromptPause, run: () => Promise<T>): Promise<T> {
@@ -415,14 +426,22 @@ export async function handleUrlElicitation(
     throw new ProtocolError(ProtocolErrorCode.InvalidParams, "URL elicitation only supports HTTP and HTTPS URLs");
   }
 
+  const urlLink = terminalHyperlink(params.url, params.url);
+  const message = params.message.replace(/\bhttps?:\/\/[^\s<>"']+/gi, candidate => {
+    if (!candidate.startsWith(params.url)) return candidate;
+    const suffix = candidate.slice(params.url.length);
+    // Only prose punctuation may follow the target, never another URL component.
+    if (!/^[.,!?;:)\]}`]*$/.test(suffix)) return candidate;
+    return urlLink + suffix;
+  });
   const decision = await abortable(options.ui.select([
     "MCP Browser Request",
     `Server: ${options.serverName}`,
     "",
-    params.message,
+    message,
     "",
     `Host: ${parsed.host}`,
-    `Full URL: ${params.url}`,
+    `Full URL: ${urlLink}`,
     "",
     "Open this URL in your browser?",
   ].join("\n"), ["Open", "Decline"]), signal);

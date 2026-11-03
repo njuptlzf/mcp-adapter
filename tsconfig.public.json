@@ -13,12 +13,11 @@
   },
   "include": [
     "config.ts",
+    "extraction-settings.ts",
     "metadata-cache.ts",
     "mcp-bearer-store.ts",
     "secure-keyring.ts",
-    "jev-contracts.ts",
-    "jev-key-store.ts",
-    "jev-client.ts",
+    "semantic-settings.ts",
     "types.ts",
     "project-server-trust.ts",
     "server-manager.ts"

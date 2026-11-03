@@ -51,6 +51,7 @@ vi.mock("../server-manager.ts", async (importOriginal) => {
 vi.mock("../tool-metadata.ts", () => ({
   buildToolMetadata: mocks.buildToolMetadata,
   totalToolCount: vi.fn(() => 0),
+  ownTools: (metadata?: Array<{ executorPath?: string }>) => metadata?.filter(tool => tool.executorPath === undefined) ?? [],
 }));
 
 vi.mock("../direct-tools.ts", () => ({
@@ -569,13 +570,13 @@ describe("lazy-keep-alive initializeMcp integration", () => {
     mocks.isServerCacheValid.mockReturnValue(true);
     state.manager.getConnection("srv").resourceDiscoveryFailed = true;
     updateMetadataCache(state, "srv");
-    expect((mocks.cache?.servers.srv as any).resources).toEqual(
+    expect((mocks.cache!.servers.srv as any).resources).toEqual(
       hasRuntimeSnapshot ? [] : [{ uri: "ui://old", name: "Old resource" }],
     );
 
     state.manager.getConnection("srv").resourceDiscoveryFailed = false;
     updateMetadataCache(state, "srv");
-    expect((mocks.cache?.servers.srv as any).resources).toEqual([]);
+    expect((mocks.cache!.servers.srv as any).resources).toEqual([]);
   });
 
   it("marks direct-tool metadata bootstrap spawns for health-check reconnects", async () => {

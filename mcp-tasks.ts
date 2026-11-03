@@ -29,6 +29,7 @@ import type {
   ElicitResult,
   JSONRPCMessage,
   JSONRPCRequest,
+  RequestOptions,
   Transport,
 } from "@modelcontextprotocol/client";
 import { ProtocolError } from "@modelcontextprotocol/client";
@@ -42,11 +43,15 @@ import {
   TaskCancelledError,
   TaskFailedError,
   type ApplicationElicitContentValue,
+  type ApplicationRoot,
+  type ApplicationSamplingContentBlock,
   type RawClientDispatch,
   type TaskEnabledSession,
 } from "@modelcontextprotocol/ext-tasks/client";
 import type { ServerDefinition } from "./types.ts";
 import { logger } from "./logger.ts";
+import { abortable } from "./abort.ts";
+import { callToolPausingForElicitation } from "./elicitation-handler.ts";
 
 export const TASKS_EXTENSION_ID = "io.modelcontextprotocol/tasks";
 
@@ -137,7 +142,7 @@ export class RawRequestChannel {
       id,
       method: request.method,
       ...(params === undefined ? {} : { params }),
-    } as unknown as JSONRPCRequest;
+    } as JSONRPCRequest;
     const timeoutMs = options?.context?.requestTimeoutMs ?? this.defaultTimeoutMs;
 
     return new Promise<JsonRpcResponseShape>((resolve, reject) => {
@@ -296,6 +301,8 @@ export interface AttachTaskSessionOptions {
   clientCapabilities: Record<string, unknown>;
   onElicitation?: (request: ElicitRequest, signal?: AbortSignal) => Promise<ElicitResult>;
   onSampling?: (request: CreateMessageRequest, signal?: AbortSignal) => Promise<CreateMessageResult>;
+  /** What a task's roots input request gets; the same list the connection's roots/list handler returns. */
+  roots?: ApplicationRoot[] | undefined;
 }
 
 export interface TaskSessionAttachment {
@@ -331,7 +338,7 @@ export async function attachTaskSession(
         throw capabilityNotSupportedError(serverName, "elicitation/create", context.inputId);
       }
       const result = await options.onElicitation(
-        { method: "elicitation/create", params: request.params } as unknown as ElicitRequest,
+        { method: "elicitation/create", params: request.params } as ElicitRequest,
         context.signal,
       );
       return {
@@ -346,16 +353,16 @@ export async function attachTaskSession(
         throw capabilityNotSupportedError(serverName, "sampling/createMessage", context.inputId);
       }
       const result = await options.onSampling(
-        { method: "sampling/createMessage", params: request.params } as unknown as CreateMessageRequest,
+        { method: "sampling/createMessage", params: request.params } as CreateMessageRequest,
         context.signal,
       );
       return {
         model: result.model,
         role: result.role,
-        content: result.content as never,
+        content: result.content as ApplicationSamplingContentBlock | readonly ApplicationSamplingContentBlock[],
       };
     },
-    roots: async () => ({ roots: [] }),
+    roots: async () => ({ roots: options.roots ?? [] }),
   });
 
   const channel = new RawRequestChannel(options.transport, options.requestTimeoutMs);
@@ -371,6 +378,8 @@ export async function attachTaskSession(
     // Tool declarations only add per-tool taskSupport hints; the adapter's
     // cached tools/list is not threaded through here, and a miss is harmless.
     tools: { currentTool: () => undefined },
+    // ext-tasks 0.1.0 stopped a call after 10 input-required rounds; 0.2.x is unbounded unless asked.
+    maxInputRounds: 10,
     onInputRequest,
     onError: (error) => logger.warn(`ext-tasks background error for ${serverName}: ${String(error)}`),
   });
@@ -426,17 +435,89 @@ export async function callToolViaTaskSession(
   session: TaskEnabledSession,
   options: TaskToolCallOptions,
 ): Promise<Record<string, unknown>> {
-  const { signal } = options;
-  let execution;
+  return settleAsCallToolResult(await openToolCall(session, options, options.signal), options.name, options.signal);
+}
+
+type ToolCallExecution = Awaited<ReturnType<TaskEnabledSession["callTool"]>>;
+export type BackgroundToolExecution = Extract<ToolCallExecution, { kind: "task" }>;
+
+export type StartedTask = { kind: "task"; execution: BackgroundToolExecution; taskId: string };
+export type StartedToolCall = { kind: "result"; result: Record<string, unknown> } | StartedTask;
+
+/** Sends the call with `lifetime` as the execution's signal; errors are mapped the way Client.callTool throws them. */
+async function openToolCall(
+  session: TaskEnabledSession,
+  options: TaskToolCallOptions,
+  lifetime: AbortSignal | undefined,
+): Promise<ToolCallExecution> {
   try {
-    execution = await session.callTool(options.name, options.args as never, {
+    return await session.callTool(options.name, options.args as never, {
       ...(options.meta === undefined ? {} : { metadata: options.meta as never }),
-      ...(signal === undefined ? {} : { signal }),
+      ...(lifetime === undefined ? {} : { signal: lifetime }),
       ...(options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: options.requestTimeoutMs }),
     });
   } catch (error) {
-    throw toCallToolError(error, signal);
+    throw toCallToolError(error, options.signal);
   }
+}
+
+/**
+ * Like callToolViaTaskSession, but returns a task-backed execution as soon as
+ * the server hands out its task. The caller owns the returned execution.
+ * Aborting `signal` before the handle arrives cancels the task; aborting it
+ * afterwards doesn't touch it.
+ */
+export async function startToolViaTaskSession(
+  session: TaskEnabledSession,
+  options: TaskToolCallOptions,
+): Promise<StartedToolCall> {
+  const { signal } = options;
+  // ext-tasks binds options.signal to a task execution for its whole local
+  // lifetime, so it gets a call-local signal that follows the tool call only
+  // until the server answers.
+  const callController = new AbortController();
+  const forwardAbort = () => callController.abort(signal?.reason);
+  if (signal?.aborted) forwardAbort();
+  else signal?.addEventListener("abort", forwardAbort, { once: true });
+  let execution;
+  try {
+    execution = await openToolCall(session, options, callController.signal);
+  } finally {
+    signal?.removeEventListener("abort", forwardAbort);
+  }
+  if (execution.kind === "task" && signal?.aborted !== true) {
+    return { kind: "task", execution, taskId: execution.handle.taskId };
+  }
+  return { kind: "result", result: await settleAsCallToolResult(execution, options.name, signal) };
+}
+
+type ClientCallToolResult = Awaited<ReturnType<Client["callTool"]>>;
+
+/**
+ * The `call` a tool call makes on `conn`. With `onTask`, a call its server answers with a
+ * task hands the task to `onTask` as soon as it starts and resolves with an empty result.
+ */
+export function callToolOn(
+  conn: { client: Client; taskSession?: TaskEnabledSession | undefined },
+  signal: AbortSignal | undefined,
+  onTask: ((task: StartedTask) => void) | undefined,
+) {
+  return async (params: Parameters<Client["callTool"]>[0], options: RequestOptions | undefined): Promise<ClientCallToolResult> => {
+    if (!conn.taskSession) return abortable(callToolPausingForElicitation(conn.client, params, options), signal);
+    const taskCall = { name: params.name, args: params.arguments ?? {}, meta: params._meta, signal, requestTimeoutMs: options?.timeout };
+    if (onTask === undefined) return await callToolViaTaskSession(conn.taskSession, taskCall) as ClientCallToolResult;
+    const started = await startToolViaTaskSession(conn.taskSession, taskCall);
+    if (started.kind === "result") return started.result as ClientCallToolResult;
+    onTask(started);
+    return { content: [] };
+  };
+}
+
+async function settleAsCallToolResult(
+  execution: ToolCallExecution,
+  name: string,
+  signal: AbortSignal | undefined,
+): Promise<Record<string, unknown>> {
   let onAbort: (() => void) | undefined;
   if (signal !== undefined && execution.kind === "task") {
     // settle({ signal }) only stops waiting locally; propagate the abort as a
@@ -453,7 +534,7 @@ export async function callToolViaTaskSession(
     const settlement = await execution.settle(signal === undefined ? {} : { signal });
     const result = resultFromTaskOutcome(settlement.outcome);
     if (!isJsonRecord(result)) {
-      throw new Error(`Task-backed tool ${options.name} settled with a non-object result`);
+      throw new Error(`Task-backed tool ${name} settled with a non-object result`);
     }
     // Match Client.callTool's lifted shape, which strips the wire-only discriminator.
     const { resultType: _resultType, ...lifted } = result;

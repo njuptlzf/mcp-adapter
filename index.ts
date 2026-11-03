@@ -1,33 +1,43 @@
 import { registerProtocolBridge } from "./runtime-protocol.ts";
 export { registerMcpProtocol, MCP_PROTOCOL_EVENT, type McpProtocolDefinition, type McpProtocol, type McpProtocolSession, type McpProtocolStream, type McpProtocolWatch, type McpProtocolEnd } from "./runtime-protocol.ts";
-import { withFileMutationQueue, type AgentToolResult, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionContext, type RegisteredMcpServer, type ToolInfo } from "@earendil-works/pi-coding-agent";
+import { withFileMutationQueue, type AgentToolResult, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionContext, type ExtensionToolContext, type RegisteredMcpServer, type ToolInfo } from "@earendil-works/pi-coding-agent";
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import type { McpExtensionState } from "./state.ts";
-import { isServerDisabled, type DirectToolSpec, type McpAdapterOptions, type McpConfig, type PromptMetadata, type ServerEntry } from "./types.ts";
+import { isServerDisabled, type CachedTool, type DirectToolSpec, type McpAdapterOptions, type McpConfig, type PromptMetadata, type ServerEntry } from "./types.ts";
 import type { McpOAuthRuntime } from "./mcp-auth-flow.ts";
+import type { NestedCallHandOff } from "./proxy-modes.ts";
+import type { ExtractField } from "./extraction.ts";
 import { Type } from "typebox";
 import type { TSchema } from "typebox";
-import { cloneMcpConfig, discoverConfiguredClaudePluginSkills, getLegacyMcpMigrationNotices, getPiGlobalConfigPath, getPiMcpAuthPath, getProjectConfigPath, loadMcpConfig, resolveConfiguredClaudePluginMcp, setPiMcpConfigEnabled, translatePiMcpServer, writeProjectServerDisabledOverride, writeSharedServerEntry } from "./config.ts";
-import { approveProjectServer, excludeProjectServersAtLoadTime, hasProjectServerDefinitions } from "./project-server-trust.ts";
+import { cloneMcpConfig, discoverConfiguredClaudePluginSkills, getLegacyMcpMigrationNotices, getPiGlobalConfigPath, getPiMcpAuthPath, getProjectConfigPath, getProjectPiConfigPath, isExclusiveConfigMode, loadMcpConfig, loadMcpConfigWithSources, resolveConfiguredClaudePluginMcp, setPiMcpConfigEnabled, translatePiMcpServer, writeProjectServerDisabledOverride, writeSharedServerEntry } from "./config.ts";
+import { approveProjectScriptTool, approveProjectServer, describeBlockedScriptTool, excludeProjectServersAtLoadTime, hasProjectScriptToolDefinitions, hasProjectServerDefinitions, loadedScriptToolIssues } from "./project-server-trust.ts";
+import { isExtractionConfigured } from "./extraction-settings.ts";
 import { buildProxyDescription, getLargeDirectToolsAdvisory, getMissingConfiguredDirectToolServers, prepareDirectToolArguments, resolveDirectTools } from "./direct-tool-surface.ts";
+import { deferredToolKey, resolveDeferredToolSpecs, type DeferredToolSpec } from "./deferred-tool-surface.ts";
+import { findScriptTool, nestedScriptToolResult, resolveScriptToolSpecs, runScriptTool, SCRIPT_TOOL_NAMESPACE, scriptToolNameConflict, scriptToolOwnerKey, type ScriptToolReservation, type ScriptToolSpec } from "./script-tool-surface.ts";
+import { parseScriptTools } from "./script-tools.ts";
+import { buildScriptToolSavePrompt, checkScriptToolCode, checkScriptToolSave, scriptToolSaveChange, writeScriptToolSave } from "./script-tool-save.ts";
+import { namespaceProxyName } from "./mcp-references.ts";
 import { isServerInActiveFailureBackoff } from "./failure-backoff.ts";
-import { computeServerHash, isServerCacheValid, loadMetadataCache, parseDirectToolSelectors, type MetadataCache } from "./metadata-cache.ts";
+import { isServerCacheValid, loadMetadataCache, parseDirectToolSelectors, withSessionMetadata, type MetadataCache } from "./metadata-cache.ts";
+import { isExecutorCatalogEntry } from "./executor-catalog.ts";
 import { createPromptCommand, resolveCachedPrompts } from "./prompts.ts";
 import { logger } from "./logger.ts";
 import { formatMcpFooterStatus, formatTerminalError, getConfigPathFromArgv, normalizeDirectToolInputSchema, truncateAtWord } from "./utils.ts";
-import { createMcpDirectToolCallRenderer, createMcpProxyToolCallRenderer, createMcpScriptToolCallRenderer, createMcpToolResultRenderer, resolveMcpToolRenderOptions } from "./tool-result-renderer.ts";
+import { createMcpDirectToolCallRenderer, createMcpProxyToolCallRenderer, createMcpToolResultRenderer, resolveMcpToolRenderOptions } from "./tool-result-renderer.ts";
 import { toolErrorOverride } from "./error-signal.ts";
 import { createMcpRuntimeOwner, createOwnedUi, isAbortError, type McpRuntimeOwner } from "./runtime-owner.ts";
 import { cleanupMaterializedBinaryResources } from "./tool-registrar.ts";
 import { publishMcpStatusShutdown } from "./mcp-status.ts";
 import { syncNamespaceProxyTools } from "./namespace-tools.ts";
 import { restoreSessionApprovalState } from "./session-approvals.ts";
+import { pendingTasksFromBranch } from "./task-entries.ts";
 import { createRetryableLoader } from "./lazy-loader.ts";
 import { toToolParameters } from "./tool-parameters.ts";
 import { readPanelOpenKeys } from "./panel-keys.ts";
 import { getAgentPath } from "./agent-dir.ts";
+import { showUpgradeNotice } from "./upgrade-notice.ts";
 
 export type { McpAdapterOptions } from "./types.ts";
 export type { ServerEntry } from "./types.ts";
@@ -46,7 +56,9 @@ export {
   type McpServerStatusSnapshot,
   type McpStatusSnapshot,
   type McpToolApprovalDecision,
+  type McpToolApprovalDenial,
   type McpToolApprovalHandler,
+  type McpToolApprovalHandlerResult,
   type McpToolApprovalOrigin,
   type McpToolApprovalRequest,
 } from "./types.ts";
@@ -56,12 +68,13 @@ const loadOAuthRuntime = createRetryableLoader(() => import("./mcp-auth-flow.ts"
 const loadProxyModes = createRetryableLoader(() => import("./proxy-modes.ts"));
 const loadDirectExecution = createRetryableLoader(() => import("./direct-tools.ts"));
 const loadCommands = createRetryableLoader(() => import("./commands.ts"));
-const loadCodeMode = createRetryableLoader(() => import("./mcp-code.ts"));
 const loadInstallParsing = createRetryableLoader(() => import("./mcp-install.ts"));
 
 const INIT_WAIT_TIMEOUT_MS = 30_000;
 const INIT_FAILURE_MESSAGE_MAX_CHARS = 1_000;
 const INIT_WAIT_TIMED_OUT: unique symbol = Symbol("init-wait-timed-out");
+// A call that reaches an unregistered server waits this long for it, then runs regardless.
+const LATE_REGISTRATION_WAIT_MS = 10_000;
 
 /** Pi 0.99+ has its own MCP config; on Pi 0.84–0.87, `mcp.json` is an old adapter config. */
 function piSupportsMcp(pi: ExtensionAPI): boolean {
@@ -72,6 +85,8 @@ function piSupportsMcp(pi: ExtensionAPI): boolean {
 function toCallToolResult(result: AgentToolResult<Record<string, unknown>>): AgentToolResult<Record<string, unknown>> {
   return {
     ...result,
+    // Content blocks are JSON but typed as interfaces, which JsonValue does not accept.
+    // oxlint-disable-next-line anti-slop/no-chained-type-assertions
     structuredContent: {
       content: result.content,
       ...(result.structuredContent !== undefined ? { structuredContent: result.structuredContent } : {}),
@@ -90,6 +105,26 @@ function hasEnabledServerWithoutValidMetadata(
     const entry = cache?.servers[serverName];
     return entry === undefined || !isServerCacheValid(entry, definition);
   });
+}
+
+/** An enabled Executor whose valid cached listing has no app catalog yet: its startup connect pages one. */
+function hasExecutorWithoutCatalog(config: McpConfig, cache: MetadataCache | null): boolean {
+  return Object.entries(config.mcpServers).some(([serverName, definition]) => {
+    const entry = cache?.servers[serverName];
+    return entry !== undefined && !entry.executorApps && !isServerDisabled(definition)
+      && isExecutorCatalogEntry(entry) && isServerCacheValid(entry, definition);
+  });
+}
+
+/** A terminal session that handed off background tasks when it last stopped: its startup resumes them. */
+function hasTasksToResume(ctx: ExtensionContext): boolean {
+  if (!ctx.hasUI || ctx.mode !== "tui") return false;
+  try {
+    return pendingTasksFromBranch(ctx.sessionManager.getBranch(), ctx.sessionManager.getSessionId()).length > 0;
+  } catch {
+    // Initialization reads the session again and logs why it can't.
+    return false;
+  }
 }
 
 export interface McpServerRegistration {
@@ -169,6 +204,16 @@ function normalizeProgrammaticConfig(config: McpConfig): McpConfig {
   };
 }
 
+// The label a supplied config's script-tool issues carry, since it has no file path.
+const SUPPLIED_CONFIG_LABEL = "The MCP config supplied to the adapter";
+
+function validateSuppliedScriptTools(config: McpConfig): { config: McpConfig; issues: string[] } {
+  if (config.scriptTools === undefined) return { config, issues: [] };
+  const { scriptTools, issues } = parseScriptTools(config.scriptTools, SUPPLIED_CONFIG_LABEL, process.cwd());
+  const { scriptTools: _supplied, ...rest } = config;
+  return { config: Object.keys(scriptTools).length > 0 ? { ...rest, scriptTools } : rest, issues };
+}
+
 async function awaitWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | typeof INIT_WAIT_TIMED_OUT> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -193,7 +238,7 @@ function optionalNumber(options: { minimum?: number; description: string }): TSc
   const number = (Type as { Number?: (opts: typeof options) => TSchema }).Number;
   return typeof number === "function"
     ? Type.Optional(number(options))
-    : ({ type: "number", ...options } as unknown as TSchema);
+    : ({ type: "number", ...options } as TSchema);
 }
 
 function parseEnvDirectToolOverride(raw: string | undefined): string[] | undefined {
@@ -209,7 +254,10 @@ function resolveNamespaceEnvOverride(
 }
 
 function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
-  const sessionConfig = options.config !== undefined ? cloneMcpConfig(options.config) : undefined;
+  // A supplied config was never read from a file, so its script tools are checked here, with
+  // relative paths against the working directory, the same way a config file's are.
+  const supplied = options.config !== undefined ? validateSuppliedScriptTools(cloneMcpConfig(options.config)) : undefined;
+  const sessionConfig = supplied?.config;
   const programmaticConfig = sessionConfig !== undefined;
   // Before the first config load, so every load in this process agrees.
   if (!programmaticConfig) setPiMcpConfigEnabled(piSupportsMcp(pi));
@@ -372,8 +420,6 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   const earlyConfig = programmaticConfig
     ? resolveConfiguredClaudePluginMcp(cloneMcpConfig(sessionConfig), process.cwd())
     : excludeProjectServersAtLoadTime(loadMcpConfig(earlyConfigPath));
-  // Pi registers tools and discovers skills once per load, so the script tool and every pointer to it follow this value.
-  const scriptTool = earlyConfig.settings?.scriptMode === true;
   const earlyCache = loadMetadataCache();
   const envRaw = process.env.MCP_DIRECT_TOOLS;
   const envDirectToolOverride = parseEnvDirectToolOverride(envRaw);
@@ -387,13 +433,34 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   // Removal clears the record so stale/fallback reactivation is reportable.
   const reportedDirectToolNamesByServer = new Map<string, Set<string>>();
   const registeredNamespaceProxyTools = new Set<string>();
+  const namespaceProxyFingerprints = new Map<string, string>();
   const fallbackDeactivatedTools = new Set<string>();
   // directTools: "search" — registered inactive, activated by mcp({ search }) or a successful mcp({ tool }) call.
   const lazyDirectTools = new Set<string>();
   const searchActivatedTools = new Set<string>();
   // On Pi 0.99+ search-mode tools are Pi deferred tools, whose activation Pi owns.
   const deferSearchTools = piSupportsMcp(pi);
+  // MCP_DIRECT_TOOLS=__none__ registers nothing, so proxy calls then stay in the proxy too.
+  const deferredRegistryLive = deferSearchTools && envRaw !== "__none__";
   const deferredToolDefinitions = new Map<string, Record<string, unknown>>();
+  // Pi 0.99+: cached tools with no direct or search-mode registration, as Pi deferred tools, by Pi name.
+  const registeredDeferredTools = new Map<string, string>();
+  // Script tools, by Pi name: the fingerprint each was last registered with.
+  const registeredScriptTools = new Map<string, string>();
+  // The registered script tools, by Pi name, for the gateway.
+  const registeredScriptSpecs = new Map<string, ScriptToolSpec>();
+  // The Pi name each cached tool the adapter registered is callable under, by deferredToolKey.
+  const registeredToolNames = new Map<string, string>();
+  // The deferredToolKey each deferred name was first given to. Never cleared, so within a session a
+  // name never moves to a different tool, as in Pi's built-in MCP.
+  const deferredNameOwners = new Map<string, string>();
+  const syncedServers = new Set<string>();
+  // Every name this adapter registered a direct, search-mode or deferred tool under; Pi keeps hidden ones.
+  const adapterToolNames = new Set<string>();
+  // Proxy calls handed to a registered tool, by the proxy's tool call id.
+  const pendingProxyHandOffs = new Map<string, { name: string; consumed: boolean; run: (params: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<AgentToolResult<Record<string, unknown>>> }>();
+  // Pi 1.2+ reads which tools a call may reach; Pi 0.99-1.1 ignore the field.
+  const reachesAllTools = deferSearchTools ? { reachesTools: () => "all" as const } : {};
   const toolRenderOptions = resolveMcpToolRenderOptions(earlyConfig.settings);
   const toolRenderShell = toolRenderOptions.resultRendering === "compact" ? "self" : "default";
   const renderMcpToolResult = createMcpToolResultRenderer(toolRenderOptions);
@@ -402,6 +469,11 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   let directToolsFrozen = false;
   let largeDirectToolsAdvisoryDelivered = false;
   let sessionMigrationNotices: string[] = [];
+  let sessionScriptToolIssues: string[] = [];
+  // Script tools the last sync left out, with the reason.
+  let scriptToolSurfaceIssues: string[] = [];
+  // The script-tool issues this session already showed, so a re-sync never repeats one.
+  let deliveredScriptToolIssues = new Set<string>();
   // Session/runtime scoped server registrations from other extensions. They
   // survive session restarts within this install and die with the process.
   const runtimeServers = new Map<string, { definition: ServerEntry; entry: ServerEntry }>();
@@ -430,24 +502,32 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       resourceUri: spec.resourceUri,
       uiResourceUri: spec.uiResourceUri,
       uiStreamMode: spec.uiStreamMode,
+      // An Executor app tool's closure sends this path, so a refresh that only respells it must re-register.
+      executorPath: spec.executorPath,
       // A mode-only change (search ↔ eager) must re-register, or the tool
       // keeps the activation behavior of the mode it was registered under.
       lazy: spec.lazy === true,
     });
   }
 
-  // The fields Pi's built-in MCP registers its tools with (extensions/mcp/tools.js).
   function deferredToolFields(spec: DirectToolSpec, config: McpConfig, cache: MetadataCache | null): Record<string, unknown> | undefined {
     if (!deferSearchTools || !spec.lazy) return undefined;
+    return piDeferredToolFields(spec, config, cache);
+  }
+
+  // The fields Pi's built-in MCP registers its tools with (extensions/mcp/tools.js).
+  function piDeferredToolFields(spec: DirectToolSpec, config: McpConfig, cache: MetadataCache | null, cachedTools?: ReadonlyMap<string, CachedTool>): Record<string, unknown> {
     const serverCache = cache?.servers[spec.serverName];
-    const tool = spec.resourceUri ? undefined : serverCache?.tools?.find((candidate) => candidate.name === spec.originalName);
+    const tool = spec.resourceUri
+      ? undefined
+      : cachedTools ? cachedTools.get(spec.originalName) : serverCache?.tools?.find((candidate) => candidate.name === spec.originalName);
     const description = config.mcpServers[spec.serverName]?.description?.trim();
     const instructions = serverCache?.instructions;
     const { title: _title, ...annotations } = tool?.annotations ?? {};
     return {
       exposure: "deferred",
       namespace: {
-        name: `mcp__${spec.serverName.replace(/-/g, "_")}`,
+        name: namespaceProxyName(spec.serverName),
         ...(description ? { description } : {}),
         ...(instructions ? { instructions } : {}),
       },
@@ -474,19 +554,26 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     if (reportedNames.size === 0) reportedDirectToolNamesByServer.delete(serverName);
   }
 
-  function registerDirectTool(spec: DirectToolSpec, config: McpConfig, deferred: Record<string, unknown> | undefined): void {
-    finalizationRegistrations?.add(spec.prefixedName);
+  // The deferred surface registers without a promptSnippet, like Pi's built-in MCP: Pi re-normalizes
+  // every snippet on every registerTool, and an activated tool then adds no line to the prompt.
+  // `script` runs a script tool instead of the MCP call.
+  function registerDirectTool(spec: DirectToolSpec, config: McpConfig, deferred: Record<string, unknown> | undefined, name = spec.prefixedName, promptSnippet = true, script?: ScriptToolSpec): void {
+    finalizationRegistrations?.add(name);
+    adapterToolNames.add(name);
     const definition = {
-      name: spec.prefixedName,
-      label: `MCP: ${spec.originalName}`,
+      name,
+      label: script ? `Script: ${script.name}` : `MCP: ${spec.originalName}`,
       description: spec.description || "(no description)",
-      promptSnippet: truncateAtWord(spec.description, 100) || `MCP tool from ${spec.serverName}`,
+      ...(promptSnippet ? { promptSnippet: truncateAtWord(spec.description, 100) || `MCP tool from ${spec.serverName}` } : {}),
       parameters: toToolParameters(normalizeDirectToolInputSchema(spec.inputSchema)),
       ...(config.settings?.strictDirectToolArguments === true
         ? { prepareArguments: (args: unknown) => prepareDirectToolArguments(spec.inputSchema, args) }
         : {}),
       ...deferred,
       async execute(toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined, ctx: ExtensionContext): Promise<AgentToolResult<Record<string, unknown>>> {
+        if (script) return executeScriptTool(script, toolCallId, params, signal, onUpdate, ctx as ExtensionToolContext);
+        const handedOff = takeProxyHandOff(toolCallId, name);
+        if (handedOff) return handedOff(params, signal);
         let executor: ReturnType<(typeof import("./direct-tools.ts"))["createDirectToolExecutor"]>;
         let guard: RuntimeGuard | undefined;
         try {
@@ -509,16 +596,119 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         return executor(toolCallId, params, signal, onUpdate, ctx);
       },
       renderShell: toolRenderShell,
-      renderCall: createMcpDirectToolCallRenderer(spec.prefixedName, toolRenderOptions),
+      renderCall: createMcpDirectToolCallRenderer(name, toolRenderOptions),
       renderResult: renderMcpToolResult,
     };
-    if (deferred) {
+    if (deferred && !script) {
       const run = definition.execute;
       definition.execute = async (...args) => toCallToolResult(await run(...args));
     }
     callReentrant(() => (pi.registerTool as (tool: unknown) => unknown)(definition));
-    if (deferred) deferredToolDefinitions.set(spec.prefixedName, definition);
-    else deferredToolDefinitions.delete(spec.prefixedName);
+    if (deferred) deferredToolDefinitions.set(name, definition);
+    else deferredToolDefinitions.delete(name);
+  }
+
+  function executeScriptTool(script: ScriptToolSpec, toolCallId: string, params: Record<string, unknown>, signal: AbortSignal | undefined, onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined, ctx: ExtensionToolContext): Promise<AgentToolResult<Record<string, unknown>>> {
+    // Called by a tool other than the model or the adapter's proxies, such as a codemode script.
+    if (calledByAnotherTool(toolCallId)) return Promise.resolve(nestedScriptToolResult(script.name));
+    return runScriptTool({
+      pi, ctx, toolCallId, signal, onUpdate: onUpdate as AgentToolUpdateCallback<unknown> | undefined,
+      spec: script, input: params, settings: (state?.config ?? earlyConfig).settings,
+    });
+  }
+
+  // Registers the configured script tools and adds their names to `taken`, before the deferred MCP
+  // tools take theirs. Like the deferred surface, an unchanged tool is not registered again.
+  // The names a script tool cannot take, and why, for a sync and for a save.
+  function scriptToolReservations(config: McpConfig, reservedDirectNames: ReadonlySet<string>, foreignNames: readonly string[]): ScriptToolReservation[] {
+    const proxyNames = new Set([...registeredNamespaceProxyTools, ...Object.keys(config.mcpServers).map(namespaceProxyName)]);
+    return [
+      // No built-in reservation: every candidate is mcp__script__<name>, which no built-in tool is.
+      { names: reservedDirectNames, reason: "is already the name of a direct MCP tool" },
+      { names: proxyNames, reason: "is already the name of an MCP server's namespace tool" },
+      { names: new Set(foreignNames), reason: "is already registered by another extension" },
+    ];
+  }
+
+  function syncScriptTools(config: McpConfig, taken: Set<string>, reservedDirectNames: ReadonlySet<string>, foreignNames: readonly string[]): void {
+    const { specs, issues } = resolveScriptToolSpecs(config.scriptTools, scriptToolReservations(config, reservedDirectNames, foreignNames), deferredNameOwners);
+    scriptToolSurfaceIssues = issues;
+    if (state) state.scriptToolIssues = scriptToolIssuesOf(state);
+    const nextNames = new Set<string>();
+    registeredScriptSpecs.clear();
+    for (const spec of specs) {
+      taken.add(spec.toolName);
+      nextNames.add(spec.toolName);
+      registeredScriptSpecs.set(spec.toolName, spec);
+      if (!deferredNameOwners.has(spec.toolName)) deferredNameOwners.set(spec.toolName, scriptToolOwnerKey(spec.name));
+      const deferred = spec.definition.declare === true ? undefined : { exposure: "deferred", namespace: { name: SCRIPT_TOOL_NAMESPACE } };
+      const fingerprint = JSON.stringify([spec.definition, deferred ?? null]);
+      if (registeredScriptTools.get(spec.toolName) === fingerprint) continue;
+      const directSpec = { serverName: SCRIPT_TOOL_NAMESPACE, originalName: spec.name, prefixedName: spec.toolName, description: spec.definition.description, inputSchema: spec.definition.inputSchema };
+      registerDirectTool(directSpec, config, deferred, spec.toolName, false, spec);
+      finalizationGuard?.();
+      registeredScriptTools.set(spec.toolName, fingerprint);
+    }
+    const removed = [...registeredScriptTools.keys()].filter((name) => !nextNames.has(name));
+    for (const name of removed) registeredScriptTools.delete(name);
+    // A direct tool registered under a removed name this sync owns it now.
+    deactivateTools(removed.filter((name) => !registeredDirectTools.has(name)));
+  }
+
+  // What /mcp-adapter lists: invalid entries, project script tools trust blocked, and name clashes.
+  function scriptToolIssuesOf(targetState: McpExtensionState): string[] {
+    const blocked = [...targetState.blockedScriptTools ?? []].map(([name, block]) => describeBlockedScriptTool(name, block));
+    return [...sessionScriptToolIssues, ...blocked, ...scriptToolSurfaceIssues];
+  }
+
+  // The script tools the gateway reaches: the registered ones, or under MCP_DIRECT_TOOLS=__none__,
+  // which registers none, every configured one. A Pi before 0.99 gets none.
+  function gatewayScriptTools(): ScriptToolSpec[] {
+    if (deferredRegistryLive) return [...registeredScriptSpecs.values()];
+    if (!deferSearchTools) return [];
+    return resolveScriptToolSpecs((state?.config ?? earlyConfig).scriptTools, [], new Map()).specs;
+  }
+
+  /**
+   * `mcp({ tool: "<script tool>" })`. With a nested-call context the call is handed to the registered
+   * script tool, so Pi's hooks see `mcp__script__<name>` and its own caller check runs; otherwise the
+   * script runs here. Either way the result is the script tool's own.
+   */
+  async function callScriptToolFromGateway(
+    spec: ScriptToolSpec, args: Record<string, unknown>, mcpCallId: string, signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined, ctx: ExtensionContext,
+    shadowed: { server: string; tool: string } | undefined,
+  ): Promise<AgentToolResult<Record<string, unknown>>> {
+    const withShadowNote = (result: AgentToolResult<Record<string, unknown>>) => shadowed ? {
+      ...result,
+      content: [...result.content, { type: "text" as const, text: `"${shadowed.tool}" also names an MCP tool on server "${shadowed.server}"; this call ran the script tool. Call the MCP tool with mcp({ tool: "${shadowed.tool}", server: "${shadowed.server}" }).` }],
+    } : result;
+    let input: Record<string, unknown>;
+    try {
+      input = prepareDirectToolArguments(normalizeDirectToolInputSchema(spec.definition.inputSchema), args) as Record<string, unknown>;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: `Failed to call tool: ${message}` }], details: { mode: "script_tool", tool: spec.name, error: "call_failed", message } };
+    }
+    const toolCtx = ctx as ExtensionToolContext;
+    if (deferredRegistryLive && !directToolsFrozen && typeof toolCtx.executeTool === "function"
+      && registeredScriptSpecs.has(spec.toolName) && toolCtx.tools.some((tool) => tool.name === spec.toolName)) {
+      const outcome = await toolCtx.executeTool(spec.toolName, input);
+      const details = outcome.result.details as Record<string, unknown> | undefined;
+      // Keep Pi's verdict, so a failed script reads as failed here as it does when called directly.
+      const flag = outcome.isError ? { isError: true as const } : {};
+      // Blocked by a tool_call hook or rejected before the script tool ran.
+      if (details?.mode !== "script_tool") {
+        return withShadowNote({ ...flag, content: outcome.result.content, details: { mode: "script_tool", tool: spec.name, error: "nested_call_failed" } });
+      }
+      return withShadowNote({ ...flag, content: outcome.result.content, details });
+    }
+    // The script runs here, not in the script tool, so the caller check runs here too.
+    if (calledByAnotherTool(mcpCallId)) return withShadowNote(nestedScriptToolResult(spec.name));
+    return withShadowNote(await runScriptTool({
+      pi, ctx: toolCtx, toolCallId: mcpCallId, signal, onUpdate: onUpdate as AgentToolUpdateCallback<unknown> | undefined,
+      spec, input, settings: (state?.config ?? earlyConfig).settings,
+    }));
   }
 
   // Pi registers a tool active. A lazy tool must not stay that way: hold every
@@ -580,6 +770,21 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         && error.message.includes("Action methods cannot be called during extension loading")) return undefined;
       throw error;
     }
+  }
+
+  // Tools other extensions registered while the session runs, such as Pi's built-in MCP, which a deferred
+  // name registered later must not replace. During extension loading Pi can't list tools, so names claimed
+  // then aren't checked. Names this adapter registered earlier stay its own, so deferred names don't drift.
+  function foreignToolNames(): string[] {
+    let tools: ToolInfo[];
+    try {
+      tools = callReentrant(() => pi.getAllTools());
+    } catch (error) {
+      if (error instanceof Error
+        && error.message.includes("Action methods cannot be called during extension loading")) return [];
+      throw error;
+    }
+    return tools.map((tool) => tool.name).filter((name) => !adapterToolNames.has(name));
   }
 
   function deactivateTools(toolNames: string[]): string[] {
@@ -678,6 +883,143 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     return { specs, reservedDirectNames, activeDirectNames: nextNames, added, updated, deactivated };
   }
 
+  // A server in failure backoff withdraws its direct tools; they must not move to the deferred surface meanwhile.
+  function directToolsIgnoringBackoff(config: McpConfig, cache: MetadataCache | null, emitted: DirectToolSpec[]): DirectToolSpec[] {
+    if (activeFailureServers().size === 0) return emitted;
+    return resolveDirectTools(config, cache, config.settings?.toolPrefix ?? "server", envDirectToolOverride, new Set(), new Set());
+  }
+
+  // Pi 0.99+ only. Runs after syncDirectTools, whose names it must not take, and before the namespace proxies.
+  // A tool whose fingerprint is unchanged is not registered again, so an unchanged sync costs Pi nothing.
+  function syncDeferredTools(config: McpConfig, cache: MetadataCache | null, reservedDirectNames: ReadonlySet<string>, directSpecs: DirectToolSpec[]): void {
+    const foreignNames = deferredRegistryLive ? foreignToolNames() : [];
+    const taken = deferredRegistryLive
+      ? new Set([...reservedDirectNames, ...registeredNamespaceProxyTools, ...Object.keys(config.mcpServers).map(namespaceProxyName), ...foreignNames])
+      : undefined;
+    if (taken) syncScriptTools(config, taken, reservedDirectNames, foreignNames);
+    else {
+      // MCP_DIRECT_TOOLS=__none__ registers none and drops none, so it has no issue to report.
+      scriptToolSurfaceIssues = !deferSearchTools && Object.keys(config.scriptTools ?? {}).length > 0
+        ? ["Script tools need Pi 0.99.0 or later, so none were loaded."]
+        : [];
+      if (state) state.scriptToolIssues = scriptToolIssuesOf(state);
+    }
+    const specs: DeferredToolSpec[] = taken
+      ? resolveDeferredToolSpecs(config, cache, { names: taken, directTools: directToolsIgnoringBackoff(config, cache, directSpecs), owners: deferredNameOwners })
+      : [];
+    const nextNames = new Set<string>();
+    // One map per server, so looking up each spec's cached tool is O(1).
+    const toolsByServer = new Map<string, Map<string, CachedTool>>();
+    const cachedToolsOf = (serverName: string): Map<string, CachedTool> => {
+      let tools = toolsByServer.get(serverName);
+      if (!tools) {
+        tools = new Map();
+        for (const tool of cache?.servers[serverName]?.tools ?? []) if (!tools.has(tool.name)) tools.set(tool.name, tool);
+        toolsByServer.set(serverName, tools);
+      }
+      return tools;
+    };
+    for (const spec of specs) {
+      nextNames.add(spec.name);
+      if (!deferredNameOwners.has(spec.name)) deferredNameOwners.set(spec.name, deferredToolKey(spec.serverName, spec.originalName, spec.resourceUri));
+      const fields = piDeferredToolFields(spec, config, cache, cachedToolsOf(spec.serverName));
+      const fingerprint = directToolFingerprint(spec) + JSON.stringify(fields);
+      if (registeredDeferredTools.get(spec.name) === fingerprint) continue;
+      registerDirectTool(spec, config, fields, spec.name, false);
+      finalizationGuard?.();
+      registeredDeferredTools.set(spec.name, fingerprint);
+    }
+    const removed = [...registeredDeferredTools.keys()].filter((name) => !nextNames.has(name));
+    for (const name of removed) registeredDeferredTools.delete(name);
+    // A direct tool registered under a removed name this sync owns it now.
+    deactivateTools(removed.filter((name) => !registeredDirectTools.has(name)));
+
+    registeredToolNames.clear();
+    for (const spec of directSpecs) registeredToolNames.set(deferredToolKey(spec.serverName, spec.originalName, spec.resourceUri), spec.prefixedName);
+    for (const spec of specs) registeredToolNames.set(deferredToolKey(spec.serverName, spec.originalName, spec.resourceUri), spec.name);
+    // The servers this sync covered, so a call that reaches another one registers it first.
+    syncedServers.clear();
+    if (!deferredRegistryLive) return;
+    for (const [serverName, definition] of Object.entries(config.mcpServers)) {
+      const entry = cache?.servers[serverName];
+      if (entry && isServerCacheValid(entry, definition)) syncedServers.add(serverName);
+    }
+  }
+
+  /** The Pi tool name a cached MCP tool or resource tool is registered under, direct or deferred. */
+  function registeredDeferredName(serverName: string, originalName: string, resourceUri?: string): string | undefined {
+    return registeredToolNames.get(deferredToolKey(serverName, originalName, resourceUri));
+  }
+
+  /** Re-syncs the tool surface from cached metadata; never connects, and a frozen surface stays frozen. */
+  async function ensureDeferredRegistered(serverName: string): Promise<void> {
+    if (directToolsFrozen || !state?.config.mcpServers[serverName]) return;
+    syncToolSurface();
+  }
+
+  // The nested leg resolves the canonical name, an exact match by construction.
+  type InProxyCall = (serverName: string, canonicalTool: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<AgentToolResult<Record<string, unknown>>>;
+
+  /**
+   * Pi 0.99+: hands a proxy call to its registered tool through ctx.executeTool, so Pi's hooks and
+   * permission extensions see the real tool. The registered tool runs the call as the proxy would,
+   * so results, approval (once, origin "proxy") and output limits are unchanged.
+   */
+  function createProxyHandOff(ctx: unknown, toolCallId: string, runInProxy: InProxyCall): NestedCallHandOff | undefined {
+    if (!deferredRegistryLive || typeof (ctx as { executeTool?: unknown } | undefined)?.executeTool !== "function") return undefined;
+    const toolCtx = ctx as ExtensionToolContext;
+    return async ({ serverName, toolMeta, args, callIdentity }) => {
+      let name = registeredDeferredName(serverName, toolMeta.originalName, toolMeta.resourceUri);
+      if (name === undefined) {
+        await ensureDeferredRegistered(serverName);
+        name = registeredDeferredName(serverName, toolMeta.originalName, toolMeta.resourceUri);
+      }
+      // A frozen surface registers nothing new; the proxy still reaches tools it knows.
+      if (name === undefined && directToolsFrozen) return undefined;
+      if (name === undefined) {
+        const message = `MCP tool "${toolMeta.originalName}" on server "${serverName}" has no registered Pi tool.`;
+        return { content: [{ type: "text" as const, text: message }], details: { mode: "call", error: "tool_not_registered", ...callIdentity, message } };
+      }
+      // Pi calls only active direct tools; one the host deactivated keeps today's proxy path.
+      const registered = name;
+      if (!toolCtx.tools.some((tool) => tool.name === registered)) return undefined;
+      let thrown: { error: unknown } | undefined;
+      const handOff = {
+        name: registered,
+        consumed: false,
+        run: async (params: Record<string, unknown>, signal: AbortSignal | undefined) => {
+          try {
+            return await runInProxy(serverName, toolMeta.name, params, signal);
+          } catch (error) {
+            thrown = { error };
+            throw error;
+          }
+        },
+      };
+      pendingProxyHandOffs.set(toolCallId, handOff);
+      let outcome: Awaited<ReturnType<ExtensionToolContext["executeTool"]>>;
+      try {
+        outcome = await toolCtx.executeTool(registered, args ?? {});
+      } finally {
+        pendingProxyHandOffs.delete(toolCallId);
+      }
+      // Pi turns a throw into an error result; the proxy throws, as it did in-proxy.
+      if (thrown) throw thrown.error;
+      const details = outcome.result.details as Record<string, unknown> | undefined;
+      if (handOff.consumed) return { content: outcome.result.content, details: details ?? {} };
+      // Blocked by a tool_call hook or rejected before the tool ran.
+      return { content: outcome.result.content, details: { mode: "call", error: "nested_call_failed", ...callIdentity } };
+    };
+  }
+
+  // The proxy hand-off a nested call `<proxy call id>/<n>` to `name` runs, consumed once.
+  function takeProxyHandOff(toolCallId: string, name: string): ((params: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<AgentToolResult<Record<string, unknown>>>) | undefined {
+    const handOff = pendingProxyHandOffs.get(toolCallId.slice(0, Math.max(0, toolCallId.lastIndexOf("/"))));
+    if (!handOff || handOff.consumed || handOff.name !== name) return undefined;
+    handOff.consumed = true;
+    return handOff.run;
+  }
+
   function applyDirectToolConfigChanges(changes: Map<string, true | string[] | false | "search">): void {
     if (!state) return;
     for (const [serverName, value] of changes) {
@@ -687,27 +1029,13 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     }
   }
 
-  function loadToolSurfaceCache(config: McpConfig): MetadataCache | null {
-    const cache = loadMetadataCache();
-    const currentState = state;
-    if (!currentState?.sessionMetadata?.size) return cache;
-    const servers = { ...cache?.servers };
-    for (const [serverName, entry] of currentState.sessionMetadata) {
-      const definition = config.mcpServers[serverName];
-      if (!definition || isServerDisabled(definition)) continue;
-      if (entry.configHash !== computeServerHash(definition)) continue;
-      const { ttlMs: _sessionTtl, cacheScope: _sessionScope, ...sessionEntry } = entry;
-      servers[serverName] = { ...sessionEntry, cachedAt: Date.now() };
-    }
-    return { version: 1, servers };
-  }
-
   function syncToolSurface(ctx?: ExtensionContext): void {
     const notificationGeneration = lifecycleGeneration;
     const notificationOwner = currentOwner;
     const config = state?.config ?? earlyConfig;
-    const cache = loadToolSurfaceCache(config);
+    const cache = withSessionMetadata(loadMetadataCache(), config, state?.sessionMetadata);
     const result = syncDirectTools(config, cache);
+    syncDeferredTools(config, cache, result.reservedDirectNames, result.specs);
     if (state) {
       const directToolCounts = state.directToolCounts ?? new Map<string, number>();
       directToolCounts.clear();
@@ -732,6 +1060,17 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         "info",
       ));
     }
+    if (ctx && state) deliverScriptToolIssues(ctx, scriptToolIssuesOf(state));
+  }
+
+  // Shows each script-tool issue once per session, whichever sync found it.
+  function deliverScriptToolIssues(ctx: ExtensionContext, issues: readonly string[]): void {
+    for (const issue of issues) {
+      if (deliveredScriptToolIssues.has(issue)) continue;
+      deliveredScriptToolIssues.add(issue);
+      if (ctx.hasUI) callReentrant(() => ctx.ui.notify(issue, "warning"));
+      else console.warn(`MCP: ${issue}`);
+    }
   }
 
   function deliverLargeDirectToolsAdvisory(
@@ -754,14 +1093,16 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     config: McpConfig;
     cache: MetadataCache | null;
     enabledServerCount: number;
+    /** The script-tool issues of the config files read for this snapshot. */
+    scriptToolIssues: string[];
   } | undefined {
     let config: McpConfig;
     if (programmaticConfig) {
       config = resolveConfiguredClaudePluginMcp(cloneMcpConfig(sessionConfig), cwd ?? process.cwd());
     } else {
       const loadedConfig = loadMcpConfig(earlyConfigPath, cwd);
-      // Project servers require the authoritative session trust context.
-      if (hasProjectServerDefinitions(loadedConfig)) return undefined;
+      // Project servers and script tools require the authoritative session trust context.
+      if (hasProjectServerDefinitions(loadedConfig) || hasProjectScriptToolDefinitions(loadedConfig)) return undefined;
       config = loadedConfig;
     }
     const cache = loadMetadataCache();
@@ -771,7 +1112,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       && getMissingConfiguredDirectToolServers(config, cache, envDirectToolOverride).length > 0) return undefined;
     if (config.settings?.deferWithMissingMetadata !== true
       && (cache === null || hasEnabledServerWithoutValidMetadata(config, cache))) return undefined;
-    return { config, cache, enabledServerCount: enabledServers.length };
+    if (envRaw !== "__none__" && hasExecutorWithoutCatalog(config, cache)) return undefined;
+    return { config, cache, enabledServerCount: enabledServers.length, scriptToolIssues: programmaticConfig ? sessionScriptToolIssues : loadedScriptToolIssues(config) };
   }
 
   function syncNamespaceTools(
@@ -787,6 +1129,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       existingDirectNames: reservedDirectNames,
       activeDirectNames,
       existingNamespaceNames: registeredNamespaceProxyTools,
+      registeredFingerprints: namespaceProxyFingerprints,
       unavailableServers: activeFailureServers(),
       fallbackDeactivatedNames: fallbackDeactivatedTools,
       pi,
@@ -803,6 +1146,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       renderResult: renderMcpToolResult,
       guardReentrant: () => finalizationGuard?.(),
       onToolRegistered: (name) => finalizationRegistrations?.add(name),
+      createHandOff: createProxyHandOff,
+      reachesTools: deferSearchTools,
     });
     finalizationGuard?.();
     for (const name of result.added) registeredNamespaceProxyTools.add(name);
@@ -818,7 +1163,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         continue;
       }
       callReentrant(() => pi.registerCommand(spec.commandName, createPromptCommand(pi, () => state, spec, {
-        ensureState: (ctx) => ensureSessionRuntime(ctx as unknown as ExtensionContext),
+        ensureState: (ctx) => ensureSessionRuntime(ctx as ExtensionContext),
         lazyConnect: async (...args) => {
           const guard = captureRuntimeGuard(args[0]);
           return (await loadForRuntime(loadCoreRuntime, guard)).lazyConnect(...args);
@@ -1070,6 +1415,10 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     description: "Path to MCP config file",
     type: "string",
   });
+  pi.registerFlag("mcp-project-servers", {
+    description: "Set to \"allow\" to start unapproved project MCP servers in a trusted project without asking, for this process only",
+    type: "string",
+  });
 
   function startInitialization(
     ctx: ExtensionContext,
@@ -1143,9 +1492,16 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       };
       const registeredDuringFinalization = new Set<string>();
       let statusPublicationAttempted = false;
-      nextState.scriptTool = scriptTool;
       state = nextState;
       nextState.migrationNotices = [...sessionMigrationNotices];
+      if (nextState.scriptToolLoadIssues) sessionScriptToolIssues = nextState.scriptToolLoadIssues;
+      nextState.scriptToolIssues = scriptToolIssuesOf(nextState);
+      // initializeMcp already warned about each project script tool that trust blocked.
+      for (const [name, block] of nextState.blockedScriptTools ?? []) deliveredScriptToolIssues.add(describeBlockedScriptTool(name, block));
+      nextState.deliversToScript = deliversToScript;
+      nextState.calledByModel = (toolCallId) => toolCallId !== undefined && !calledByAnotherTool(toolCallId);
+      nextState.proxyToolAvailable = () => proxyToolRegistered && (getActiveToolsIfReady()?.includes("mcp") ?? true);
+      nextState.listScriptTools = gatewayScriptTools;
       finalizationGuard = guard;
       finalizationRegistrations = registeredDuringFinalization;
       try {
@@ -1171,6 +1527,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         guard();
         nextState.onToolMetadataUpdated = (_serverName, _reason) => {
           if (state !== nextState || !owner.isActive()) return;
+          if (envRaw !== "__none__") coreRuntime?.refreshExecutorCatalog(nextState, _serverName, _reason);
           syncPromptCommands();
           if (directToolsFrozen) {
             logger.debug(`MCP: metadata update for ${_serverName} (${_reason}) skipped — directTools frozen`);
@@ -1182,6 +1539,11 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         syncPromptCommands();
         guard();
         syncToolSurface(ctx);
+        guard();
+        // Startup connects ran before the hook above was set.
+        if (envRaw !== "__none__") {
+          for (const name of Object.keys(nextState.config.mcpServers)) coreRuntime?.refreshExecutorCatalog(nextState, name);
+        }
         guard();
         // A connected snapshot is readiness-like external state. Publish it only
         // after Pi's model-facing direct-tool surface reflects live metadata.
@@ -1196,7 +1558,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         guard();
         if (earlyConfig.settings?.freezeDirectTools === true) {
           directToolsFrozen = true;
-          logger.info("MCP: direct tools frozen after initial sync — metadata can refresh without rebuilding the active tool surface");
+          // Routine initialization must not write over Pi's interactive editor.
+          logger.debug("MCP: direct tools frozen after initial sync — metadata can refresh without rebuilding the active tool surface");
         }
         guard();
         initPromise = null;
@@ -1213,6 +1576,10 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
             registeredDirectToolServers.delete(name);
             registeredDirectToolVersions.delete(name);
             registeredNamespaceProxyTools.delete(name);
+            registeredDeferredTools.delete(name);
+          }
+          for (const [key, name] of registeredToolNames) {
+            if (registeredDuringFinalization.has(name)) registeredToolNames.delete(key);
           }
           if (registeredDuringFinalization.has("mcp")) {
             proxyToolRegistered = false;
@@ -1281,6 +1648,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       const owner = createMcpRuntimeOwner();
       currentOwner = owner;
       currentOAuthRuntime = null;
+      // Load-time initialization runs before any session, so only these context fields exist.
+      // oxlint-disable-next-line anti-slop/no-chained-type-assertions
       startInitialization({
         mode: "print",
         hasUI: false,
@@ -1292,25 +1661,30 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     });
   }
 
-  const scriptingSkillPath = fileURLToPath(new URL("./skills/mcp-scripting/SKILL.md", import.meta.url));
   pi.on("resources_discover", (event) => {
     const resourceConfig = programmaticConfig
       ? cloneMcpConfig(sessionConfig)
       : loadMcpConfig(earlyConfigPath, event.cwd);
     const skillPaths = discoverConfiguredClaudePluginSkills(resourceConfig, event.cwd);
-    if (scriptTool && existsSync(scriptingSkillPath) && !skillPaths.includes(scriptingSkillPath)) {
-      skillPaths.push(scriptingSkillPath);
-    }
     return skillPaths.length > 0 ? { skillPaths } : undefined;
   });
 
   pi.on("session_start", async (_event, ctx) => {
     sessionCtx = null;
+    // A host that embeds the adapter with its own config ships it inside another package; its users never installed this one.
+    if (options.config === undefined && options.configPath === undefined) {
+      void showUpgradeNotice(ctx).catch((error) => console.error(`MCP: failed to show the upgrade notice: ${formatTerminalError(error)}`));
+    }
     sessionMigrationNotices = programmaticConfig
       ? []
       : getLegacyMcpMigrationNotices(ctx.cwd, earlyConfigPath);
+    // A config file's issues arrive with the session's config load: the deferred snapshot or initialization.
+    sessionScriptToolIssues = programmaticConfig ? supplied?.issues ?? [] : [];
+    deliveredScriptToolIssues = new Set(sessionScriptToolIssues);
     if (ctx.hasUI) {
-      for (const notice of sessionMigrationNotices) ctx.ui.notify(notice, "warning");
+      for (const notice of [...sessionMigrationNotices, ...sessionScriptToolIssues]) ctx.ui.notify(notice, "warning");
+    } else {
+      for (const issue of sessionScriptToolIssues) console.warn(`MCP: ${issue}`);
     }
     // Reset before any await so replacement sessions cannot inherit activation.
     searchActivatedTools.clear();
@@ -1374,10 +1748,13 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     if (state) return;
 
     if (!initPromise) {
-      const deferredSnapshot = getDeferredSessionSnapshot(ctx.cwd);
+      const deferredSnapshot = hasTasksToResume(ctx) ? undefined : getDeferredSessionSnapshot(ctx.cwd);
       if (deferredSnapshot) {
         const { config, cache, enabledServerCount } = deferredSnapshot;
+        sessionScriptToolIssues = deferredSnapshot.scriptToolIssues;
         const directResult = syncDirectTools(config, cache);
+        syncDeferredTools(config, cache, directResult.reservedDirectNames, directResult.specs);
+        deliverScriptToolIssues(ctx, [...sessionScriptToolIssues, ...scriptToolSurfaceIssues]);
         syncProxyTool(config, cache, directResult.specs);
         syncNamespaceTools(config, cache, directResult.reservedDirectNames, directResult.activeDirectNames);
         // Pi cannot unregister commands. Wait until cwd is authoritative, and
@@ -1475,6 +1852,10 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     initStartedPromise = null;
     clearRetainedInitFailure();
 
+    // Hand background tasks off to the session record first: the owner's abort below would cancel them.
+    // Always, even with none running, since a restore may still be resuming one.
+    await currentState?.backgroundTasks?.handOffForShutdown();
+
     // Abort before awaiting cleanup so delayed initialization cannot touch stale
     // Pi context after session shutdown.
     const stopOwner = owner?.stop("MCP extension session shutdown") ?? Promise.resolve();
@@ -1490,7 +1871,144 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   });
 
   // Re-flag returned MCP tool failures so pi registers them as errors (see toolErrorOverride).
-  pi.on("tool_result", (event) => toolErrorOverride(event.details));
+  pi.on("tool_result", (event) => {
+    return toolErrorOverride(event.details);
+  });
+
+  // Pi 1.2+ `reachesTools` by tool name: refilled from pi.getAllTools() only for a name it does not know,
+  // so a tool call costs a map lookup.
+  const toolReaches = new Map<string, ((input: unknown) => unknown) | undefined>();
+
+  function reachOf(toolName: string, input: unknown): "all" | string[] | undefined {
+    if (registeredDirectTools.has(toolName) || registeredDeferredTools.has(toolName)) return undefined;
+    // The proxies connect and register on their own, so their first-call errors stay as they are.
+    if (toolName === "mcp" || registeredNamespaceProxyTools.has(toolName)) return undefined;
+    if (!toolReaches.has(toolName)) {
+      toolReaches.clear();
+      for (const tool of pi.getAllTools()) {
+        const reaches = (tool as { reachesTools?: unknown }).reachesTools;
+        toolReaches.set(tool.name, typeof reaches === "function" ? reaches as (input: unknown) => unknown : undefined);
+      }
+      if (!toolReaches.has(toolName)) toolReaches.set(toolName, undefined);
+    }
+    const reach = toolReaches.get(toolName)?.(input);
+    if (reach === "all") return reach;
+    return Array.isArray(reach) && reach.every((word) => typeof word === "string") ? reach : undefined;
+  }
+
+  // Pi's codemode names tools by words of the script, so `mcp__docs` and `mcp__docs__find` reach docs.
+  function reachesServer(reach: "all" | string[], serverName: string): boolean {
+    if (reach === "all") return true;
+    const namespace = namespaceProxyName(serverName);
+    return reach.some((word) => word === namespace || word.startsWith(`${namespace}__`));
+  }
+
+  async function waitBounded(work: Promise<unknown>, signal: AbortSignal | undefined): Promise<void> {
+    // An abort listener added after the abort never fires.
+    if (signal?.aborted) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
+    await Promise.race([
+      work.catch(() => undefined),
+      new Promise<void>((resolveWait) => {
+        timer = setTimeout(resolveWait, LATE_REGISTRATION_WAIT_MS);
+        onAbort = resolveWait;
+        signal?.addEventListener("abort", onAbort, { once: true });
+      }),
+    ]);
+    clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener("abort", onAbort);
+  }
+
+  /**
+   * Registers the servers a call reaches before it runs. "all" only awaits connections already in
+   * flight; a reach that names servers connects every unregistered one it names, first starting the
+   * session runtime if a deferred session has none yet. Failures are recorded by the connect and
+   * reported by the call itself.
+   */
+  async function registerReachedServers(reach: "all" | string[], signal: AbortSignal | undefined, ctx: ExtensionContext): Promise<void> {
+    if (signal?.aborted) return;
+    let targetState = state;
+    if (!targetState) {
+      // A deferred session has no runtime until its first MCP operation, so naming a server with no
+      // registered tools starts it, as the proxy's first call does. "all" never starts every server.
+      const namesPending = reach !== "all" && Object.entries(earlyConfig.mcpServers)
+        .some(([serverName, definition]) => !isServerDisabled(definition) && !syncedServers.has(serverName) && reachesServer(reach, serverName));
+      const initialization = namesPending ? ensureSessionRuntime(ctx) : initPromise;
+      if (!initialization) return;
+      await waitBounded(initialization, signal);
+      if (!namesPending || !state) {
+        // The session initialization just produced, if it finished within the wait.
+        if (!directToolsFrozen && state) syncToolSurface();
+        return;
+      }
+      targetState = state;
+    }
+    const runtimeState = targetState;
+    const pending = Object.entries(runtimeState.config.mcpServers)
+      .filter(([serverName, definition]) => !isServerDisabled(definition) && !syncedServers.has(serverName) && reachesServer(reach, serverName))
+      .map(([serverName]) => serverName);
+    if (pending.length === 0) return;
+    const { lazyConnect } = await loadForRuntime(loadCoreRuntime, captureRuntimeGuard(runtimeState));
+    const connecting = reach === "all"
+      ? pending.filter((serverName) => runtimeState.manager.isConnecting(serverName))
+      : pending;
+    if (connecting.length === 0) return;
+    let connected = false;
+    await waitBounded(Promise.all(connecting.map(async (serverName) => {
+      if (await lazyConnect(runtimeState, serverName, signal)) connected = true;
+    })), signal);
+    // A failed connect has nothing new to register, so an unreachable server costs no re-sync.
+    if (connected && !directToolsFrozen && state === runtimeState) syncToolSurface();
+  }
+
+  // Pi tells a nested call only its parent's id, not which tool that is, so the tool_call handler
+  // below records each call until its tool_execution_end, which Pi emits for every call, blocked or
+  // run, so the record holds only calls still running. Without that handler (MCP_DIRECT_TOOLS=__none__,
+  // or Pi before 0.99) nothing is recorded and every result keeps the output guard.
+  const toolCallsById = new Map<string, { name: string; parent: string | undefined }>();
+  const MAX_CALL_DEPTH = 64;
+
+  /**
+   * A call's result goes to a script, not the model, when a tool other than the adapter's proxies
+   * (`mcp`, `mcp__<server>`) called it, directly or through them: Pi's codemode or another
+   * extension's tool. A proxy's hand-off leg is asked with the proxy's own id.
+   */
+  function deliversToScript(toolCallId: string | undefined): boolean {
+    let call = toolCallId === undefined ? undefined : toolCallsById.get(toolCallId);
+    for (let depth = 0; call?.parent !== undefined && depth < MAX_CALL_DEPTH; depth++) {
+      const parent = toolCallsById.get(call.parent);
+      if (!parent || parent === call) return false;
+      if (parent.name !== "mcp" && !registeredNamespaceProxyTools.has(parent.name)) return true;
+      call = parent;
+    }
+    return false;
+  }
+
+  /**
+   * Whether a tool other than the model or the adapter's proxies called `toolCallId`.
+   * Pi forms every nested call id as `<parent>/<n>`; under MCP_DIRECT_TOOLS=__none__ there is no caller
+   * record, so the id shape is the only signal. That holds for a call whose record is already gone too.
+   */
+  function calledByAnotherTool(toolCallId: string): boolean {
+    return toolCallsById.has(toolCallId) ? deliversToScript(toolCallId) : toolCallId.includes("/");
+  }
+
+  if (deferredRegistryLive) pi.on("agent_end", () => toolCallsById.clear());
+  if (deferredRegistryLive) pi.on("tool_execution_end", (event) => { toolCallsById.delete(event.toolCallId); });
+
+  // A call that may reach other tools (Pi's codemode and tool_search, other extensions) first registers what it reaches.
+  // Registered only when deferred tools are, since Pi runs its tool_call pipeline for every call once a handler exists.
+  if (deferredRegistryLive) pi.on("tool_call", async (event, ctx) => {
+    toolCallsById.set(event.toolCallId, { name: event.toolName, parent: event.parentToolCallId });
+    if (directToolsFrozen) return;
+    try {
+      const reach = reachOf(event.toolName, event.input);
+      if (reach !== undefined) await registerReachedServers(reach, ctx.signal, ctx);
+    } catch (error) {
+      logger.debug(`MCP: could not register the servers ${event.toolName} reaches: ${formatTerminalError(error)}`);
+    }
+  });
 
   const registerMcpCommand = (commandName: string) => pi.registerCommand(commandName, {
     description: "Show MCP server status",
@@ -1502,8 +2020,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           { value: "reconnect", label: "reconnect — Reconnect servers" },
           { value: "tools", label: "tools — List all tools" },
           { value: "prompts", label: "prompts — List all MCP prompts" },
+          { value: "tasks", label: "tasks — List and stop background MCP tasks" },
           { value: "setup", label: "setup — Configure MCP servers" },
-          { value: "jev", label: "jev setup — Configure Jev semantic search" },
+          { value: "semantic", label: "semantic setup — Choose which servers semantic search may use" },
           { value: "edit", label: "edit — Edit .mcp.json or the global config" },
           { value: "logout", label: "logout — Clear server credentials" },
           { value: "token", label: "token — Manage stored bearer tokens" },
@@ -1515,10 +2034,22 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       }
 
       const [, subcommand, argumentPrefix] = argumentMatch;
-      if (subcommand === "jev") {
+      if (subcommand === "semantic") {
         return "setup".startsWith((argumentPrefix ?? "").trimStart())
-          ? [{ value: "jev setup", label: "setup — Configure Jev semantic search" }]
+          ? [{ value: "semantic setup", label: "setup — Choose which servers semantic search may use" }]
           : null;
+      }
+      if (subcommand === "tasks") {
+        const taskArguments = (argumentPrefix ?? "").trimStart();
+        const stopMatch = taskArguments.match(/^stop\s+(.*)$/);
+        if (!stopMatch) {
+          return "stop".startsWith(taskArguments) ? [{ value: "tasks stop ", label: "stop — Stop a background MCP task" }] : null;
+        }
+        const keyPrefix = stopMatch[1] ?? "";
+        const tasks = (state?.backgroundTasks?.list() ?? [])
+          .filter(task => task.key.startsWith(keyPrefix))
+          .map(task => ({ value: `tasks stop ${task.key}`, label: `${task.key} (${task.tool})` }));
+        return tasks.length > 0 ? tasks : null;
       }
       if (
         (subcommand !== "reconnect" && subcommand !== "logout" && subcommand !== "disable" && subcommand !== "enable" && subcommand !== "token")
@@ -1550,12 +2081,12 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     handler: async (args, ctx) => {
       let commandOwner = currentOwner;
       const commandReload = typeof ctx.reload === "function" ? ctx.reload.bind(ctx) : async () => {};
-      let commandCtx = createCommandContext(ctx as unknown as ExtensionContext, commandOwner);
+      let commandCtx = createCommandContext(ctx as ExtensionContext, commandOwner);
       if (!state) {
         try {
-          state = await ensureSessionRuntime(ctx as unknown as ExtensionContext);
+          state = await ensureSessionRuntime(ctx as ExtensionContext);
           commandOwner = currentOwner;
-          commandCtx = createCommandContext(ctx as unknown as ExtensionContext, commandOwner);
+          commandCtx = createCommandContext(ctx as ExtensionContext, commandOwner);
           commandOwner?.throwIfInactive();
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1594,6 +2125,16 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         case "prompts":
           await commands.showPrompts(state, commandCtx);
           break;
+        case "tasks":
+          if (parts.length === 1) {
+            commands.showBackgroundTasks(state, commandCtx);
+          } else if (parts[1] === "stop" && parts.length === 3) {
+            commandOwner?.throwIfInactive();
+            await commands.stopBackgroundTask(state, commandCtx, parts[2]!);
+          } else if (commandCtx.hasUI) {
+            commandCtx.ui?.notify("Usage: /mcp-adapter tasks [stop <server>/<taskId>]", "error");
+          }
+          break;
         case "setup": {
           commandOwner?.throwIfInactive();
           if (programmaticConfig) {
@@ -1608,17 +2149,17 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           }
           break;
         }
-        case "jev": {
+        case "semantic": {
           if (parts[1] !== "setup" || parts.length !== 2) {
-            commandCtx.ui?.notify("Usage: /mcp-adapter jev setup", "error");
+            commandCtx.ui?.notify("Usage: /mcp-adapter semantic setup", "error");
             break;
           }
           if (programmaticConfig) {
-            commandCtx.ui?.notify("Jev setup is unavailable when config is supplied by createMcpAdapter().", "info");
+            commandCtx.ui?.notify("Semantic search setup is unavailable when config is supplied by createMcpAdapter().", "info");
             break;
           }
           commandOwner?.throwIfInactive();
-          if (await commands.setupJevSemanticSearch(state, commandCtx, earlyConfigPath)) {
+          if (await commands.setupSemanticSearch(state, commandCtx, earlyConfigPath)) {
             commandOwner?.throwIfInactive();
             await commandReload();
             return;
@@ -1738,7 +2279,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     description: "Authenticate with an MCP server (OAuth)",
     handler: async (args, ctx) => {
       let commandOwner = currentOwner;
-      let commandCtx = createCommandContext(ctx as unknown as ExtensionContext, commandOwner);
+      let commandCtx = createCommandContext(ctx as ExtensionContext, commandOwner);
       const serverName = args?.trim();
       if (!serverName && !commandCtx.hasUI) {
         return;
@@ -1746,9 +2287,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
 
       if (!state) {
         try {
-          state = await ensureSessionRuntime(ctx as unknown as ExtensionContext);
+          state = await ensureSessionRuntime(ctx as ExtensionContext);
           commandOwner = currentOwner;
-          commandCtx = createCommandContext(ctx as unknown as ExtensionContext, commandOwner);
+          commandCtx = createCommandContext(ctx as ExtensionContext, commandOwner);
           commandOwner?.throwIfInactive();
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -1787,62 +2328,6 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       }
     },
   });
-
-  if (scriptTool) {
-    // The skill file is manual-only; Pi reads disable-model-invocation from the file and extensions cannot override it.
-    const skillPointer = earlyConfig.settings?.scriptSkill === "model"
-      ? ` Before writing a script, read ${scriptingSkillPath} for result shapes and limits.`
-      : "";
-    (pi.registerTool as (tool: unknown) => unknown)({
-      name: "mcpScript",
-      label: "MCP Script",
-      description: "Run sandboxed JavaScript to loop, filter, chain, or fan out across multiple MCP calls in one request. Use mcp for a single call, search, describe, status, or auth. await tools.search({ query }) returns { items: [{ path, name, server, description? }], total, hasMore, nextOffset }, not { ok, data }. await tools.describe({ path }) returns a descriptor with inputTypeScript or { path, error: { code, message, suggestions } }. tools.call(path, args) and tools.<path>(args) return { ok: true, data } or { ok: false, error: { code, message } }. data is the raw MCP result { content, structuredContent? }: use data.structuredContent when present; otherwise JSON usually needs JSON.parse(data.content[0].text). Use emit(value) for user-visible output." + skillPointer,
-      promptSnippet: "Batch multiple MCP tool calls in one JavaScript request (loop, filter, chain)",
-      parameters: Type.Object({
-        code: Type.String({ description: "Sandboxed JavaScript MCP script. Pass tool names exactly as mcp lists them, e.g. tools.call(\"github_search_issues\", args), and use emit(value)." }),
-        timeoutMs: optionalNumber({ minimum: 1, description: "Execution timeout in milliseconds (default: 30000)" }),
-      }),
-      renderCall: createMcpScriptToolCallRenderer(toolRenderOptions),
-      renderResult: renderMcpToolResult,
-      async execute(_toolCallId: string, params: { code: string; timeoutMs?: number }, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext) {
-        let executeOwner = currentOwner;
-        if (!state) {
-          try {
-            const initialized = await awaitWithTimeout(ensureSessionRuntime(ctx), INIT_WAIT_TIMEOUT_MS);
-            if (initialized === INIT_WAIT_TIMED_OUT) {
-              return {
-                content: [{ type: "text" as const, text: "MCP initialization is still in progress. Try again shortly." }],
-                details: { mode: "script", error: "init_timeout", timeoutMs: INIT_WAIT_TIMEOUT_MS },
-              };
-            }
-            executeOwner = currentOwner;
-            executeOwner?.throwIfInactive();
-            state = initialized;
-          } catch (error) {
-            if (executeOwner && isOwnerAbortError(error, executeOwner)) throw error;
-            const message = error instanceof Error ? error.message : String(error);
-            return {
-              content: [{ type: "text" as const, text: `MCP initialization failed: ${message}` }],
-              details: { mode: "script", error: "init_failed", message },
-            };
-          }
-        }
-        if (!state) {
-          return {
-            content: [{ type: "text" as const, text: retainedInitFailure
-              ? buildInitRetryInstruction("MCP is not initialized after an earlier initialization failure")
-              : "MCP not initialized" }],
-            details: { mode: "script", error: "not_initialized", ...(retainedInitFailure ? { message: retainedInitFailure } : {}) },
-          };
-        }
-        executeOwner?.throwIfInactive();
-        const scriptState = state;
-        const scriptGuard = captureRuntimeGuard(scriptState);
-        const codeMode = await loadForRuntime(loadCodeMode, scriptGuard);
-        return codeMode.runMcpScript(scriptState, params.code, params.timeoutMs, getPiTools, signal);
-      },
-    });
-  }
 
   async function connectAndReport(targetState: McpExtensionState, serverName: string, signal?: AbortSignal, ctx?: ExtensionContext) {
     const guard = captureRuntimeGuard(targetState);
@@ -1897,7 +2382,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     }
 
     const destination = target === "project" ? getProjectConfigPath(cwd) : getPiGlobalConfigPath(earlyConfigPath);
-    if (target === "project" && process.env.PI_MCP_CONFIG_MODE?.trim().toLowerCase() === "exclusive"
+    if (target === "project" && isExclusiveConfigMode()
       && resolve(destination) !== resolve(getPiGlobalConfigPath(earlyConfigPath))) {
       return {
         content: [{ type: "text" as const, text: "Project installation is unavailable in exclusive config mode; use the global target." }],
@@ -2088,7 +2573,150 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
     };
   }
 
-  function registerProxyTool(description: string): void {
+  /**
+   * `mcp({ action: "save-script" })`: shows the operator the save, then the script in an editor, and
+   * writes only what they approve. Every refusal before the dialogs asks nothing and writes nothing.
+   */
+  async function executeSaveScript(
+    targetState: McpExtensionState,
+    args: Record<string, unknown> | undefined,
+    topLevelTarget: string | undefined,
+    toolCallId: string,
+    ctx: ExtensionContext,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult<Record<string, unknown>>> {
+    const saveOwner = currentOwner;
+    const throwIfStopped = () => {
+      signal?.throwIfAborted();
+      saveOwner?.throwIfInactive();
+    };
+    throwIfStopped();
+    const { target: argsTarget, ...saveArgs } = args ?? {};
+    const requestedName = typeof saveArgs.name === "string" ? saveArgs.name : undefined;
+    const result = (text: string, details: Record<string, unknown>) => ({
+      content: [{ type: "text" as const, text }],
+      details: { mode: "save-script", ...(requestedName !== undefined ? { name: requestedName } : {}), ...details },
+    });
+    if (programmaticConfig) {
+      return result("Saving a script tool is unavailable when the adapter uses programmatic configuration.", { error: "programmatic_config" });
+    }
+    if (targetState.config.settings?.allowScriptToolSave === false) {
+      return result("Saving script tools is disabled by configuration.", { error: "save_disabled" });
+    }
+    // Before Pi 0.99 no script tool loads, so a save would write files that never become a tool.
+    if (!deferSearchTools) {
+      return result("Saving a script tool needs Pi 0.99.0 or later, which runs script tools. Nothing was written.", { error: "unsupported_pi" });
+    }
+    // An args.target that is present but not a string is refused, not replaced by the top-level one.
+    const target = argsTarget !== undefined ? argsTarget : topLevelTarget ?? "global";
+    if (target !== "global" && target !== "project") {
+      return result("Script tool save target must be 'global' or 'project'.", { error: "invalid_target" });
+    }
+    if (target === "project" && isExclusiveConfigMode()
+      && resolve(getProjectPiConfigPath(ctx.cwd)) !== resolve(getPiGlobalConfigPath(earlyConfigPath))) {
+      return result("Saving to the project config is unavailable in exclusive config mode; use the global target.", { error: "inactive_target" });
+    }
+    if (calledByAnotherTool(toolCallId)) {
+      return result('Saving a script tool cannot be requested from inside another tool. Call mcp({ action: "save-script" }) directly.', { error: "nested_save" });
+    }
+    const saveGuard = captureRuntimeGuard(targetState);
+    const core = await loadForRuntime(loadCoreRuntime, saveGuard);
+    // An RPC client has a UI too, but the operator must read the diff and the script, so only the TUI asks.
+    if (!core.isTuiMode(ctx)) {
+      return result(`Saving a script tool needs an interactive terminal session, because it writes files only after you approve them. This session is ${ctx.mode}.`, { error: "headless" });
+    }
+    if (target === "project" && !ctx.isProjectTrusted()) {
+      return result("Saving to the project config needs project trust. Trust this project and try again.", { error: "project_trust_required" });
+    }
+    const checked = checkScriptToolSave({
+      args: saveArgs, target, cwd: ctx.cwd, ...(earlyConfigPath !== undefined ? { configOverridePath: earlyConfigPath } : {}),
+      scriptTools: targetState.config.scriptTools,
+      // Only a project config can shadow a global save, and nothing shadows a project save.
+      projectScriptTools: target === "global" ? loadMcpConfigWithSources(earlyConfigPath, ctx.cwd).projectScriptTools : undefined,
+    });
+    if (!checked.ok) {
+      return result(checked.message, {
+        error: checked.error,
+        ...(checked.shadowedBy ? { shadowedBy: checked.shadowedBy } : {}),
+        ...(checked.reason !== undefined ? { message: checked.reason } : {}),
+      });
+    }
+    const { name, scriptPath, configPath } = checked;
+    const toolName = `${SCRIPT_TOOL_NAMESPACE}__${name}`;
+    // Checked against the live surface: another extension can register a name after the last sync.
+    const reservations = scriptToolReservations(targetState.config, new Set(registeredDirectTools.keys()), foreignToolNames());
+    const unavailable = scriptToolNameConflict(name, reservations, deferredNameOwners);
+    if (unavailable) return result(`Cannot save script tool "${name}": ${toolName} ${unavailable}.`, { error: "name_unavailable" });
+
+    const failed = (error: unknown, text: (message: string) => string) => {
+      const message = error instanceof Error ? error.message : String(error);
+      return result(text(message), { error: "script_save_failed", message });
+    };
+    const summary = buildScriptToolSavePrompt(checked);
+    const declined = () => result("The save was declined, so nothing was written.", { error: "declined" });
+    // Deny first, so a stray Enter declines.
+    const choice = await ctx.ui.select(summary, ["Don't save", "Review the script"], signal ? { signal } : {});
+    throwIfStopped();
+    if (choice !== "Review the script") return declined();
+    const code = await ctx.ui.editor(`Review the script for ${toolName} (${scriptPath}). Saving writes the script and its config entry; Escape writes nothing.`, checked.code);
+    throwIfStopped();
+    if (code === undefined) return declined();
+    const codeRefusal = checkScriptToolCode(name, code);
+    if (codeRefusal) return result(codeRefusal.message, { error: codeRefusal.error });
+    const approvedButFailed = (message: string) => `The script tool was approved, but could not be saved: ${message}`;
+    let changed: string | undefined;
+    try {
+      await withFileMutationQueue(configPath, async () => {
+        throwIfStopped();
+        // The operator approved the files as the summary showed them.
+        changed = scriptToolSaveChange(checked);
+        if (changed === undefined) writeScriptToolSave({ ...checked, code });
+      });
+    } catch (error) {
+      if (signal?.aborted || (saveOwner && !saveOwner.isActive())) throw error;
+      return failed(error, approvedButFailed);
+    }
+    if (changed !== undefined) return failed(changed, approvedButFailed);
+
+    const entry = { ...checked.entry, file: scriptPath };
+    if (target === "project" && targetState.blockedScriptTools !== undefined) {
+      // The approval is keyed on the entry as the loader returns it.
+      approveProjectScriptTool(ctx.cwd, name, loadMcpConfig(earlyConfigPath, ctx.cwd).scriptTools?.[name] ?? entry);
+    }
+    targetState.blockedScriptTools?.delete(name);
+    targetState.config.scriptTools = { ...targetState.config.scriptTools, [name]: entry };
+    // The files are written: only a stale session or an abort makes that a failure, as for install.
+    let syncFailure: string | undefined;
+    if (!directToolsFrozen) {
+      try {
+        syncToolSurface(ctx);
+      } catch (error) {
+        if (isRuntimeGuardStale(saveGuard) || isAbortError(error, saveGuard.owner?.signal)) throw error;
+        syncFailure = error instanceof Error ? error.message : String(error);
+        logger.warn(`MCP: saved script tool "${name}" but could not refresh the tool surface: ${syncFailure}`);
+      }
+    }
+    const registered = syncFailure === undefined && deferredRegistryLive && !directToolsFrozen && registeredScriptSpecs.has(toolName);
+    const lines = [savedScriptToolText(name, toolName, registered, syncFailure)];
+    const edited = code !== checked.code;
+    if (edited) lines.push("The operator edited the script before saving, so the saved code differs from the code you sent.");
+    lines.push(`Script: ${scriptPath}`, `Config: ${configPath}`);
+    return result(lines.join("\n"), { tool: toolName, path: configPath, scriptPath, target, registered, edited });
+  }
+
+  // How the model reaches a script tool it just saved.
+  function savedScriptToolText(name: string, toolName: string, registered: boolean, syncFailure: string | undefined): string {
+    if (registered) return `Saved script tool "${name}". Call it as ${toolName} or mcp({ tool: "${name}", args }).`;
+    if (!deferredRegistryLive) return `Saved script tool "${name}". This session registers no script tools, so call it with mcp({ tool: "${name}", args }).`;
+    if (directToolsFrozen) return `Saved script tool "${name}". The tool surface is frozen in this session, so it is callable after /reload.`;
+    if (syncFailure !== undefined) {
+      return `Saved script tool "${name}", but the tool surface could not be refreshed (${syncFailure}), so it is callable after /reload.`;
+    }
+    const issue = scriptToolSurfaceIssues.find((text) => text.startsWith(`Script tool "${name}" was not loaded`));
+    return `Saved script tool "${name}", but it is not registered in this session. ${issue ?? `${toolName} was left out of the tool surface.`}`;
+  }
+
+  function registerProxyTool(description: string, allowScriptToolSave: boolean, extraction: boolean): void {
     callReentrant(() => (pi.registerTool as (tool: unknown) => unknown)({
       name: "mcp",
       label: "MCP",
@@ -2112,25 +2740,32 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
             description: "Alias for `args` — arguments as a JSON object",
           }),
         ], { description: "Alias for `args`, accepted for MCP clients/agents that emit the outer field name `arguments`" })),
+        ...(extraction ? { extract: Type.Optional(Type.Object({}, {
+          additionalProperties: true,
+          description: 'With tool: return only these typed values from its result instead of the whole text, e.g. { total: "number", due: { type: "date", description: "Payment due date" } }. Types: text, number, integer, date, time, datetime, duration.<unit>, list, list.number, list.date. The full result is saved to a file.',
+        })) } : {}),
         connect: Type.Optional(Type.String({ description: "Server name to connect (lazy connect + metadata refresh)" })),
         describe: Type.Optional(Type.String({ description: "Tool name to describe (shows parameters)" })),
         instructions: Type.Optional(Type.String({ description: "Server name to show that server's usage instructions" })),
         search: Type.Optional(Type.String({ description: "Search tools by name/description" })),
-        searchMode: Type.Optional(Type.String({ enum: ["lexical", "semantic"], description: "Search backend (default: lexical; semantic is available when a System One key is configured)" })),
+        searchMode: Type.Optional(Type.String({ enum: ["lexical", "semantic"], description: "Search backend (default: lexical; semantic ranks tools by meaning with a Pi classifier model)" })),
         regex: Type.Optional(Type.Boolean({ description: "Treat search as regex (default: substring match)" })),
         includeSchemas: Type.Optional(Type.Boolean({ description: "Include parameter schemas in search results (default: true)" })),
         limit: optionalNumber({ minimum: 1, description: "Maximum search results to return (default: 12)" }),
         offset: optionalNumber({ minimum: 0, description: "Search result offset (default: 0)" }),
         server: Type.Optional(Type.String({ description: "Server name: filters searches, disambiguates calls and describe operations, and optionally names an install" })),
-        action: Type.Optional(Type.String({ description: "Action: 'install', 'ui-messages', 'auth-start', 'auth-complete', or 'reload' (re-read the watched config and restart the adapter to apply post-startup changes)" })),
+        action: Type.Optional(Type.String({ description: `Action: 'install', 'ui-messages', 'auth-start', 'auth-complete',${allowScriptToolSave ? " 'save-script'," : ""} or 'reload' (re-read the watched config and restart the adapter to apply post-startup changes)` })),
         url: Type.Optional(Type.String({ description: "MCP endpoint URL for action: 'install'" })),
         target: Type.Optional(Type.String({ description: "Install target: 'global' (default) or 'project'" })),
+        cancelTask: Type.Optional(Type.String({ description: "Stop a background MCP task by its <server>/<taskId> key" })),
       }),
       renderResult: renderMcpToolResult,
+      ...reachesAllTools,
       async execute(toolCallId: string, params: {
         tool?: string;
         args?: string | Record<string, unknown>;
         arguments?: string | Record<string, unknown>;
+        extract?: unknown;
         connect?: string;
         describe?: string;
         instructions?: string;
@@ -2144,6 +2779,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         action?: string;
         url?: string;
         target?: string;
+        cancelTask?: string;
       }, signal: AbortSignal | undefined, _onUpdate: AgentToolUpdateCallback<Record<string, unknown>> | undefined, _ctx: ExtensionContext) {
         let executeOwner = currentOwner;
         const parseArgs = (value: string | Record<string, unknown> | undefined): Record<string, unknown> | undefined => {
@@ -2178,7 +2814,8 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           || value.server !== undefined
           || value.action !== undefined
           || value.url !== undefined
-          || value.target !== undefined;
+          || value.target !== undefined
+          || value.cancelTask !== undefined;
         if (!hasGatewayMode(params) && (params.args ?? params.arguments) !== undefined) {
           throw new Error("Gateway params were nested inside `args`; pass them top-level (for example, mcp({ search: \"...\" }) or mcp({ tool: \"...\", args: {} })).");
         }
@@ -2231,6 +2868,9 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
         if (params.action === "ui-messages") {
           return proxyModes.executeUiMessages(proxyState);
         }
+        if (params.action === "save-script") {
+          return executeSaveScript(proxyState, parsedArgs, params.target, toolCallId, _ctx, signal);
+        }
         if (params.action === "auth-start") {
           if (!params.server) {
             return {
@@ -2260,8 +2900,47 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
             ? proxyModes.executeAuthComplete(proxyState, params.server, input, signal)
             : proxyModes.executeAuthComplete(proxyState, params.server, input);
         }
+        if (params.cancelTask !== undefined) {
+          return proxyModes.executeCancelTask(proxyState, params.cancelTask);
+        }
         if (params.tool) {
-          const result = await proxyModes.executeCall(proxyState, params.tool, parsedArgs, params.server, getPiTools, signal, undefined, undefined, toolCallId);
+          let extractFields: Record<string, ExtractField> | undefined;
+          if (params.extract !== undefined) {
+            if (!isExtractionConfigured(proxyState.config.settings)) {
+              return {
+                content: [{ type: "text" as const, text: "Extraction is not configured. Set settings.extraction.allowedServers to use extract." }],
+                details: { mode: "call", error: "extraction_not_configured" },
+              };
+            }
+            const parsed = proxyModes.parseExtractFields(params.extract);
+            if (!parsed.ok) {
+              return {
+                content: [{ type: "text" as const, text: `Invalid extract: ${parsed.message}.` }],
+                details: { mode: "call", error: "invalid_extract", message: parsed.message },
+              };
+            }
+            extractFields = parsed.fields;
+          }
+          // A script tool wins over an MCP tool of the same name; mcp({ tool, server }) reaches the MCP one.
+          const scriptTool = params.server === undefined ? findScriptTool(gatewayScriptTools(), params.tool) : undefined;
+          if (scriptTool && params.extract !== undefined) {
+            return {
+              content: [{ type: "text" as const, text: "extract works only with MCP tools, not script tools." }],
+              details: { mode: "call", error: "extract_not_supported" },
+            };
+          }
+          if (scriptTool) {
+            const mcpMatch = proxyModes.resolveDescribeTarget(proxyState, params.tool);
+            const shadowed = "error" in mcpMatch ? undefined : { server: mcpMatch.server, tool: params.tool };
+            const result = await callScriptToolFromGateway(scriptTool, parsedArgs ?? {}, toolCallId, signal, _onUpdate, _ctx, shadowed);
+            assertRuntimeGuard(proxyGuard);
+            return result;
+          }
+          const handOff = createProxyHandOff(_ctx, toolCallId, (server, canonicalTool, args, nestedSignal) =>
+            proxyModes.executeCall(proxyState, canonicalTool, args, server, getPiTools, nestedSignal, undefined, undefined, toolCallId));
+          const called = await proxyModes.executeCall(proxyState, params.tool, parsedArgs, params.server, getPiTools, signal, undefined, undefined, toolCallId, handOff);
+          assertRuntimeGuard(proxyGuard);
+          const result = extractFields ? await proxyModes.applyExtraction(proxyState, called, extractFields, _ctx?.modelRegistry, signal) : called;
           assertRuntimeGuard(proxyGuard);
           if (lazyDirectTools.size === 0) return result;
           // A successful proxy call is as clear a signal as a search hit: the
@@ -2277,19 +2956,21 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           // Content is returned untouched: the call's output is already sized to
           // the output limits and is what a compact view previews. The tool
           // description tells the model a called tool is direct from then on.
-          return { ...result, details: { ...(result.details ?? {}), activated: added }, addedToolNames: added };
+          return { ...result, details: { ...result.details, activated: added }, addedToolNames: added };
         }
         if (params.connect) {
           return connectAndReport(proxyState, params.connect, signal, _ctx as ExtensionContext);
         }
         if (params.describe) {
-          return proxyModes.executeDescribe(proxyState, params.describe, params.server);
+          const result = await proxyModes.executeGuardedDescribe(proxyState, params.describe, params.server, signal);
+          assertRuntimeGuard(proxyGuard);
+          return result;
         }
         if (params.instructions) {
           return proxyModes.executeInstructions(proxyState, params.instructions);
         }
         if (params.search !== undefined) {
-          const result = await proxyModes.executeSearch(proxyState, params.search, params.regex, params.server, params.includeSchemas, params.limit, params.offset, params.searchMode, signal);
+          const result = await proxyModes.executeSearch(proxyState, params.search, params.regex, params.server, params.includeSchemas, params.limit, params.offset, params.searchMode, signal, _ctx?.modelRegistry);
           assertRuntimeGuard(proxyGuard);
           if (lazyDirectTools.size === 0) return result;
           holdLazyToolsInactive();
@@ -2300,7 +2981,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
           return {
             ...result,
             content: [{ type: "text" as const, text: `Activated as direct tools: ${added.join(", ")}.\n\n${text}` }],
-            details: { ...(result.details ?? {}), activated: added },
+            details: { ...result.details, activated: added },
             addedToolNames: added,
           };
         }
@@ -2332,10 +3013,10 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
       || hasEnabledServerWithoutValidMetadata(config, cache, directSpecs);
 
     if (shouldRegisterProxyTool) {
-      const description = buildProxyDescription(config, scriptTool);
+      const description = buildProxyDescription(config);
       if (!proxyToolRegistered || proxyToolDescription !== description) {
         finalizationRegistrations?.add("mcp");
-        registerProxyTool(description);
+        registerProxyTool(description, config.settings?.allowScriptToolSave !== false, isExtractionConfigured(config.settings));
         finalizationGuard?.();
       }
       const activeTools = getActiveToolsIfReady();
@@ -2360,6 +3041,7 @@ function installMcpAdapter(pi: ExtensionAPI, options: McpAdapterOptions) {
   }
 
   const initialDirectResult = syncDirectTools(earlyConfig, earlyCache);
+  syncDeferredTools(earlyConfig, earlyCache, initialDirectResult.reservedDirectNames, initialDirectResult.specs);
   syncProxyTool(earlyConfig, earlyCache, initialDirectResult.specs);
   // Register namespace-proxy tools eagerly so tool-groups/slow-mode can validate
   // `mcp:<server>` references on the first session_start turn. Without this

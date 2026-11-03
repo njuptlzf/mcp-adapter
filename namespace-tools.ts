@@ -1,4 +1,5 @@
 import type { AgentToolResult, ExtensionAPI, ToolInfo } from "@earendil-works/pi-coding-agent";
+import type { NestedCallHandOff } from "./proxy-modes.ts";
 import { Type } from "typebox";
 import type { McpExtensionState } from "./state.ts";
 import { isServerDisabled, type McpConfig } from "./types.ts";
@@ -105,7 +106,13 @@ export type ExecuteNamespaceCall = (
   origin: "proxy",
   internalDelivery: undefined,
   toolCallId: string,
+  handOff?: NestedCallHandOff,
 ) => Promise<AgentToolResult<Record<string, unknown>>>;
+export type CreateNamespaceHandOff = (
+  ctx: unknown,
+  toolCallId: string,
+  runInProxy: (serverName: string, canonicalTool: string, args: Record<string, unknown>, signal: AbortSignal | undefined) => Promise<AgentToolResult<Record<string, unknown>>>,
+) => NestedCallHandOff | undefined;
 
 function namespaceExecute(
   getState: GetState,
@@ -114,6 +121,7 @@ function namespaceExecute(
   executeCall: ExecuteNamespaceCall,
   serverName: string,
   getPiTools: GetPiTools,
+  createHandOff?: CreateNamespaceHandOff,
 ) {
   return async (
     toolCallId: string,
@@ -160,17 +168,10 @@ function namespaceExecute(
         details: { error: "not_initialized", server: serverName },
       };
     }
-    return executeCall(
-      state,
-      params.tool,
-      params.args ?? {},
-      serverName,
-      getPiTools,
-      signal,
-      "proxy",
-      undefined,
-      toolCallId,
-    );
+    const callState = state;
+    const handOff = createHandOff?.(ctx, toolCallId, (server, canonicalTool, args, nestedSignal) =>
+      executeCall(callState, canonicalTool, args, server, getPiTools, nestedSignal, "proxy", undefined, toolCallId));
+    return executeCall(state, params.tool, params.args ?? {}, serverName, getPiTools, signal, "proxy", undefined, toolCallId, handOff);
   };
 }
 
@@ -189,6 +190,8 @@ export interface SyncNamespaceProxyToolsInput {
   existingDirectNames: Set<string>;
   activeDirectNames?: ReadonlySet<string>;
   existingNamespaceNames: Set<string>;
+  /** What each registered namespace proxy was registered with, so an unchanged one is not re-registered. */
+  registeredFingerprints?: Map<string, string>;
   unavailableServers?: ReadonlySet<string>;
   // Names the adapter removed from Pi's active tools because Pi could not
   // unregister them. Pi does not re-activate a name it already knows, so a
@@ -205,6 +208,10 @@ export interface SyncNamespaceProxyToolsInput {
   renderResult?: unknown;
   guardReentrant?: () => void;
   onToolRegistered?: (name: string) => void;
+  /** Pi 0.99+: hands a resolved call to its registered tool through the tool context. */
+  createHandOff?: CreateNamespaceHandOff;
+  /** Pi 0.99+: declare the namespace's tools as what a call may reach. */
+  reachesTools?: boolean;
 }
 
 export interface SyncNamespaceProxyToolsResult {
@@ -259,6 +266,7 @@ function registerNamespaceProxyTool(
     renderShell,
     renderCall: createNamespaceRenderCall(renderOptions, spec.serverName),
     renderResult,
+    ...(input.reachesTools ? { reachesTools: () => [spec.toolName] } : {}),
     execute: namespaceExecute(
       input.getState,
       input.getInitPromise,
@@ -266,6 +274,7 @@ function registerNamespaceProxyTool(
       executeCall,
       spec.serverName,
       input.getPiTools,
+      input.createHandOff,
     ),
   });
   input.guardReentrant?.();
@@ -301,7 +310,7 @@ function deactivateStaleNamespaceTools(input: SyncNamespaceProxyToolsInput, next
     (name) => !nextNames.has(name) && !activeDirectNames.has(name),
   );
   const deactivated: string[] = [];
-  const unregisterTool = (input.pi as unknown as {
+  const unregisterTool = (input.pi as {
     unregisterTool?: (name: string) => boolean;
   }).unregisterTool;
   for (const stale of staleNames) {
@@ -348,8 +357,14 @@ export function syncNamespaceProxyTools(input: SyncNamespaceProxyToolsInput): Sy
   const renderResult = input.renderResult ?? createMcpToolResultRenderer(renderOptions);
 
   for (const spec of specs) {
+    const existing = input.existingNamespaceNames.has(spec.toolName);
+    const fingerprint = JSON.stringify([spec.serverName, spec.description, input.reachesTools === true]);
+    // Pi rebuilds its whole tool registry on every registerTool, so an unchanged proxy is left alone.
+    if (existing && input.registeredFingerprints?.get(spec.toolName) === fingerprint
+      && !input.fallbackDeactivatedNames?.has(spec.toolName)) continue;
     registerNamespaceProxyTool(input, spec, renderOptions, renderShell, renderResult);
-    (input.existingNamespaceNames.has(spec.toolName) ? result.updated : result.added).push(spec.toolName);
+    input.registeredFingerprints?.set(spec.toolName, fingerprint);
+    (existing ? result.updated : result.added).push(spec.toolName);
   }
 
   result.deactivated.push(...deactivateStaleNamespaceTools(input, nextNames));

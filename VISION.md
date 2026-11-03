@@ -6,6 +6,7 @@ pi-mcp-adapter lets Pi use MCP servers without paying for every tool definition 
 It serves a single Pi operator first: one person who wants the useful parts of the MCP ecosystem inside their session without giving up context, speed, or control.
 It stays flexible enough for other people, other hosts, and embedding apps, but it does not redesign itself around them.
 It owns the bridge between Pi and MCP: config loading, connections and lifecycle, tool discovery and exposure, auth for MCP servers, and delivery of results back to Pi.
+It also turns workflows the operator approves into reusable tools: saved scripts that combine MCP tools with Pi's other tools and run through Pi's codemode.
 
 ## Context is the budget
 
@@ -19,7 +20,8 @@ Anything the model sees on every turn, such as tool names, descriptions, guidanc
 MCP servers run code and reach external services in the operator's name.
 Servers come from config the operator wrote or approved.
 Project config does not start servers until Pi trusts the project and the operator approves them.
-Tool calls respect approval settings, and `mcpScript` runs in a sandbox with no file, network, or process access of its own.
+Tool calls respect approval settings, and scripts that call MCP tools run in Pi's codemode, with no file, network, or process access of their own.
+A saved script tool runs only code the operator wrote or approved, and every call inside it goes through the same approvals as any other call.
 When trust, approval, or ownership cannot be proven, the adapter fails closed and says why.
 
 ## Standard config first
@@ -36,6 +38,7 @@ The `/mcp-adapter setup` presets are a short list of general servers that work w
 A server that needs its own paid API key does not get a preset.
 Anything specific to one vendor or server, including a new preset, needs the maintainer's approval before it is accepted.
 It can be rejected without asking.
+Executor is the one exception: the adapter answers its approval pauses and account links in Pi and exposes its app tools as Pi tools, because those can't be expressed as config.
 Any server can still be added as an ordinary config entry, and the README can show how.
 
 ## Follow the protocol and the SDK

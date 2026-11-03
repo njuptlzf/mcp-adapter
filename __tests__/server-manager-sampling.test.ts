@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, rmSync } from "node:fs";
-import { join } from "node:path";
 import { RESOURCE_MIME_TYPE } from "../ui-app-bridge-helpers.ts";
 
 const mocks = vi.hoisted(() => ({
   clients: [] as any[],
   transports: [] as any[],
   open: vi.fn(async () => undefined),
+  attachTaskSession: vi.fn(async (_options: any) => undefined),
 }));
 
 vi.mock("open", () => ({ default: mocks.open }));
+
+vi.mock("../mcp-tasks.ts", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  attachTaskSession: mocks.attachTaskSession,
+}));
 
 vi.mock("@modelcontextprotocol/client", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -49,6 +54,7 @@ describe("McpServerManager sampling", () => {
     mocks.clients.length = 0;
     mocks.transports.length = 0;
     mocks.open.mockClear();
+    mocks.attachTaskSession.mockClear();
   });
 
   afterEach(() => {
@@ -149,7 +155,8 @@ describe("McpServerManager sampling", () => {
         url: "https://example.com/connect",
       },
     });
-    const completionHandler = client.setNotificationHandler.mock.calls[0][1];
+    const completionHandler = client.setNotificationHandler.mock.calls
+      .find(([method]: [string]) => method === "notifications/elicitation/complete")[1];
     completionHandler({ params: { elicitationId: "unknown-id" } });
     completionHandler({ params: { elicitationId: "known-id" } });
     completionHandler({ params: { elicitationId: "known-id" } });
@@ -210,6 +217,43 @@ describe("McpServerManager sampling", () => {
     expect(mocks.clients[0].setRequestHandler).toHaveBeenCalledTimes(2);
   });
 
+  it("bounds a task's sampling by the task, not the current turn, while plain sampling follows the turn", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    const turn = new AbortController();
+    const turnCancelled = new Error("turn cancelled");
+    manager.setSamplingConfig({
+      autoApprove: true,
+      modelRegistry: {
+        getAvailable: () => [{ provider: "test", id: "model", name: "model" }],
+        // The run ends only when its signal aborts.
+        streamSimple: (_model: unknown, _context: unknown, options: { signal: AbortSignal }) => ({
+          result: () => new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(new Error("sampling aborted")), { once: true });
+          }),
+        }),
+      } as any,
+      getCurrentModel: () => undefined,
+      getThinkingLevel: () => "off",
+      getSignal: () => turn.signal,
+    });
+    await manager.connect("demo", { command: "node", args: ["server.js"] });
+    const request = { method: "sampling/createMessage", params: { messages: [{ role: "user", content: { type: "text", text: "hi" } }], maxTokens: 10 } };
+
+    const task = new AbortController();
+    const taskRun = mocks.attachTaskSession.mock.calls[0][0].onSampling(request, task.signal);
+    const settled = vi.fn();
+    taskRun.then(settled, settled);
+    turn.abort(turnCancelled);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(settled).not.toHaveBeenCalled();
+    task.abort();
+    await expect(taskRun).rejects.toThrow("sampling aborted");
+
+    const [, plainHandler] = mocks.clients[0].setRequestHandler.mock.calls.find(([method]: [string]) => method === "sampling/createMessage");
+    await expect(plainHandler(request)).rejects.toBe(turnCancelled);
+  });
+
   it("does not advertise sampling when no sampling config is set", async () => {
     const { McpServerManager } = await import("../server-manager.ts");
     const manager = new McpServerManager();
@@ -256,6 +300,30 @@ describe("McpServerManager sampling", () => {
       { mode: "auto" },
       { mode: { pin: "2026-07-28" } },
     ]);
+  });
+
+  it("does not advertise MCP Apps to a server with openUi: false", async () => {
+    const { McpServerManager } = await import("../server-manager.ts");
+    const manager = new McpServerManager();
+    manager.setSamplingConfig({
+      autoApprove: true,
+      modelRegistry: {} as any,
+      getCurrentModel: () => undefined,
+      getSignal: () => undefined,
+    });
+
+    await manager.connect("headless", { command: "node", args: ["server.js"], openUi: false });
+    await manager.connect("windowed", { command: "node", args: ["server.js"] });
+
+    const sessionCapabilities = mocks.attachTaskSession.mock.calls.map(([options]) => options.clientCapabilities);
+    expect(mocks.clients[0].options.capabilities).toEqual({ sampling: {} });
+    expect(sessionCapabilities[0]).toEqual({ sampling: {} });
+    const windowed = {
+      extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } },
+      sampling: {},
+    };
+    expect(mocks.clients[1].options.capabilities).toEqual(windowed);
+    expect(sessionCapabilities[1]).toEqual(windowed);
   });
 
   it("refreshes cached lists and ignores notifications from replaced clients", async () => {

@@ -61,6 +61,7 @@ vi.mock("../init.ts", () => ({
   updateStatusBar: mocks.updateStatusBar,
   flushMetadataCache: mocks.flushMetadataCache,
   notifyToolMetadataUpdated: mocks.notifyToolMetadataUpdated,
+  refreshExecutorCatalog: vi.fn(),
 }));
 
 vi.mock("../mcp-auth-flow.ts", () => ({
@@ -79,7 +80,8 @@ vi.mock("../config.ts", () => ({
   writeProjectServerDisabledOverride: mocks.writeProjectServerDisabledOverride,
 }));
 
-vi.mock("../metadata-cache.ts", () => ({
+vi.mock("../metadata-cache.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../metadata-cache.ts")>()),
   loadMetadataCache: mocks.loadMetadataCache,
 }));
 

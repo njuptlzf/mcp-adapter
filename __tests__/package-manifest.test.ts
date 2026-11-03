@@ -22,11 +22,6 @@ const hostPeerPackages = {
 };
 
 describe("package.json files", () => {
-  it("keeps the bundled MCP scripting skill available for manual use only", () => {
-    const skill = readFileSync(join(repoRoot, "skills", "mcp-scripting", "SKILL.md"), "utf-8");
-    expect(skill).toMatch(/^disable-model-invocation:\s*true\s*$/m);
-  });
-
   it("ships every doc section the published README links to", () => {
     // Fork layout: README.md is the short fork page; the full upstream docs
     // README (the one that links into docs/*.md) ships as README-src.md.
