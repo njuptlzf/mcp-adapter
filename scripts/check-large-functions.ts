@@ -97,11 +97,6 @@ function* walkFiles(dir: string): Generator<string> {
   }
 }
 
-interface OpenBrace {
-  char: string; // '{' | '('
-  line: number;
-}
-
 /**
  * Find functions/classes with body length > maxLines.
  * Strategy: find declaration line, then find its body's first `{`, then
@@ -194,7 +189,7 @@ function main() {
       console.error(`Path is not a directory: ${opts.path}`);
       process.exit(2);
     }
-  } catch (e) {
+  } catch {
     console.error(`Cannot access path: ${opts.path}`);
     process.exit(2);
   }

@@ -16,7 +16,7 @@ export interface AgentPathResolver {
  * Resolve an agent directory from an env var, with tilde expansion.
  * Returns `defaultDir` when the env var is unset or empty-after-trim.
  */
-function resolveEnvAgentDir(envVar: string, defaultDir: string): string {
+export function resolveEnvAgentDir(envVar: string, defaultDir: string): string {
   const configured = process.env[envVar]?.trim();
   if (!configured) return defaultDir;
   if (configured === "~") return homedir();
