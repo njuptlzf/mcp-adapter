@@ -148,6 +148,19 @@ describe("runtime MCP tool-call event", () => {
     expect(mocks.executeCall).toHaveBeenCalledWith(state, "search", undefined, undefined, expect.any(Function), undefined, "script");
   });
 
+  it("counts only a top-level call id as the model's when no caller was recorded", async () => {
+    const state = createState();
+    mocks.initializeMcp.mockResolvedValue(state);
+    mocks.executeCall.mockResolvedValue({ content: [], details: { mode: "call" } });
+    const { handlers, callTool } = await startAdapter();
+    await handlers.get("session_start")?.({}, {});
+    await callTool({ version: 1, tool: "search" });
+
+    expect(state.calledByModel("toolu_01abc")).toBe(true);
+    expect(state.calledByModel("codemode/1")).toBe(false);
+    expect(state.calledByModel(undefined)).toBe(false);
+  });
+
   it("refuses without a live session and never starts initialization", async () => {
     const { handlers, callTool } = await startAdapter();
 
@@ -164,7 +177,7 @@ describe("runtime MCP tool-call event", () => {
 
   it("reports a tool error that executeCall resolves as ok:false", async () => {
     mocks.executeCall.mockResolvedValue({
-      content: [{ type: "text", text: "The user declined approval" }],
+      content: [{ type: "text", text: 'MCP tool "search" on server "demo" was blocked by the approval gate; it was not executed. This does not by itself mean the user rejected it.' }],
       details: { mode: "call", error: "approval_denied" },
     });
     const { handlers, callTool } = await startAdapter();

@@ -20,7 +20,7 @@ const SECRET = "sk-host-managed-sentinel-7f3a";
 
 type RegisteredTool = {
   name: string;
-  execute(toolCallId: string, params: unknown, signal: AbortSignal | undefined, onUpdate: undefined, ctx: object): Promise<{
+  execute(toolCallId: string, params: unknown, signal: AbortSignal | undefined, onUpdate: undefined, ctx: unknown): Promise<{
     content: Array<{ type: string; text?: string }>;
     details: Record<string, unknown>;
   }>;
@@ -401,6 +401,7 @@ describe("host-managed MCP adapter", () => {
 
     expect(result.details).toMatchObject({ error: "host_error", sent: true });
     expect(text(result)).toContain("may have run");
+    expect(text(result)).toContain("blocked by the approval gate");
     expect(fixture.calls).toHaveLength(1);
     expect(fixture.reads).toEqual([]);
   });

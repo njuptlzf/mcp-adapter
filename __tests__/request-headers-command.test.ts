@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,6 +16,48 @@ function commandScript(source: string): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// The command runs `action` only once its long-lived helper has started and recorded its PID.
+function commandWithRunningHelper(action: string): { script: string; pidFile: string } {
+  const pidFile = join(mkdtempSync(join(tmpdir(), "pi-mcp-request-headers-")), "helper.pid");
+  const helper = commandScript(`
+import { renameSync, writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(`${pidFile}.tmp`)}, String(process.pid));
+renameSync(${JSON.stringify(`${pidFile}.tmp`)}, ${JSON.stringify(pidFile)});
+setInterval(() => {}, 1000);
+`);
+  const script = commandScript(`
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+spawn(process.execPath, [${JSON.stringify(helper)}], { stdio: "ignore" }).unref();
+const waitForHelper = setInterval(() => {
+  if (!existsSync(${JSON.stringify(pidFile)})) return;
+  clearInterval(waitForHelper);
+  ${action}
+}, 5);
+`);
+  return { script, pidFile };
+}
+
+// SIGKILL delivery is asynchronous, so wait a bounded time for the helper to exit.
+// The bound stays under vitest's 5s test timeout so a survivor is killed and reported.
+// A killed orphan stays a zombie until PID 1 reaps it, which some container inits never do.
+async function expectHelperToExit(pidFile: string): Promise<void> {
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ESRCH") return;
+      throw error;
+    }
+    if (spawnSync("ps", ["-o", "stat=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim().startsWith("Z")) return;
+    await delay(20);
+  }
+  process.kill(pid, "SIGKILL");
+  expect.fail(`helper process ${pid} survived cleanup`);
 }
 
 async function runWithWindowsTaskkillExitCode(status: number): Promise<Response> {
@@ -184,28 +226,13 @@ describe("per-request HTTP header commands", () => {
   });
 
   it.skipIf(process.platform === "win32")("kills helpers when the command exits unsuccessfully", async () => {
-    const marker = join(mkdtempSync(join(tmpdir(), "pi-mcp-request-headers-")), "marker");
-    const helper = commandScript(`
-import { writeFileSync } from "node:fs";
-setTimeout(() => {
-  writeFileSync(${JSON.stringify(marker)}, "alive");
-}, 150);
-setInterval(() => {}, 1000);
-`);
-    const script = commandScript(`
-import { spawn } from "node:child_process";
-spawn(process.execPath, [${JSON.stringify(helper)}], { stdio: "ignore" }).unref();
-setTimeout(() => {
-  process.exit(7);
-}, 75);
-`);
+    const { script, pidFile } = commandWithRunningHelper("process.exit(7);");
     const fetch = createRequestHeadersCommandFetch({ command: process.execPath, args: [script] });
 
     await expect(fetch("https://mcp.example.test/mcp")).rejects.toThrow(
       "HTTP request headers command exited with code 7",
     );
-    await delay(220);
-    expect(existsSync(marker)).toBe(false);
+    await expectHelperToExit(pidFile);
   });
 
   it("fails closed on malformed command output", async () => {
@@ -217,21 +244,7 @@ setTimeout(() => {
   });
 
   it.skipIf(process.platform === "win32")("kills helpers when the command returns valid output", async () => {
-    const marker = join(mkdtempSync(join(tmpdir(), "pi-mcp-request-headers-")), "marker");
-    const helper = commandScript(`
-import { writeFileSync } from "node:fs";
-setTimeout(() => {
-  writeFileSync(${JSON.stringify(marker)}, "alive");
-}, 150);
-setInterval(() => {}, 1000);
-`);
-    const script = commandScript(`
-import { spawn } from "node:child_process";
-spawn(process.execPath, [${JSON.stringify(helper)}], { stdio: "ignore" }).unref();
-setTimeout(() => {
-  process.stdout.write(JSON.stringify({ "x-derived": "ok" }));
-}, 75);
-`);
+    const { script, pidFile } = commandWithRunningHelper('process.stdout.write(JSON.stringify({ "x-derived": "ok" }));');
     const fetch = createRequestHeadersCommandFetch(
       { command: process.execPath, args: [script] },
       async () => new Response("ok"),
@@ -239,33 +252,17 @@ setTimeout(() => {
 
     const response = await fetch("https://mcp.example.test/mcp");
     expect(response.status).toBe(200);
-    await delay(220);
-    expect(existsSync(marker)).toBe(false);
+    await expectHelperToExit(pidFile);
   });
 
   it.skipIf(process.platform === "win32")("kills helpers when the command returns malformed output", async () => {
-    const marker = join(mkdtempSync(join(tmpdir(), "pi-mcp-request-headers-")), "marker");
-    const helper = commandScript(`
-import { writeFileSync } from "node:fs";
-setTimeout(() => {
-  writeFileSync(${JSON.stringify(marker)}, "alive");
-}, 150);
-setInterval(() => {}, 1000);
-`);
-    const script = commandScript(`
-import { spawn } from "node:child_process";
-spawn(process.execPath, [${JSON.stringify(helper)}], { stdio: "ignore" }).unref();
-setTimeout(() => {
-  process.stdout.write("not-json");
-}, 75);
-`);
+    const { script, pidFile } = commandWithRunningHelper('process.stdout.write("not-json");');
     const fetch = createRequestHeadersCommandFetch({ command: process.execPath, args: [script] });
 
     await expect(fetch("https://mcp.example.test/mcp")).rejects.toThrow(
       "HTTP request headers command returned invalid JSON",
     );
-    await delay(220);
-    expect(existsSync(marker)).toBe(false);
+    await expectHelperToExit(pidFile);
   });
 
   it("kills a command that keeps running after timeout", async () => {

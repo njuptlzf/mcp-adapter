@@ -33,7 +33,7 @@ server.tool("get_path", "Get value at JSON path", {
 }, async ({ obj, path }) => {
   try {
     const parsed = JSON.parse(obj);
-    const parts = path.split(/[\.[\]]/).filter(p => p !== "");
+    const parts = path.split(/[.[\]]/).filter(p => p !== "");
     let current = parsed;
     for (const part of parts) {
       if (/^\d+$/.test(part)) {

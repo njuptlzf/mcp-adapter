@@ -13,9 +13,11 @@ The `mcp` proxy tool, search, direct tools, approval prompts, and output limits.
 | Instructions | `mcp({ instructions: "name" })` |
 | Call | `mcp({ tool: "...", args: { key: "value" } })` |
 | Connect | `mcp({ connect: "server-name" })` |
+| Stop a background task | `mcp({ cancelTask: "<server>/<taskId>" })`, while the `mcp` tool is available ([Task-augmented tool calls](servers.md#task-augmented-tool-calls)) |
 | UI messages | `mcp({ action: "ui-messages" })` |
 | Auth start | `mcp({ action: "auth-start", server: "name" })` |
 | Auth complete | `mcp({ action: "auth-complete", server: "name", args: { redirectUrl: "..." } })` |
+| Save a script as a tool | `mcp({ action: "save-script", args: { name, description, code, inputSchema } })` ([Saving a script as a tool](scripting.md#saving-a-script-as-a-tool)) |
 
 `args` can be a JSON object or a JSON string. Prefer the object form when your model handles it reliably; the string form remains supported for providers that need simpler schemas.
 
@@ -27,15 +29,15 @@ Search covers MCP tools only. Space-separated words are ranked by weighted match
 
 Tool names are fuzzy-matched on hyphens and underscores — `context7_resolve_library_id` finds `context7_resolve-library-id`. When `describe` or `tool` cannot resolve a name, the result includes top suggestions so the agent can correct a typo or missing prefix in the same turn.
 
-When a server declares MCP tool annotations, `describe` adds a `Hints:` line such as `Hints: read-only, idempotent`, `tools.describe` in `mcpScript` returns them as `annotations`, and the approval prompt says when a tool is marked destructive or read-only. They are the server's own hints, not guarantees, and never appear in search results or direct-tool descriptions.
+When a server declares MCP tool annotations, `describe` adds a `Hints:` line such as `Hints: read-only, idempotent`, and the approval prompt says when a tool is marked destructive or read-only. They are the server's own hints, not guarantees, and never appear in search results or direct-tool descriptions.
 
-When `includeSchemas` is enabled, search and describe render common JSON Schema parameters as compact TypeScript shapes like `{ query: string; limit?: number; }`, with the older schema formatter retained as a fallback for unsupported schemas.
+With `includeSchemas` enabled, search renders parameter summaries, using compact TypeScript shapes where possible. When the summary leaves something out, because compact rendering is unsupported or the schema carries field guidance, constraints or other non-structural information, it links to `mcp({ describe: "tool_name", server: "name" })`. That description returns the original input JSON Schema, including referenced definitions, integer requirements, bounds and annotations. References are preserved, not expanded or fetched; an external reference still requires its external schema. Plain structural schemas keep compact shapes like `{ query: string; enabled?: boolean; }`.
+
+`describe` results use the existing output guard: oversized descriptions are bounded in context and the complete text, including the schema, is saved to the indicated file. The existing `settings.outputGuard` limits and opt-out apply; no extra setting or direct-tool exposure is required.
 
 `mcp({ server: "name" })` lists each tool's top-level parameter names after its name, required ones first, such as `- search(query, limit?) - ...`. Types and nested fields stay in `describe`. A tool whose schema has no properties shows `()`. A tool with no schema, or one whose top level uses `$ref`, `allOf`, `anyOf`, `oneOf`, `not`, `if`/`then`/`else`, or dependent requirements, shows no parentheses, because those can add parameters or requirements the list would miss.
 
-Most tools declare no output schema. After such a tool returns structured content or a JSON text result, `describe` (and `tools.describe` in `mcpScript`) also shows the output shape seen so far: field names and types only, never values, labeled as observed, not a contract. A wide object that appears more than once, such as a user under `user`, `assignee`, and `assignees`, is written once as a named type. With `scriptMode` on, shapes are also saved in `mcp-cache.json`, so later sessions can write a script without calling the tool first. A shape is used only while the tool's description and input schema stay the same, and a saved one is dropped when they or the server's config change.
-
-When an `mcpScript` run throws, times out, or returns `[]`, `{}`, `null`, `""`, or nothing, its result ends with the shapes seen from the schemaless tools it called, so the model can fix a wrong field guess without a separate look at the data.
+Most tools declare no output schema. After such a tool returns structured content or a JSON text result, `describe` also shows the output shape seen so far: field names and types only, never values, labeled as observed, not a contract. A wide object that appears more than once, such as a user under `user`, `assignee`, and `assignees`, is written once as a named type. Shapes are also saved in `mcp-cache.json`, so later sessions see a tool's fields before calling it, unless the server's tool list is private (sign-in-scoped). A shape is used only while the tool's description and input schema stay the same, and a saved one is dropped when they or the server's config change.
 
 For HTTP servers, Pi reports HTTP 503 as temporary unavailability and does not add another immediate retry loop. Keep-alive servers keep cached metadata available and retry after 30 seconds, backing off to 5 minutes. Other failed connects run a one-request shape probe that can turn opaque transport errors into setup hints such as `endpoint returned HTML (200) — this URL does not appear to speak MCP`. Healthy connections are not probed.
 
@@ -62,7 +64,7 @@ Search uses literal matching so a tool whose name and description use different 
 
 With this config, `mcp({ search: "grep" })` finds `github_search_code` even though neither its name nor description contains that word. Similarly, `mcp({ search: "gh" })` finds all tools provided by the github server.
 
-Keys match a tool's original name, prefixed name, or a glob (`*` applies to every tool on the server) and all matching entries combine. Keywords are weighted like description text, with an extra boost when the query exactly matches a configured phrase. They affect ranked and regex search only (including `tools.search` in `mcpScript`): they never appear in tool schemas, `describe` output, direct-tool registration, or the metadata cache, and search with keywords works offline from cached metadata.
+Keys match a tool's original name, prefixed name, or a glob (`*` applies to every tool on the server) and all matching entries combine. Keywords are weighted like description text, with an extra boost when the query exactly matches a configured phrase. They affect the adapter's ranked and regex search only, not Pi's `searchTools()` or `tool_search`: they never appear in tool schemas, `describe` output, direct-tool registration, or the metadata cache, and search with keywords works offline from cached metadata.
 
 ## MCP output schemas
 
@@ -194,6 +196,24 @@ When you change direct-tool toggles in `/mcp-adapter`, the extension updates dir
 
 **Subagent integration:** If you use the subagent extension, agents can request direct MCP tools in their frontmatter with `mcp:server-name` syntax. See the subagent README for details.
 
+## Codemode and tool_search
+
+On Pi 0.99 and later, every cached tool the model could reach through `mcp` is also a Pi deferred tool, so Pi's `codemode` scripts and `tool_search` can find and call it. That includes resource tools (`read_<resource>`) and the tools a `directTools: ["a", "b"]` list leaves out. Tools that already have a direct or search-mode registration keep it instead. Pi doesn't turn `codemode` on for the adapter's servers; [MCP scripting](scripting.md#scripting-mcp-calls-with-pis-codemode) shows how.
+
+- **Names.** They're registered as `mcp__<server>__<tool>`, like Pi's built-in MCP names its tools. Anything but letters, digits and `_` becomes `_`. A name over 64 characters, or one already used by another adapter tool or by a tool another extension registered while the session is running, gets an 8-character hash suffix. Tools whose names become the same, such as `a-b` and `a_b`, all get one, and within a session a name never moves to a different tool, even when the server changes its tool list. Names claimed while extensions load are not checked against other extensions' tools. A tool whose suffixed name is also taken is skipped with a warning, and `mcp({ tool })` then answers `tool_not_registered` for it. Existing direct and search-mode tool names don't change, so one server can have tools under both naming schemes.
+- **Nothing new is declared to the model.** Deferred tools aren't in the tool list or in codemode's description, and they carry no prompt snippet. A tool that `tool_search` activates is declared from then on, with no snippet line in the system prompt, the same as Pi's built-in MCP tools.
+- **Calls still go through the adapter**: lazy connect and `approveTools`. Codemode scripts get the whole MCP `CallToolResult` (`content`, `structuredContent`, `isError`), which the output guard leaves alone.
+- **Proxy calls run under the real tool name.** `mcp({ tool, args })` and `mcp__<server>({ tool, args })` run the call as a nested Pi tool call of the registered tool, so Pi's `tool_call` and `tool_result` hooks and permission extensions see the real name and its annotations. A matching `approveTools` rule still asks once. The call stays inside the proxy, as before, under `MCP_DIRECT_TOOLS=__none__`, when the tool has no registration because `freezeDirectTools` froze the surface first, when the registered tool isn't callable (for example a direct tool you deactivated), when the tool's input schema is one the adapter can't evaluate, and for calls from other extensions through the [runtime tool-call event](extension-api.md#runtime-tool-calls-from-other-extensions).
+- **Servers connected later.** On Pi 1.2 and later, a codemode script that names `mcp__<server>...` for a server whose tools aren't registered yet connects that server first, waiting up to 10 seconds. A call that reaches every tool, such as `tool_search`, waits only for connections already in progress. A server that lists new tools (`notifications/tools/list_changed`) registers them right away.
+- **Controls.** `MCP_DIRECT_TOOLS=__none__` registers none of these tools. It registers no [script tool](scripting.md#script-tools) either, but `mcp` still finds and runs the configured ones. `excludeTools` and `disabled: true` keep tools out, and so does a project server you haven't approved. `settings.freezeDirectTools` freezes this surface too.
+- **`--tools` on Pi 1.1 and later.** A `--tools` list without an `mcp__` entry still keeps MCP tools registered and reachable from codemode and `tool_search`. To keep a session free of MCP, use `--exclude-tools 'mcp__*'`.
+
+[Script tools](scripting.md#script-tools) share this surface. Each one is a Pi deferred tool named `mcp__script__<name>`, so `tool_search`, codemode's `searchTools()` and `mcp({ search })` find it next to the MCP tools, with nothing added to the model's tool list unless the entry sets `declare: true`. A codemode script can't call one, because a script tool runs its own script; the call returns an error that says to call the tool directly.
+
+[Executor app tools](prompts-and-ui.md#executor-app-tools) share it too. Each tool of an Executor app is a Pi deferred tool named `mcp__<server>__<app>_<tool>`, found by the same searches and never declared to the model, even with `directTools`.
+
+Registering thousands of tools costs startup time, because Pi rebuilds its tool registry on every registration after the session starts. With 100 servers of 50 tools each and a warm metadata cache, MCP is ready about 90 ms later than before. The first session without cached metadata takes about 2.6 seconds longer; with 20 servers of 30 tools it's about 60 ms.
+
 ## Tool Approval
 
 Use `approveTools` when a tool should stay visible but not run without confirmation. This is useful for destructive or high-cost actions where hiding the tool would make planning harder, but running it silently is too risky.
@@ -228,23 +248,25 @@ import {
 
 pi.events.on(MCP_TOOL_APPROVAL_REQUEST_EVENT, (request: McpToolApprovalRequest) => {
   request.claim(async () => {
-    return "allow_once"; // "allow_for_session" | "deny" | "abstain"
+    return "allow_once"; // "allow_for_session" | "deny" | "abstain" | { decision: "deny", reason }
   });
 });
 ```
 
-The request includes `serverName`, `originalToolName`, `prefixedToolName`, `args`, `origin`, and optional `signal`. The first synchronous claim wins. Brokered approval runs for every resolved MCP call reaching the approval gate, including calls matching session grants restored from the active branch, regardless of `approveTools` configuration, across proxy, direct, `mcpScript`, resource, and iframe origins. `allow_once` permits only the current call; `allow_for_session` updates the same session-scoped approval cache and persistence path as the built-in dialog; `deny` blocks the current MCP call even if cached, without revoking its grant. Only `abstain` or no claim consults the cache, then the configured approval/UI fallback above if no matching grant exists. With no broker listener, fallback behavior is unchanged.
+The request includes `serverName`, `originalToolName`, `prefixedToolName`, `args`, `origin`, and optional `signal`. The first synchronous claim wins. Brokered approval runs for every resolved MCP call reaching the approval gate, including calls matching session grants restored from the active branch, regardless of `approveTools` configuration, across the proxy, direct, resource, and iframe origins and the `script` origin, which is a call from another extension through the [runtime tool-call event](extension-api.md#runtime-tool-calls-from-other-extensions). `allow_once` permits only the current call; `allow_for_session` updates the same session-scoped approval cache and persistence path as the built-in dialog; `deny` blocks the current MCP call even if cached, without revoking its grant. Only `abstain` or no claim consults the cache, then the configured approval/UI fallback above if no matching grant exists. With no broker listener, fallback behavior is unchanged.
 
-Pi's `tool_call` hooks see a call to `mcp` or `mcpScript` as one call with its arguments. They don't see the MCP tools that call runs, so permission extensions that want each MCP call should use the broker event above. `approveTools` applies to every MCP call, whether it comes from `mcp`, `mcpScript`, or a direct tool. If another extension also asks before `mcp` or `mcpScript` runs, one action can show two prompts.
+A handler can explain a denial by returning `{ decision: "deny", reason: "..." }` instead of `"deny"`. Return it only when `request.supportsDenyReason` is `true`; any other object is treated as a plain `"deny"`. The model receives the reason in the result of the same call, after a line saying the tool was blocked by the approval gate and not executed. The reason is shown as text: escape sequences and control characters are removed, and a reason over 8 KB is cut at a character boundary and marked as truncated. When you pick **Deny** in the adapter's own dialog, the reason is "The user denied it in the approval dialog."
+
+On Pi 0.99 and later, a call through `mcp` or `mcp__<server>`, or from a `codemode` script, reaches Pi's `tool_call` and `tool_result` hooks under the registered tool name (see [Codemode and tool_search](#codemode-and-tool_search)). A call that stays inside the proxy is one call to `mcp` with its arguments, and a runtime tool-call event reaches no Pi hook, so permission extensions that want every MCP call should use the broker event above. `approveTools` applies to every MCP call, whether it comes from `mcp`, a direct tool, or a script. It matches the MCP calls inside a [script tool](scripting.md#script-tools), never the script tool itself; a permission extension sees both, the script tool as `mcp__script__<name>`. If another extension also asks before `mcp` runs, one action can show two prompts.
 
 ## Output Guard
 
-Oversized MCP tool/resource results are guarded by default so a single huge response can't blow up the model context window or the session file:
+Oversized MCP tool/resource results are guarded by default so a single huge response can't blow up the model context window or the session file. Only results that go to the model are guarded: a tool or resource result that a codemode script or another extension's tool asked for through Pi's nested tool calls reaches it whole, whether it called `mcp`, `mcp__<server>` or the tool by its own name. That needs Pi 0.99 or later, without `MCP_DIRECT_TOOLS=__none__`. `mcp`'s describe output and calls through the [runtime tool-call event](extension-api.md#runtime-tool-calls-from-other-extensions) are still guarded. For results that go to the model:
 
 - Inline text output is capped at **50 KiB / 2,000 lines** (matching Pi's built-in `bash` guard). Larger output is truncated to a head preview and the full text is saved to a temp file whose path is included in the result, so the agent can `read`/`grep` it.
 - **Image content blocks pass through unchanged** — only text output is guarded. Images are delivered to the provider as native image content.
 - Binary resource blobs up to **10 MiB** are decoded to private temp files and replaced with file references. Each session is limited to **100 MiB** and **10,000 files**. The files are removed at session teardown.
-- In proxy mode, `details.mcpResult` is kept raw when its JSON is **≤ 16 KiB**; larger results are replaced with a compact summary (block counts, sizes, key previews) and the raw JSON is saved to a temp file. Direct tools keep lean details unless `settings.directToolResultDetails` is set to `"bounded"`, which applies the same guarded `mcpResult` limit.
+- In proxy mode, `details.mcpResult` is kept raw when its JSON is **≤ 16 KiB**; larger results are replaced with a compact summary (block counts, sizes, key previews) and the raw JSON is saved to a temp file. Direct tools keep lean details unless `settings.directToolResultDetails` is set to `"bounded"`, which applies the same guarded `mcpResult` limit. A result that goes to a script has no `details.mcpResult`, since the script gets the whole result as its content.
 
 Extensions consuming `details.mcpResult` must check for `omitted === true` on both the result and its `structuredContent` before treating either value as an original payload. For omitted object `structuredContent`, `preservedFields` is only a partial preview; `summary.keyCount` is the original cardinality, while `preservedCount` and `droppedCount` account for retention. Under tiny limits, the whole result may compact to an omission marker without spill metadata.
 

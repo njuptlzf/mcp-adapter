@@ -203,8 +203,6 @@ describe("E2E-05: directTools mode", () => {
         },
       };
 
-      const definition = config.mcpServers.calculator;
-
       const cache: MetadataCache = {
         version: 1,
         servers: {

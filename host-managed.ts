@@ -22,10 +22,10 @@ import { createJsonSchemaValidator } from "./json-schema-validator.ts";
 import { guardMcpOutput, guardedMcpDetails, resolveMcpOutputGuardOptions } from "./mcp-output-guard.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
 import { abortable } from "./abort.ts";
-import { requestBrokerApproval } from "./tool-approval.ts";
+import { approvalBlockedResult, requestBrokerApproval, sanitizeDenyReason } from "./tool-approval.ts";
 import { toToolParameters } from "./tool-parameters.ts";
 import { cleanupMaterializedBinaryResources, resolveMcpResultContent } from "./tool-registrar.ts";
-import { formatToolName } from "./types.ts";
+import { formatToolName, type McpToolApprovalHandlerResult } from "./types.ts";
 import { normalizeDirectToolInputSchema, normalizeToolArguments, stableStringify, truncateAtWord, withToolCallIdMeta } from "./utils.ts";
 
 const CLOSE_TIMEOUT_MS = 5_000;
@@ -123,13 +123,29 @@ export class HostManagedMcpError extends Error {
   readonly delivery: HostManagedMcpDelivery;
   readonly server: string;
   readonly protocolCode?: number;
+  /** Set when the approval gate refused the request (`delivery` stays `not_sent`). */
+  readonly denied?: true;
+  /** The approver's reason, with escape sequences and control characters removed and capped at 8 KB. */
+  readonly denyReason?: string;
 
-  constructor(delivery: HostManagedMcpDelivery, server: string, options: { cause?: unknown; protocolCode?: number } = {}) {
-    super(`MCP server "${server}": ${DELIVERY_MESSAGES[delivery]}`, options.cause !== undefined ? { cause: options.cause } : undefined);
+  constructor(
+    delivery: HostManagedMcpDelivery,
+    server: string,
+    options: { cause?: unknown; protocolCode?: number; denied?: boolean; denyReason?: string } = {},
+  ) {
+    const reason = options.denied && options.denyReason !== undefined ? sanitizeDenyReason(options.denyReason) : undefined;
+    const message = options.denied
+      ? `MCP server "${server}": ${DELIVERY_MESSAGES[delivery]} (blocked by the approval gate)${reason ? `. Reason: ${reason}` : ""}`
+      : `MCP server "${server}": ${DELIVERY_MESSAGES[delivery]}`;
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "HostManagedMcpError";
     this.delivery = delivery;
     this.server = server;
     if (options.protocolCode !== undefined) this.protocolCode = options.protocolCode;
+    if (options.denied) {
+      this.denied = true;
+      if (reason !== undefined) this.denyReason = reason;
+    }
   }
 }
 
@@ -182,7 +198,7 @@ function textResult(text: string, details: Record<string, unknown>): ToolResult 
   return { content: [{ type: "text", text }], details };
 }
 
-function isAllowed(decision: string): boolean {
+function isAllowed(decision: McpToolApprovalHandlerResult): boolean {
   return decision === "allow_once" || decision === "allow_for_session";
 }
 
@@ -369,14 +385,15 @@ export function createHostManagedMcpAdapter(options: HostManagedMcpAdapterOption
     }
 
     const signal = combineAbortSignals(lifetime.signal, piSignal) ?? lifetime.signal;
-    let decision: string;
+    let decision: McpToolApprovalHandlerResult;
     try {
       decision = await requestBrokerApproval(pi.events, tool.server, { name: tool.toolName, originalName: name }, args, "direct", signal);
     } catch {
       return dispatchFailureResult(tool, new HostManagedMcpError("not_sent", tool.server));
     }
-    if (decision === "deny") {
-      return textResult(`The user declined approval to run MCP tool "${name}" on server "${tool.server}".`, { error: "approval_denied", server: tool.server, tool: name });
+    if (decision === "deny" || typeof decision === "object") {
+      const denyReason = typeof decision === "object" ? { denyReason: decision.reason } : {};
+      return approvalBlockedResult({ ok: false, reason: "denied", ...denyReason }, tool.server, name);
     }
     if (!isAllowed(decision)) {
       return textResult(`MCP tool "${name}" on server "${tool.server}" was not run: no approval handler allowed it.`, { error: "approval_required", server: tool.server, tool: name });
@@ -417,12 +434,14 @@ export function createHostManagedMcpAdapter(options: HostManagedMcpAdapterOption
     };
     const readLinkedResource = async (uri: string): Promise<HostManagedMcpResourceRead> => {
       if (unavailable()) throw new HostManagedMcpError("not_sent", tool.server);
-      let decision: string;
+      let decision: McpToolApprovalHandlerResult;
       try {
         decision = await requestBrokerApproval(pi.events, tool.server, { name: tool.toolName, originalName: name }, Object.freeze({ uri }), "resource", signal);
       } catch {
         decision = "abstain";
       }
+      if (typeof decision === "object") throw new HostManagedMcpError("not_sent", tool.server, { denied: true, denyReason: decision.reason });
+      if (decision === "deny") throw new HostManagedMcpError("not_sent", tool.server, { denied: true });
       if (!isAllowed(decision) || unavailable()) throw new HostManagedMcpError("not_sent", tool.server);
       let readDispatched = false;
       const sendRead = async (): Promise<ReadResourceResult> => {
@@ -476,6 +495,10 @@ export function createHostManagedMcpAdapter(options: HostManagedMcpAdapterOption
         return dispatchFailureResult(tool, error, connection.retired.has(name));
       }
       const details = { error: "host_error", server: tool.server, tool: name, sent };
+      if (error instanceof HostManagedMcpError && error.denied) {
+        const why = error.denyReason ? ` Reason: ${error.denyReason}` : "";
+        return textResult(`MCP tool "${name}" on server "${tool.server}" was sent and may have run; the host then failed because a follow-up read was blocked by the approval gate.${why} Do not retry automatically; check its effects first.`, { ...details, denied: true });
+      }
       return sent
         ? textResult(`The host failed while handling MCP tool "${name}" on server "${tool.server}" after the request was sent, so it may have run. Do not retry automatically; check its effects first.`, details)
         : textResult(`The host rejected MCP tool "${name}" on server "${tool.server}"; it was not run.`, details);
@@ -483,7 +506,7 @@ export function createHostManagedMcpAdapter(options: HostManagedMcpAdapterOption
       settled = true;
     }
 
-    const content = resolveMcpResultContent(result as unknown as Record<string, unknown>, lifetime.signal);
+    const content = resolveMcpResultContent(result as Record<string, unknown>, lifetime.signal);
     const outputContent = content.length > 0 ? content : [{ type: "text" as const, text: "(empty result)" }];
     if (result.isError) {
       const guarded = await guardMcpOutput(outputContent, { ...guardOptions, prefix: "Error: ", emptyTextFallback: "Tool execution failed" });

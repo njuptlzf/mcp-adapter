@@ -5,13 +5,16 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import stripJsonComments from "strip-json-comments";
 import { getAgentPath, getConfigDirName } from "./agent-dir.js";
+import { DEFAULT_AGENT_RESOLVER, resolveAgentGlobalConfigPath } from "./interfaces/agent-paths.js";
 import { getAgentPluginSummaries, loadAgentPluginConfigs } from "./agent-plugin-loader.js";
 import { cloneBuiltInAgentPluginEntry, isBuiltInAgentPlugin, mergeBuiltInAgentPluginEntries } from "./agent-plugin-provenance.js";
 import { loadClaudePluginBundles } from "./claude-plugin-loader.js";
 import { loadPackageMcpConfigs } from "./package-mcp-loader.js";
-import { validateJevSettings } from "./jev-client.js";
+import { validateExtractionSettings } from "./extraction-settings.js";
+import { validateSemanticSearchSettings } from "./semantic-settings.js";
+import { parseScriptTools } from "./script-tools.js";
 import { formatServerNamespace, isServerDisabled } from "./types.js";
-import { getMissingEnvVars, parseJsonWithComments, providerAuthUrlError, stripUtf8Bom, toStringRecord } from "./utils.js";
+import { interpolateEnvVars, parseJsonWithComments, providerAuthUrlError, stripUtf8Bom, toStringRecord } from "./utils.js";
 const GENERIC_GLOBAL_CONFIG_PATH = join(homedir(), ".config", "mcp", "mcp.json");
 const AGENTS_GLOBAL_CONFIG_PATHS = [
     join(homedir(), ".agents", "mcp.json"),
@@ -68,8 +71,10 @@ export const KNOWN_SERVER_PRESETS = [
     {
         id: "github",
         name: "GitHub",
-        summary: "Work with GitHub through your Copilot account.",
-        entry: { url: "https://api.githubcopilot.com/mcp", auth: "oauth", protocolVersion: "auto" },
+        summary: "Work with GitHub using your GitHub CLI sign-in. Needs `gh` installed and `gh auth login` done.",
+        // GitHub's OAuth server has no dynamic client registration, so MCP OAuth can't sign in;
+        // the GitHub CLI token works and is read at connect time, never written to config.
+        entry: { url: "https://api.githubcopilot.com/mcp/", auth: "bearer", bearerToken: "!gh auth token", protocolVersion: "auto" },
     },
     {
         id: "chrome-devtools",
@@ -111,6 +116,14 @@ const IMPORT_PATHS = {
     windsurf: [join(homedir(), ".windsurf", "mcp.json")],
     vscode: [".vscode/mcp.json"],
 };
+/**
+ * Fork seam (pre-v2.29 sync feature, restored during the v5.2.0 merge): the
+ * agent-pluggable global config path. `interfaces/agent-paths.ts` is the
+ * fork's universal-host contract; upstream's config.ts has no resolver seam.
+ */
+export function getAgentGlobalConfigPath(resolver = DEFAULT_AGENT_RESOLVER, overridePath) {
+    return resolveAgentGlobalConfigPath(resolver, overridePath);
+}
 export function getPiGlobalConfigPath(overridePath) {
     return overridePath ? resolve(overridePath) : getAgentPath(ADAPTER_CONFIG_NAME);
 }
@@ -162,6 +175,99 @@ function legacyMcpConfigHasContent(filePath) {
     }
 }
 export function getLegacyMcpMigrationNotices(cwd = process.cwd(), overridePath) {
+    return [
+        ...getPiMcpConfigNotices(cwd, overridePath),
+        ...getOpenCodeImportNotices(cwd, overridePath),
+        ...getDroppedCredentialNotices(cwd, overridePath),
+        ...getRemovedSettingNotices(cwd, overridePath),
+    ];
+}
+/** Settings that only configured mcpScript. They still load, and do nothing. */
+const REMOVED_SCRIPT_SETTINGS = ["scriptMode", "scriptSkill"];
+/** Notices for each config file that still sets settings that now do nothing: mcpScript's, and `settings.jev`. */
+function getRemovedSettingNotices(cwd, overridePath) {
+    return getConfigSources(overridePath, cwd).flatMap((source) => {
+        const settings = readSourceConfig(source.id, source.readPath)?.settings;
+        if (!settings)
+            return [];
+        const notices = [];
+        const keys = REMOVED_SCRIPT_SETTINGS.filter((key) => settings[key] !== undefined).map((key) => `settings.${key}`);
+        if (keys.length > 0) {
+            const [verb, pronoun] = keys.length === 1 ? ["does", "it"] : ["do", "them"];
+            notices.push(`${source.readPath}: pi-mcp-adapter no longer has mcpScript, so ${keys.join(" and ")} ${verb} nothing. Remove ${pronoun}, and add "+codemode" to defaultTools in Pi's settings to script MCP calls with Pi's codemode.`);
+        }
+        if (settings.jev === false) {
+            notices.push(`${source.readPath}: settings.jev was replaced by settings.semanticSearch, and settings.jev: false no longer turns semantic search off. Set settings.semanticSearch to false to keep it off.`);
+        }
+        else if (settings.jev !== undefined) {
+            notices.push(`${source.readPath}: settings.jev was replaced by settings.semanticSearch, and semantic search now uses Pi's classifier models instead of a System One key. Move allowedServers there (semanticCandidateLimit is now candidateLimit and semanticMinProbability is minProbability), or run /mcp-adapter semantic setup.`);
+        }
+        return notices;
+    });
+}
+function credentialFiles(servers, fileOf) {
+    return new Map(Object.entries(servers).map(([name, definition]) => [
+        name,
+        new Map(CREDENTIAL_FIELDS.filter((field) => definition[field] !== undefined).map((field) => [field, fileOf(name, field)])),
+    ]));
+}
+/**
+ * Replays the server merges of loadMcpConfigWithSources with the file behind each credential field,
+ * and reports the fields mergeServerMaps drops because a later file points the server at another url.
+ */
+function getDroppedCredentialNotices(cwd, overridePath) {
+    const notices = [];
+    const merge = (base, baseFiles, next, nextFiles, urlFile) => {
+        const files = new Map(baseFiles);
+        for (const [name, definition] of Object.entries(next)) {
+            const existing = base[name];
+            const fieldFiles = new Map(files.get(name));
+            const byFile = new Map();
+            for (const field of existing ? droppedUrlBoundAuth(existing, definition) : []) {
+                const from = fieldFiles.get(field);
+                if (from !== undefined)
+                    byFile.set(from, [...byFile.get(from) ?? [], field]);
+                fieldFiles.delete(field);
+            }
+            for (const [from, fields] of byFile) {
+                notices.push(`"${name}": ignoring ${fields.join(", ")} from ${from}, because ${urlFile(name)} sets a different url for this server. Use one url, or set ${fields.length === 1 ? "it" : "them"} next to that url.`);
+            }
+            for (const [field, path] of nextFiles.get(name) ?? [])
+                fieldFiles.set(field, path);
+            files.set(name, fieldFiles);
+        }
+        return [mergeServerMaps(base, next), files];
+    };
+    const host = !isExclusiveConfigMode() && getConfiguredHostConfigDiscovery(overridePath, cwd) === "on"
+        ? loadDiscoveredHostConfigs(cwd)
+        : { config: { mcpServers: {} }, serverSources: new Map() };
+    const hostFile = (name) => host.serverSources.get(name)?.path ?? "a host config";
+    let servers = host.config.mcpServers;
+    let files = credentialFiles(servers, hostFile);
+    const sourceSpecs = getConfigSources(overridePath, cwd);
+    const piProjectSource = sourceSpecs.find((source) => source.id === "pi-mcp-project");
+    const piProjectNames = Object.keys((piProjectSource && readPiMcpConfig(piProjectSource.readPath))?.mcpServers ?? {});
+    for (const source of sourceSpecs) {
+        const loaded = readSourceConfig(source.id, source.readPath);
+        if (!loaded)
+            continue;
+        if (source.id === "pi-mcp-global") {
+            for (const name of piProjectNames)
+                delete loaded.mcpServers[name];
+        }
+        // The same two merges as expandImports and mergeConfigs: the file's own entries over its imports,
+        // then the file over the files before it.
+        const imported = expandImports({ ...loaded, mcpServers: {} }, cwd);
+        // An OpenCode project entry can inherit a credential from the global file, so name the file per key.
+        const importFile = (name, field) => imported.keySources?.get(name)?.get(field) ?? imported.serverSources.get(name)?.path ?? source.readPath;
+        const ownFile = () => source.readPath;
+        const [fileServers, fileFiles] = merge(imported.config.mcpServers, credentialFiles(imported.config.mcpServers, importFile), loaded.mcpServers, credentialFiles(loaded.mcpServers, ownFile), ownFile);
+        const urlFile = (name) => typeof loaded.mcpServers[name]?.url === "string" ? source.readPath : importFile(name, "url");
+        [servers, files] = merge(servers, files, fileServers, fileFiles, urlFile);
+    }
+    return notices;
+}
+function getPiMcpConfigNotices(cwd, overridePath) {
     if (piMcpConfigEnabled) {
         return getConfigSources(overridePath, cwd).flatMap((source) => {
             const file = isPiMcpSource(source.id) ? readPiMcpConfig(source.readPath) : null;
@@ -194,6 +300,32 @@ export function getLegacyMcpMigrationNotices(cwd = process.cwd(), overridePath) 
             ? `Merge ${source} into ${target}, then remove ${source}.`
             : `Move it with: mv ${JSON.stringify(source)} ${JSON.stringify(target)}`;
         return [`pi-mcp-adapter no longer reads ${source}. ${fix}`];
+    });
+}
+/** Settings OpenCode drops from an active `opencode` import, grouped by the file that defines each server. */
+function getOpenCodeImportNotices(cwd, overridePath) {
+    const active = (!isExclusiveConfigMode() && getConfiguredHostConfigDiscovery(overridePath, cwd) === "on")
+        || getConfigSources(overridePath, cwd).some((source) => readSourceConfig(source.id, source.readPath)?.imports?.includes("opencode"));
+    const imported = active ? loadImportedConfig("opencode", cwd, "Failed to inspect imported MCP config from opencode:") : null;
+    if (!imported)
+        return [];
+    // Warn only where the OpenCode import is still the server's definition, matching /mcp-adapter.
+    const provenance = getServerProvenance(overridePath, cwd);
+    // Name the file each key came from: a project entry can inherit a stray key from the global file.
+    const byFile = new Map();
+    for (const [name, keys] of getOpenCodeIgnoredSettings(imported.value)) {
+        if (provenance.get(name)?.ignoredSettingsSource !== "opencode")
+            continue;
+        for (const key of keys) {
+            const path = imported.keySources?.get(name)?.get(key) ?? imported.path;
+            const servers = byFile.get(path) ?? new Map();
+            servers.set(name, [...servers.get(name) ?? [], key]);
+            byFile.set(path, servers);
+        }
+    }
+    return [...byFile].map(([path, servers]) => {
+        const ignored = [...servers].map(([name, settings]) => `"${name}": ${settings.join(", ")}`);
+        return `${path}: OpenCode ignores these settings, so the import does too (details in /mcp-adapter): ${ignored.join("; ")}.`;
     });
 }
 export function getSharedConfigPath(target, cwd = process.cwd()) {
@@ -314,7 +446,7 @@ export const MCP_CONFIG_SOURCE_METADATA = Symbol.for("pi-mcp-adapter/config-sour
 export function loadMcpConfig(overridePath, cwd = process.cwd()) {
     const loaded = loadMcpConfigWithSources(overridePath, cwd);
     Object.defineProperty(loaded.config, MCP_CONFIG_SOURCE_METADATA, {
-        value: { projectServers: loaded.projectServers, projectServerPolicy: loaded.projectServerPolicy },
+        value: { projectServers: loaded.projectServers, projectScriptTools: loaded.projectScriptTools, scriptToolIssues: loaded.scriptToolIssues, projectServerPolicy: loaded.projectServerPolicy },
         enumerable: false,
     });
     return loaded.config;
@@ -323,6 +455,8 @@ export function loadMcpConfigWithSources(overridePath, cwd = process.cwd()) {
     const sourceSpecs = getConfigSources(overridePath, cwd);
     const hostConfigDiscovery = getConfiguredHostConfigDiscovery(overridePath, cwd);
     const projectServers = new Map();
+    const projectScriptTools = new Map();
+    const scriptToolIssues = [];
     let projectServerPolicy = "ask";
     let projectAgentPluginSource;
     let projectClaudePluginSource;
@@ -343,6 +477,8 @@ export function loadMcpConfigWithSources(overridePath, cwd = process.cwd()) {
         const loaded = readSourceConfig(source.id, source.readPath);
         if (!loaded)
             continue;
+        // Read here, because expandImports and mergeConfigs keep only the config's own keys.
+        scriptToolIssues.push(...loaded.scriptToolIssues ?? []);
         // Pi replaces a global entry that the project file redefines; mergeServerMaps would merge fields.
         if (source.id === "pi-mcp-global") {
             for (const name of piProjectNames)
@@ -374,10 +510,17 @@ export function loadMcpConfigWithSources(overridePath, cwd = process.cwd()) {
             if (importedSource.scope === "project")
                 projectServers.set(name, { path: importedSource.path });
         }
+        // A later file's entry replaces the whole entry, so the file that set it last decides its scope.
+        for (const name of Object.keys(expanded.scriptTools ?? {})) {
+            if (source.scope === "project")
+                projectScriptTools.set(name, sourceRef);
+            else
+                projectScriptTools.delete(name);
+        }
         config = mergeConfigs(config, expanded);
     }
     if (isExclusiveConfigMode()) {
-        return { config: stripProjectProviderAuth(resolveConfiguredClaudePluginMcp(config, cwd), projectServers), projectServers, projectServerPolicy };
+        return { config: stripProjectProviderAuth(resolveConfiguredClaudePluginMcp(config, cwd), projectServers), projectServers, projectScriptTools, scriptToolIssues, projectServerPolicy };
     }
     const packageConfig = loadPackageMcpConfigs(cwd);
     const pluginConfig = loadAgentPluginConfigs(config.settings?.agentPluginPaths, cwd);
@@ -401,6 +544,8 @@ export function loadMcpConfigWithSources(overridePath, cwd = process.cwd()) {
     return {
         config: stripProjectProviderAuth(mergedConfig, projectServers),
         projectServers,
+        projectScriptTools,
+        scriptToolIssues,
         projectServerPolicy,
     };
 }
@@ -446,13 +591,9 @@ function applySettingDefaults(config) {
     return { ...config, mcpServers };
 }
 function getMergedSettings(overridePath, cwd = process.cwd()) {
-    let settings;
-    for (const source of getConfigSources(overridePath, cwd)) {
-        const loaded = readSourceConfig(source.id, source.readPath);
-        if (loaded?.settings)
-            settings = { ...settings, ...loaded.settings };
-    }
-    return settings;
+    const sources = getConfigSources(overridePath, cwd).flatMap((source) => readSourceConfig(source.id, source.readPath)?.settings ?? []);
+    // Later files win; fromEntries keeps a "__proto__" key as data, as a spread would.
+    return sources.length > 0 ? Object.fromEntries(sources.flatMap((settings) => Object.entries(settings))) : undefined;
 }
 function getConfiguredHostConfigDiscovery(overridePath, cwd = process.cwd()) {
     let configured = "off";
@@ -730,18 +871,21 @@ function getAncestorProjectDirs(cwd, root) {
     }
     return dirs;
 }
-function isExclusiveConfigMode() {
+export function isExclusiveConfigMode() {
     return process.env.PI_MCP_CONFIG_MODE?.trim().toLowerCase() === "exclusive";
 }
 function mergeConfigs(base, next) {
     const imports = mergeImports(base.imports, next.imports);
     const settings = next.settings ? { ...base.settings, ...next.settings } : base.settings;
     const claudePlugins = next.claudePlugins ?? base.claudePlugins;
+    // A later file's script tool replaces a same-named one whole, never field by field.
+    const scriptTools = next.scriptTools ? { ...base.scriptTools, ...next.scriptTools } : base.scriptTools;
     return {
         mcpServers: mergeServerMaps(base.mcpServers, next.mcpServers),
         ...(imports !== undefined ? { imports } : {}),
         ...(settings !== undefined ? { settings } : {}),
         ...(claudePlugins !== undefined ? { claudePlugins } : {}),
+        ...(scriptTools !== undefined ? { scriptTools } : {}),
     };
 }
 // Credential-bearing fields whose value is bound to a specific server `url`.
@@ -750,6 +894,21 @@ function mergeConfigs(base, next) {
 // otherwise the original endpoint's credentials would be shipped to the new
 // url. See the SECURITY note in mergeServerMaps.
 const URL_BOUND_AUTH_FIELDS = ["headers", "bearerToken", "bearerTokenEnv", "bearerTokenStore", "requestHeadersCommand", "caFile"];
+const CREDENTIAL_FIELDS = [...URL_BOUND_AUTH_FIELDS, "auth", "oauth"];
+/** The credential fields of `existing` that mergeServerMaps drops for `definition`'s different url. */
+function droppedUrlBoundAuth(existing, definition) {
+    if (typeof definition.url !== "string" || definition.url === existing.url)
+        return [];
+    return CREDENTIAL_FIELDS.filter((field) => {
+        if (Object.hasOwn(definition, field))
+            return false;
+        if (field === "auth")
+            return typeof existing.auth === "object";
+        if (field === "oauth")
+            return existing.oauth !== undefined && existing.oauth !== false;
+        return existing[field] !== undefined;
+    });
+}
 function mergeServerMaps(base, next) {
     const merged = { ...base };
     for (const [name, definition] of Object.entries(next)) {
@@ -795,14 +954,10 @@ function mergeServerMaps(base, next) {
         if (existing && typeof definition.url === "string" && definition.url !== existing.url) {
             if (baseEntry === existing)
                 baseEntry = { ...existing };
-            for (const field of URL_BOUND_AUTH_FIELDS) {
+            // Provider tokens (object `auth`) and OAuth config are bound to the url too; the startup
+            // notice reports exactly these fields, so both read the one rule.
+            for (const field of droppedUrlBoundAuth(existing, definition)) {
                 delete baseEntry[field];
-            }
-            // A provider token is bound to the url that asked for it, like the fields above.
-            if (typeof baseEntry.auth === "object")
-                delete baseEntry.auth;
-            if (baseEntry.oauth !== false) {
-                delete baseEntry.oauth;
             }
         }
         if (existing && Object.hasOwn(definition, "env") && isBuiltInAgentPlugin(existing, "env") && !Object.hasOwn(definition, "literalEnv")) {
@@ -825,6 +980,7 @@ function expandImports(config, cwd = process.cwd()) {
         return { config, serverSources: new Map() };
     const importedServers = {};
     const serverSources = new Map();
+    const keySources = new Map();
     for (const importKind of config.imports) {
         const imported = loadImportedConfig(importKind, cwd, `Failed to import MCP config from ${importKind}:`);
         if (!imported)
@@ -834,6 +990,9 @@ function expandImports(config, cwd = process.cwd()) {
             if (!importedServers[name]) {
                 importedServers[name] = definition;
                 serverSources.set(name, imported.serverSources.get(name) ?? imported.source);
+                const keys = imported.keySources?.get(name);
+                if (keys)
+                    keySources.set(name, keys);
             }
         }
     }
@@ -842,9 +1001,11 @@ function expandImports(config, cwd = process.cwd()) {
             imports: config.imports,
             ...(config.settings !== undefined ? { settings: config.settings } : {}),
             ...(config.claudePlugins !== undefined ? { claudePlugins: config.claudePlugins } : {}),
+            ...(config.scriptTools !== undefined ? { scriptTools: config.scriptTools } : {}),
             mcpServers: mergeServerMaps(importedServers, config.mcpServers),
         },
         serverSources,
+        keySources,
     };
 }
 function resolveImportCandidates(importKind, cwd) {
@@ -886,6 +1047,7 @@ function loadImportedConfig(importKind, cwd, warningPrefix) {
         let merged = {};
         let highestPrecedenceSource;
         const serverSources = new Map();
+        const keySources = new Map();
         for (const source of resolveImportCandidates(importKind, cwd)) {
             const { path } = source;
             if (!existsSync(path))
@@ -900,8 +1062,14 @@ function loadImportedConfig(importKind, cwd, warningPrefix) {
                     const entries = isRecord(mcp.servers)
                         ? { ...Object.fromEntries(Object.entries(mcp).filter(([name]) => name !== "servers" && name !== "timeout")), ...mcp.servers }
                         : mcp;
-                    const normalized = Object.fromEntries(Object.entries(entries).map(([name, entry]) => {
-                        if (!isRecord(entry) || !isRecord(entry.oauth))
+                    const normalized = Object.fromEntries(Object.entries(entries).map(([name, raw]) => {
+                        if (!isRecord(raw))
+                            return [name, raw];
+                        // OpenCode reads only `environment`; the import also accepts the common `env` spelling.
+                        // `environment` wins when both are set, since that is what OpenCode runs.
+                        const { env, ...rest } = raw;
+                        const entry = env !== undefined && rest.environment === undefined ? { ...rest, environment: env } : rest;
+                        if (!isRecord(entry.oauth))
                             return [name, entry];
                         const { client_id, client_secret, auth_server_metadata_url, ...oauth } = entry.oauth;
                         return [name, {
@@ -915,8 +1083,15 @@ function loadImportedConfig(importKind, cwd, warningPrefix) {
                             }];
                     }));
                     merged = mergeOpenCodeConfigs(merged, { ...imported, mcp: normalized });
-                    for (const name of Object.keys(normalized))
+                    for (const [name, entry] of Object.entries(normalized)) {
                         serverSources.set(name, source);
+                        if (!isRecord(entry))
+                            continue;
+                        const keys = keySources.get(name) ?? new Map();
+                        for (const key of Object.keys(entry))
+                            keys.set(key, path);
+                        keySources.set(name, keys);
+                    }
                     highestPrecedenceSource = source;
                 }
             }
@@ -936,6 +1111,7 @@ function loadImportedConfig(importKind, cwd, warningPrefix) {
             value: merged,
             source: highestPrecedenceSource,
             serverSources,
+            keySources,
         };
     }
     for (const source of resolveImportCandidates(importKind, cwd)) {
@@ -967,7 +1143,7 @@ function readValidatedConfig(path, label) {
         const text = readFileSync(path, "utf-8");
         if (stripJsonComments(text, { trailingCommas: true }).trim() === "")
             return null;
-        return validateConfig(parseJsonWithComments(text));
+        return validateConfig(parseJsonWithComments(text), path);
     }
     catch (error) {
         console.warn(`Failed to load ${label}:`, error);
@@ -1002,7 +1178,7 @@ function readPiMcpConfig(path) {
     }
     const file = {
         mcpServers: {},
-        adapterKeys: ["settings", "imports", "claudePlugins", "mcp-servers"].filter((key) => raw[key] !== undefined),
+        adapterKeys: ["settings", "imports", "claudePlugins", "scriptTools", "mcp-servers"].filter((key) => raw[key] !== undefined),
         skipped: [],
         ignoredSettings: new Map(),
     };
@@ -1144,25 +1320,35 @@ function translatePiOAuth(oauth) {
     }
     return { oauth: result, ignored: Object.keys(unknown).map((key) => `oauth.${key}`) };
 }
-function validateConfig(raw) {
+/**
+ * `sourcePath` is the config file's own path. Only a file read from a path has script tools,
+ * because their relative `file` paths resolve against it; Claude plugin configs have none.
+ */
+function validateConfig(raw, sourcePath) {
     if (!isRecord(raw)) {
         return { mcpServers: {} };
     }
+    const parsedScriptTools = sourcePath !== undefined && raw.scriptTools !== undefined
+        ? parseScriptTools(raw.scriptTools, sourcePath)
+        : undefined;
+    const hasScriptTools = parsedScriptTools !== undefined && Object.keys(parsedScriptTools.scriptTools).length > 0;
     return {
         mcpServers: toServerEntries(raw.mcpServers ?? raw["mcp-servers"]),
         ...(Array.isArray(raw.imports) ? { imports: raw.imports } : {}),
         ...(raw.settings !== undefined ? { settings: parseSettings(raw.settings) } : {}),
         ...(raw.claudePlugins !== undefined ? { claudePlugins: parseClaudePlugins(raw.claudePlugins) } : {}),
+        ...(hasScriptTools ? { scriptTools: parsedScriptTools.scriptTools } : {}),
+        ...(parsedScriptTools?.issues.length ? { scriptToolIssues: parsedScriptTools.issues } : {}),
     };
 }
 function parseSettings(value) {
     if (!isRecord(value))
         throw new Error("settings must be an object");
     const settings = { ...value };
-    if (value.jev !== undefined) {
-        validateJevSettings(value.jev);
-        settings.jev = value.jev;
-    }
+    if (value.semanticSearch !== undefined)
+        validateSemanticSearchSettings(value.semanticSearch);
+    if (value.extraction !== undefined)
+        validateExtractionSettings(value.extraction);
     return settings;
 }
 function parseClaudePlugins(value) {
@@ -1205,7 +1391,7 @@ function toServerEntries(servers) {
             const error = typeof provider !== "string" || !provider ? "auth.provider must be a provider name"
                 : typeof entry.url !== "string" ? "auth.provider requires a url"
                     // A URL with env references is checked once resolved, when it connects.
-                    : getMissingEnvVars(entry.url, {}).length > 0 ? undefined
+                    : interpolateEnvVars(entry.url, {}) !== entry.url ? undefined
                         : providerAuthUrlError(entry.url);
             if (error) {
                 console.warn(`Ignoring MCP server "${name}": ${error}`);
@@ -1230,6 +1416,24 @@ function isRecord(value) {
 }
 function isStringRecord(value) {
     return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
+}
+// OpenCode's schema allows only these keys on a server (V1 and V2 forms) and silently drops the rest.
+const OPENCODE_LOCAL_SERVER_KEYS = new Set(["type", "command", "cwd", "environment", "enabled", "disabled", "codemode", "timeout", "protocol"]);
+const OPENCODE_REMOTE_SERVER_KEYS = new Set(["type", "url", "headers", "oauth", "enabled", "disabled", "codemode", "timeout", "protocol"]);
+/** Keys of imported OpenCode servers that OpenCode ignores, so the import ignores them too. */
+function getOpenCodeIgnoredSettings(merged) {
+    const ignored = new Map();
+    const entries = isRecord(merged) && isRecord(merged.mcp) ? merged.mcp : {};
+    for (const name of Object.keys(extractServers(merged, "opencode"))) {
+        const entry = entries[name];
+        if (!isRecord(entry) || (entry.type !== "local" && entry.type !== "remote"))
+            continue;
+        const allowed = entry.type === "local" ? OPENCODE_LOCAL_SERVER_KEYS : OPENCODE_REMOTE_SERVER_KEYS;
+        const keys = Object.keys(entry).filter((key) => !allowed.has(key));
+        if (keys.length > 0)
+            ignored.set(name, keys);
+    }
+    return ignored;
 }
 function mergeOpenCodeConfigs(base, next) {
     const baseMcp = base.mcp;
@@ -1395,11 +1599,20 @@ function extractServers(config, kind) {
 function serializeRawConfig(raw) {
     return `${JSON.stringify(raw, null, 2)}\n`;
 }
-function buildUnifiedDiff(beforeText, afterText) {
+/**
+ * A line diff of two texts. By default every line is listed; with `context`, only changed lines and
+ * that many lines around them, in `@@` hunks.
+ */
+export function buildUnifiedDiff(beforeText, afterText, options = {}) {
     if (beforeText === afterText)
         return "(no changes)";
-    const before = beforeText.split("\n");
-    const after = afterText.split("\n");
+    // With context, lines are counted as in `diff -u`: a final newline ends a line rather than starting
+    // a blank one, so an empty text has no lines.
+    const split = (text) => options.context !== undefined && (text === "" || text.endsWith("\n"))
+        ? text.split("\n").slice(0, -1)
+        : text.split("\n");
+    const before = split(beforeText);
+    const after = split(afterText);
     const rows = before.length;
     const cols = after.length;
     const lcs = Array.from({ length: rows + 1 }, () => Array(cols + 1).fill(0));
@@ -1414,7 +1627,7 @@ function buildUnifiedDiff(beforeText, afterText) {
                 : Math.max(nextRow[j] ?? 0, row[j + 1] ?? 0);
         }
     }
-    const lines = ["--- before", "+++ after"];
+    const lines = [];
     let i = 0;
     let j = 0;
     while (i < rows || j < cols) {
@@ -1434,13 +1647,59 @@ function buildUnifiedDiff(beforeText, afterText) {
             i++;
         }
     }
-    return lines.join("\n");
+    const body = options.context === undefined ? lines : contextHunks(lines, options.context);
+    // The texts differ, so with no changed line only the final newline was added or removed.
+    if (body.length === 0)
+        body.push("(only the final newline differs)");
+    return ["--- before", "+++ after", ...body].join("\n");
+}
+// Removals come before additions within each run of changes, as in `diff -u`.
+function contextHunks(lines, context) {
+    const ordered = [];
+    for (let k = 0; k < lines.length;) {
+        if (lines[k].startsWith(" ")) {
+            ordered.push(lines[k++]);
+            continue;
+        }
+        const run = [];
+        while (k < lines.length && !lines[k].startsWith(" "))
+            run.push(lines[k++]);
+        // Loops, not push(...run): a spread past about 100,000 arguments throws RangeError.
+        for (const line of run)
+            if (line.startsWith("-"))
+                ordered.push(line);
+        for (const line of run)
+            if (line.startsWith("+"))
+                ordered.push(line);
+    }
+    const changed = ordered.flatMap((line, index) => line.startsWith(" ") ? [] : [index]);
+    const hunks = [];
+    // Line numbers of ordered[cursor] in the before and after texts.
+    let cursor = 0;
+    let beforeLine = 1;
+    let afterLine = 1;
+    for (let k = 0; k < changed.length; k++) {
+        const start = Math.max(0, changed[k] - context);
+        while (k + 1 < changed.length && changed[k + 1] - changed[k] - 1 <= 2 * context)
+            k++;
+        const end = Math.min(ordered.length, changed[k] + context + 1);
+        for (; cursor < start; cursor++) {
+            if (!ordered[cursor].startsWith("+"))
+                beforeLine++;
+            if (!ordered[cursor].startsWith("-"))
+                afterLine++;
+        }
+        const hunk = ordered.slice(start, end);
+        const beforeCount = hunk.filter((line) => !line.startsWith("+")).length;
+        const afterCount = hunk.filter((line) => !line.startsWith("-")).length;
+        hunks.push(`@@ -${beforeCount === 0 ? beforeLine - 1 : beforeLine},${beforeCount} +${afterCount === 0 ? afterLine - 1 : afterLine},${afterCount} @@`);
+        for (const line of hunk)
+            hunks.push(line);
+    }
+    return hunks;
 }
 function buildConfigWritePreview(filePath, nextRaw) {
-    const existed = existsSync(filePath);
-    const beforeRaw = readRawConfigObject(filePath);
-    const beforeText = existed ? serializeRawConfig(beforeRaw) : "";
-    const afterText = serializeRawConfig(nextRaw);
+    const { existed, beforeText, afterText } = configWriteTexts(filePath, nextRaw);
     return {
         path: filePath,
         existed,
@@ -1449,6 +1708,13 @@ function buildConfigWritePreview(filePath, nextRaw) {
         afterText,
         diffText: buildUnifiedDiff(beforeText, afterText),
     };
+}
+function configWriteTexts(filePath, nextRaw) {
+    const existed = existsSync(filePath);
+    const beforeRaw = readRawConfigObject(filePath);
+    const beforeText = existed ? serializeRawConfig(beforeRaw) : "";
+    const afterText = serializeRawConfig(nextRaw);
+    return { existed, beforeText, afterText };
 }
 function readRawConfigObject(filePath) {
     if (!lstatSync(filePath, { throwIfNoEntry: false }))
@@ -1503,24 +1769,27 @@ export function writeSharedConfigText(filePath, text) {
         throw new Error("top-level value must be an object");
     writeConfigText(filePath, text);
 }
-export function writeJevSemanticSearchConfig(overridePath, cwd, allowedServers, effectiveJev) {
+export function writeSemanticSearchConfig(overridePath, cwd, allowedServers, effectiveSettings) {
     const filePath = overridePath ? getPiGlobalConfigPath(overridePath) : getProjectPiConfigPath(cwd);
     const raw = readRawConfigObject(filePath);
     if (raw.settings !== undefined && !isRecord(raw.settings)) {
-        throw new Error(`Failed to update Jev settings at ${filePath}: settings must be an object`);
+        throw new Error(`Failed to update semantic search settings at ${filePath}: settings must be an object`);
     }
     const settings = raw.settings;
-    const currentJev = settings?.jev;
-    if (currentJev !== undefined && currentJev !== false && !isRecord(currentJev)) {
-        throw new Error(`Failed to update Jev settings at ${filePath}: settings.jev must be an object or false`);
+    const current = settings?.semanticSearch;
+    if (current !== undefined && current !== false && !isRecord(current)) {
+        throw new Error(`Failed to update semantic search settings at ${filePath}: settings.semanticSearch must be an object or false`);
     }
-    const jev = isRecord(effectiveJev) ? effectiveJev : isRecord(currentJev) ? currentJev : {};
-    const nextServers = [...new Set(allowedServers)].sort((a, b) => a.localeCompare(b));
-    const nextJev = { ...jev, semanticSearch: true, allowedServers: nextServers };
-    validateJevSettings(nextJev);
-    if (isRecord(currentJev) && JSON.stringify(currentJev) === JSON.stringify(nextJev))
+    // The effective settings may come from a lower-precedence file; writing them keeps this file's policy complete.
+    const source = isRecord(effectiveSettings) ? effectiveSettings : isRecord(current) ? current : {};
+    const next = { ...source, allowedServers: [...new Set(allowedServers)].sort((a, b) => a.localeCompare(b)) };
+    validateSemanticSearchSettings(next);
+    if (isRecord(current) && JSON.stringify(current) === JSON.stringify(next) && settings?.jev === undefined)
         return { path: filePath, changed: false };
-    raw.settings = { ...settings, jev: nextJev };
+    // Setup is the migration path off settings.jev, so the file it writes stops repeating that notice.
+    const nextSettings = { ...settings, semanticSearch: next };
+    delete nextSettings.jev;
+    raw.settings = nextSettings;
     writeRawConfigObject(filePath, raw);
     return { path: filePath, changed: true };
 }
@@ -1725,19 +1994,50 @@ export function writeSharedServerEntry(filePath, serverName, entry) {
     writeRawConfigObject(filePath, raw);
     return filePath;
 }
+function getScriptToolsObject(raw, filePath) {
+    if (Object.hasOwn(raw, "scriptTools") && !isRecord(raw.scriptTools)) {
+        throw new Error(`Failed to update MCP config at ${filePath}: scriptTools must be an object`);
+    }
+    return (raw.scriptTools ?? {});
+}
+/** The file's text before and after the entry is written, for a diff the caller bounds. */
+export function previewScriptToolEntryTexts(filePath, name, entry) {
+    return configWriteTexts(filePath, withScriptToolEntry(filePath, name, entry));
+}
+/** The file's `scriptTools` entry for `name` as written, or undefined when it has none. */
+export function readScriptToolEntry(filePath, name) {
+    const scriptTools = getScriptToolsObject(readRawConfigObject(filePath), filePath);
+    return Object.hasOwn(scriptTools, name) ? scriptTools[name] : undefined;
+}
+function withScriptToolEntry(filePath, name, entry) {
+    const raw = readRawConfigObject(filePath);
+    return { ...raw, scriptTools: { ...getScriptToolsObject(raw, filePath), [name]: entry } };
+}
+export function writeScriptToolEntry(filePath, name, entry) {
+    const raw = readRawConfigObject(filePath);
+    raw.scriptTools = { ...getScriptToolsObject(raw, filePath), [name]: entry };
+    writeRawConfigObject(filePath, raw);
+    return filePath;
+}
 export function getServerProvenance(overridePath, cwd = process.cwd()) {
     const provenance = new Map();
     const userPath = getPiGlobalConfigPath(overridePath);
+    const importProvenance = (importKind, value) => {
+        const ignored = importKind === "opencode" ? getOpenCodeIgnoredSettings(value) : new Map();
+        return new Map(Object.keys(extractServers(value, importKind)).map((name) => {
+            const ignoredSettings = ignored.get(name);
+            // Keep writes inside adapter-owned storage even though the source is external.
+            return [name, { path: userPath, kind: "import", importKind, ...(ignoredSettings ? { ignoredSettings, ignoredSettingsSource: "opencode" } : {}) }];
+        }));
+    };
     if (getConfiguredHostConfigDiscovery(overridePath, cwd) === "on") {
         for (const importKind of Object.keys(IMPORT_PATHS)) {
             const imported = loadImportedConfig(importKind, cwd, `Failed to inspect imported MCP config from ${importKind}:`);
             if (!imported)
                 continue;
-            for (const name of Object.keys(extractServers(imported.value, importKind))) {
-                // Keep writes inside adapter-owned storage even though the source is external.
-                // Later import kinds win in the same deterministic order as loadDiscoveredHostConfigs.
-                provenance.set(name, { path: userPath, kind: "import", importKind });
-            }
+            // Later import kinds win in the same deterministic order as loadDiscoveredHostConfigs.
+            for (const [name, prov] of importProvenance(importKind, imported.value))
+                provenance.set(name, prov);
         }
     }
     for (const source of getConfigSources(overridePath, cwd)) {
@@ -1745,21 +2045,28 @@ export function getServerProvenance(overridePath, cwd = process.cwd()) {
         if (!loaded)
             continue;
         if (loaded.imports?.length) {
+            // Same precedence as expandImports + mergeConfigs: the first import in a file wins, and a later file replaces earlier ones.
+            const imported = new Set();
             for (const importKind of loaded.imports) {
-                const imported = loadImportedConfig(importKind, cwd, `Failed to inspect imported MCP config from ${importKind}:`);
-                if (!imported)
+                const importedConfig = loadImportedConfig(importKind, cwd, `Failed to inspect imported MCP config from ${importKind}:`);
+                if (!importedConfig)
                     continue;
-                const servers = extractServers(imported.value, importKind);
-                for (const name of Object.keys(servers)) {
-                    if (!provenance.has(name)) {
-                        provenance.set(name, { path: userPath, kind: "import", importKind });
-                    }
+                for (const [name, prov] of importProvenance(importKind, importedConfig.value)) {
+                    if (imported.has(name))
+                        continue;
+                    imported.add(name);
+                    provenance.set(name, prov);
                 }
             }
         }
         for (const name of Object.keys(loaded.mcpServers)) {
             // A Pi entry brings its own list; other sources keep the one from the Pi entry below them.
-            const ignoredSettings = loaded.ignoredSettings ? loaded.ignoredSettings.get(name) : provenance.get(name)?.ignoredSettings;
+            // A source that defines the server replaces an OpenCode import, so its OpenCode list no longer applies.
+            // (`loaded.mcpServers` holds only the file's own servers, so a plain import keeps its list.)
+            const below = provenance.get(name);
+            const ignoredSettings = loaded.ignoredSettings
+                ? loaded.ignoredSettings.get(name)
+                : below?.ignoredSettingsSource === "opencode" ? undefined : below?.ignoredSettings;
             provenance.set(name, {
                 path: source.writePath,
                 kind: source.kind,

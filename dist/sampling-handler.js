@@ -29,15 +29,24 @@ export async function handleSamplingRequest(options, request) {
     throwIfAborted(signal);
     await confirmSampling(options, "Approve MCP sampling request", formatRequestApproval(options.serverName, `${model.provider}/${model.id}`, params.systemPrompt, messages));
     throwIfAborted(signal);
-    const result = await options.modelRegistry.complete(model, {
+    const context = {
         ...(params.systemPrompt !== undefined ? { systemPrompt: params.systemPrompt } : {}),
         messages,
-    }, {
+    };
+    const requestOptions = {
         maxTokens: params.maxTokens,
         ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
         ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
         ...(signal ? { signal } : {}),
-    });
+    };
+    const thinkingLevel = options.getThinkingLevel();
+    // Only streamSimple applies the thinking level; Pi before 0.86 has no streamSimple, so sampling runs with thinking off there.
+    const result = options.modelRegistry.streamSimple
+        ? await options.modelRegistry.streamSimple(model, context, {
+            ...requestOptions,
+            ...(thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+        }).result()
+        : await options.modelRegistry.complete(model, context, requestOptions);
     const converted = convertAssistantResult(result);
     throwIfAborted(signal);
     await confirmSampling(options, "Return MCP sampling response", formatResponseApproval(options.serverName, converted));

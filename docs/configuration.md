@@ -1,6 +1,6 @@
 # Configuration
 
-Where the adapter reads MCP servers from, which file wins, how project servers are trusted, and every `settings` key.
+Where the adapter reads MCP servers from, which file wins, how project servers are trusted, every `settings` key, and the `scriptTools` key.
 
 ## Setup panel
 
@@ -8,7 +8,7 @@ Where the adapter reads MCP servers from, which file wins, how project servers a
 
 **Open the panel from a key:** To open the panel without clearing a prompt you are typing, bind `mcp.panel.open` in Pi's [`keybindings.json`](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/keybindings.md), for example `{ "mcp.panel.open": "alt+m" }`, then run `/reload`. You can bind one key or a list of keys. There is no default key.
 
-**Guided first-run setup:** Run `/mcp-adapter setup` to choose the normal write target for new shared servers — project `.mcp.json` or global `~/.config/mcp/mcp.json` — inspect detected shared MCP files, adopt compatibility imports from other hosts, open discovered config paths, preview exact before/after file diffs for writes, scaffold a minimal selected config, add a curated known server (DeepWiki, Context7, Parallel Search, Tavily Search, Notion, GitHub, Chrome DevTools, or Figma (desktop) when the Figma app is installed), or quick-add RepoPrompt into a standard/shared MCP file.
+**Guided first-run setup:** Run `/mcp-adapter setup` to choose the normal write target for new shared servers — project `.mcp.json` or global `~/.config/mcp/mcp.json` — inspect detected shared MCP files, adopt compatibility imports from other hosts, open discovered config paths, preview exact before/after file diffs for writes, scaffold a minimal selected config, add a curated known server (DeepWiki, Context7, Parallel Search, Tavily Search, Notion, GitHub (signs in with the GitHub CLI token from `gh auth token`), Chrome DevTools, or Figma (desktop) when the Figma app is installed), or quick-add RepoPrompt into a standard/shared MCP file.
 
 **Figma:** Figma's remote server, `https://mcp.figma.com/mcp`, only accepts approved clients, and Pi isn't approved yet. Use the Figma desktop app's local server instead: run `/mcp-adapter setup` and add Figma (desktop). It needs a Dev or Full seat on a paid Figma plan; to turn it on, open a Design file, switch to Dev Mode (Shift+D), and click "Enable desktop MCP server" in the inspect panel.
 
@@ -54,7 +54,7 @@ On Pi 0.99 and later, the adapter also reads Pi's own `<Pi agent dir>/mcp.json` 
 | `toolExposure` entries set to `"hidden"` | `excludeTools`, which can hide more than Pi's `hidden` |
 | `auth: { "provider": ... }` | same; user-global file only, see [Pi provider tokens](auth.md#pi-provider-tokens) |
 
-Entries with `type: "sse"`, and entries Pi rejects, are skipped. Other settings without an exact equivalent, such as a per-tool `codemode` or `deferred`, are ignored, and the server keeps its server-level setting. Top-level `settings`, `imports`, `claudePlugins`, and `mcp-servers` come from old adapter configs; they are ignored too and belong in `mcp-adapter.json`. Everything skipped or ignored is reported once per file at startup, and a loaded server's ignored settings are also listed under it in `/mcp-adapter`.
+Entries with `type: "sse"`, and entries Pi rejects, are skipped. Other settings without an exact equivalent, such as a per-tool `codemode` or `deferred`, are ignored, and the server keeps its server-level setting. Top-level `settings`, `imports`, `claudePlugins`, `scriptTools`, and `mcp-servers` are adapter keys; they are ignored too and belong in `mcp-adapter.json`. Everything skipped or ignored is reported once per file at startup, and a loaded server's ignored settings are also listed under it in `/mcp-adapter`.
 
 A server in `.pi/mcp.json` replaces the same-named server from `<Pi agent dir>/mcp.json` as a whole, as in Pi. The adapter never writes Pi's files; changes such as direct tools go to the `mcp-adapter.json` in the same folder. `.pi/mcp.json` servers need project trust and approval like `.mcp.json` servers. Exclusive mode reads neither file.
 
@@ -94,6 +94,8 @@ Within the selected root, `.mcp.json` and `<configDir>/mcp-adapter.json` load fr
 
 Prefer `.mcp.json` for project-local shared MCP config and `~/.config/mcp/mcp.json` for user-global shared MCP config. Use `.pi/mcp-adapter.json` for adapter-specific project overrides. Project files override user-global sources.
 
+Entries for the same server merge field by field, but credentials (`headers`, bearer tokens, `oauth`, and the other auth fields) stay with the `url` they were written for: when a higher-precedence file sets a different `url`, the lower file's credentials are not sent, and the adapter says so at startup, naming both files. The notice covers config files and their imports; a url change between two files of the same host (such as global and project `opencode.json`), or for a server from a package or plugin, drops credentials the same way without a notice.
+
 ## Import Existing Configs
 
 Shared MCP files are loaded automatically. Use `imports` only for host-specific config formats that are not already covered by `.mcp.json` or `~/.config/mcp/mcp.json`.
@@ -107,19 +109,23 @@ Shared MCP files are loaded automatically. Use `imports` only for host-specific 
 
 Supported compatibility imports: `cursor`, `claude-code`, `claude-desktop`, `opencode`, `vscode`, `windsurf`, `codex`
 
-`pi-mcp-adapter init` detects these host-specific configs and adds missing imports to the Pi agent dir config for you. The `opencode` import reads OpenCode V1 `mcp` entries from both `~/.config/opencode/opencode.json` and the project `opencode.json`, with project fields taking precedence. It is explicit-import only; OpenCode V2, inline content, managed configs, and remote discovery are not supported.
+`pi-mcp-adapter init` detects these host-specific configs and adds missing imports to the Pi agent dir config for you. The `opencode` import reads OpenCode V1 `mcp` entries from both `~/.config/opencode/opencode.json` and the project `opencode.json`, with project fields taking precedence. It is explicit-import only; OpenCode V2, inline content, managed configs, and remote discovery are not supported. A server's variables come from `environment`, and the import also accepts `env` as another name for it; `environment` wins when both are set. OpenCode itself reads only `environment`. Other keys outside OpenCode's schema are ignored, as OpenCode ignores them, and reported once at startup, under the server in `/mcp-adapter`, and in `pi-mcp-adapter doctor`.
 
 ## Project server trust
 
 Servers defined or changed by project-scoped MCP files (`.mcp.json`, `.pi/mcp-adapter.json`, and opted-in ancestor project files) do not run merely because a repository was opened. This includes servers brought in through project `imports`, `claudePlugins`, `settings.agentPluginPaths`, repo-local host config files (even when imports or discovery are enabled globally), or Pi packages listed in project `.pi/settings.json`. If Pi reports the project as untrusted, the adapter blocks them. In a trusted interactive session, the adapter shows the source file and command or URL and asks once before the first connection. The prompt starts on "Don't allow", so pressing Enter blocks the server for that session and `/reload` asks again. The approval is stored under the Pi agent directory and is tied to the canonical project path, server name, and complete effective definition; changing the definition requires a new approval. Git worktrees of one repository share approvals for the same folder, so a new worktree only asks when its definition differs. This covers regular, bare, and `--separate-git-dir` repositories; the one exception is the main checkout of a `--separate-git-dir` repository, which git records no link to, so it asks once on its own. Blocked servers are identified in the panel, while MCP status includes the required trust or approval action.
 
-In print, JSON, and RPC sessions, an unapproved project server is skipped. To intentionally allow project servers in trusted headless sessions, set `"projectServers": "allow"` in the **user-global** `settings` object. The default is `"ask"`; project files cannot change this policy. Explicit config files, programmatic configuration, global/import/plugin servers, and runtime registrations retain their existing behavior. Project servers are always excluded from extension-load initialization and are admitted only after `session_start` supplies Pi's trust context.
+[Script tools](#script-tools) set in project files follow the same rules: they load only when Pi trusts the project and you approve each one, with its own prompt.
+
+In print, JSON, and RPC sessions, an unapproved project server or script tool is skipped. To intentionally allow project servers and script tools in trusted headless sessions, set `"projectServers": "allow"` in the **user-global** `settings` object. The default is `"ask"`; project files cannot change this policy. Explicit config files, programmatic configuration, global/import/plugin servers, and runtime registrations retain their existing behavior. Project servers are always excluded from extension-load initialization and are admitted only after `session_start` supplies Pi's trust context.
+
+A script that opens interactive sessions nobody is watching, for example one Pi per new git worktree, can start Pi with `--mcp-project-servers allow`. That process then starts unapproved project servers and loads unapproved project script tools without asking, in every session mode, but only while Pi reports the project as trusted; nothing is saved to the approval store. Use it only for folders whose project config you control: Pi treats a folder that has a `.mcp.json` and no `.pi` resources as trusted without asking, so the flag runs whatever that file defines. Typing `pi` without the flag keeps the approval prompt.
 
 ## Check servers from a shell
 
-`pi-mcp-adapter doctor` loads the config a session in the current directory would (including Pi's own `mcp.json` files when `pi --version` reports 0.99 or later), gives each enabled server 15 seconds to connect, and prints one line per server: name, state (`ok`, `failed`, `needs-auth`, `blocked`, or `disabled`), tool count, and the error or a hint. Secret commands (`!command` values) run with their own timeouts. `--json` prints the same report as a JSON array. It exits 1 when an enabled server fails or needs a sign-in; blocked and disabled servers don't count.
+`pi-mcp-adapter doctor` loads the config a session in the current directory would (including Pi's own `mcp.json` files when `pi --version` reports 0.99 or later), gives each enabled server 15 seconds to connect and list its tools, and prints one line per server: name, state (`ok`, `failed`, `needs-auth`, `blocked`, or `disabled`), tool count, and the error or a hint. Secret commands (`!command` values) run with their own timeouts. `--json` prints the same report as a JSON array. It exits 1 when an enabled server fails or needs a sign-in; blocked and disabled servers don't count.
 
-Project servers follow the trust and approval rules above as in a non-interactive session. Like Pi, doctor trusts a project without trust-requiring Pi resources (such as `.pi/settings.json` or a project `.agents/skills`). Otherwise it needs Pi's stored trust decision for the project, because it can't run the Pi extensions a session asks first. It loads Pi from where the CLI is installed, or else from the Pi package that provides the `pi` on PATH; if neither works, the project is treated as untrusted. Doctor never starts OAuth: a server without a stored sign-in is reported as `needs-auth`; sign in with `/mcp-auth <server>` in Pi. Errors show only what the adapter can state itself, such as the HTTP status, network error code, or endpoint probe result; doctor never prints server output, response bodies, or configured secrets. Run a failing command directly to see its output.
+Project servers follow the trust and approval rules above as in a non-interactive session. Like Pi, doctor trusts a project without trust-requiring Pi resources (such as `.pi/settings.json` or a project `.agents/skills`). Otherwise it needs Pi's stored trust decision for the project, because it can't run the Pi extensions a session asks first. It loads Pi from where the CLI is installed, or else from the Pi install behind the `pi` on PATH, whether npm or Pi's own installer made it; if neither works, the project is treated as untrusted. Doctor never starts OAuth: a server without a stored sign-in is reported as `needs-auth`; sign in with `/mcp-auth <server>` in Pi. Errors show only what the adapter can state itself, such as the HTTP status, network error code, or endpoint probe result; doctor never prints server output, response bodies, or configured secrets. Run a failing command directly to see its output.
 
 ## Lifecycle Modes
 
@@ -148,6 +154,8 @@ Accepting a browser (URL) request from the server, and its completion, also coun
 **What ignores the timer.** `keep-alive`, `lazy-keep-alive`, `eager` unless the server sets `idleTimeout`, and `idleTimeout: 0`, set globally or on the server. Use `lazy-keep-alive` or `idleTimeout: 0` for servers that hold state you don't want to lose between calls.
 
 **Startup discovery.** When a session starts, a server without valid cached tools (new, changed config, corrupt cache, or past a TTL the server declared) is connected once to read its tools, 10 at a time. Plain `lazy` servers are closed as soon as their tools are captured, before the next server starts, and all entries from the pass are saved in one cache write. `lazy-keep-alive`, `idleTimeout: 0`, and servers that need sign-in are not closed. A `lazy` or `lazy-keep-alive` server whose cached entry is private (sign-in-scoped) is not discovered at startup.
+
+A `lazy` [Executor](prompts-and-ui.md#executor-app-tools) server stays connected after discovery until it has read its app catalog, and one whose cache has no catalog yet is connected at startup to read it.
 
 **Failed discovery.** A `lazy` or `lazy-keep-alive` server that fails discovery or needs sign-in is tried once per config. Later sessions don't start it at startup until a setting that defines the server changes (such as its command, arguments, environment, or URL; `lifecycle`, `idleTimeout`, `requestTimeoutMs`, and `debug` don't count), the cache file is missing or corrupt, or it connects successfully, for example when you use it. Temporary HTTP outages are retried next session. `eager` and `keep-alive` servers connect at every start.
 
@@ -186,6 +194,7 @@ Accepting a browser (URL) request from the server, and its completion, also coun
 |---------|-------------|
 | `toolPrefix` | `"server"` (default), `"short"` (strips `-mcp` suffix), `"none"`, or `"mcp"` (prefixes with `mcp__`, using server-mode normalization). Per-server `toolPrefix` overrides this for that server. |
 | `allowInstall` | Allow URL installation through the `mcp` tool (default: `true`). Set to `false` to block it. |
+| `allowScriptToolSave` | Allow the `mcp` tool to save a script as a script tool after you approve it (default: `true`). Set to `false` to block it and remove its line from the `mcp` tool description. |
 | `idleTimeout` | Global idle timeout in minutes (default: 10, 0 to disable) |
 | `requestTimeoutMs` | Global request timeout in milliseconds for live MCP calls (if omitted or `<= 0`, the MCP SDK default timeout is used). For a tool call, the timeout restarts whenever the tool reports progress; task-augmented calls instead apply it to each task request |
 | `deferWithMissingMetadata` | Allow lazy startup to defer when persisted metadata is missing or invalid (default: `false`). See [Direct Tools](tools.md#direct-tools) for the startup tradeoff. |
@@ -195,23 +204,22 @@ Accepting a browser (URL) request from the server, and its completion, also coun
 | `collapsedResultLines` | Number of result text lines to show before expansion: `1`, `2`, or `3`. Defaults to `1` in compact mode and `3` in boxed mode. |
 | `notifyOnStartupConnect` | Show successful startup connection notices (default: `true`). Set to `false` to suppress routine `MCP: N servers connected (M tools)` notices. Connection errors and authentication warnings remain visible. |
 | `hostConfigDiscovery` | Host-specific config policy: `"off"` (default), `"prompt"` (detect/report only), or `"on"` (explicitly load detected host configs as the lowest-precedence fallback) |
-| `projectServers` | Project-server admission policy for trusted headless sessions: `"ask"` (default, skip unapproved servers) or `"allow"`. Only user-global or explicitly selected config may set it; project files are ignored. |
+| `projectServers` | Admission policy for project servers and project script tools in trusted headless sessions: `"ask"` (default, skip unapproved ones) or `"allow"`. Only user-global or explicitly selected config may set it; project files are ignored. |
 | `ancestorConfigRoots` | Trusted absolute or `~/...` roots for opt-in ancestor config discovery. Only user-global or explicitly selected config may set it; roots outside cwd are ignored and the deepest matching root is used. |
 | `agentPluginPaths` | Agent Plugins package directories to load MCP servers from. Relative paths resolve from the active project cwd. |
 | `approveTools` | `true` to require approval before every MCP tool call, `"destructive"` to require it for tools the server does not mark read-only or non-destructive, or an array of glob patterns such as `["github_delete_*", "notion_update_*"]`. Per-server `approveTools` overrides this. |
 | `oauthDir` | Legacy OAuth `tokens.json` import directory for this MCP config. Relative paths resolve from the active project cwd. `MCP_OAUTH_DIR` still wins when set. Persistent OAuth credentials are stored in the OS credential store, not this directory. |
 | `oauthCredentialStore` | Set explicitly to `"encrypted-file"` for externally keyed AES-256-GCM storage (notably Windows OpenSSH network logons). Requires `PI_MCP_ADAPTER_OAUTH_FILE_KEY`; absent uses the OS credential store. |
 | `mcpServers.<name>.oauth.authorizationParams` | Extra authorization URL parameters for provider-specific OAuth extensions. Flow-owned parameters such as `client_id`, `redirect_uri`, `scope`, `state`, `code_challenge`, `response_type`, and `resource` cannot be overridden. |
-| `directTools` | Global default for all servers (default: false). `true`, `false`, or `"search"`. Per-server overrides this. On Pi 0.99 and later, `"search"` tools are Pi deferred tools; see [search-activated direct tools](tools.md#search-activated-direct-tools). |
-| `namespaceProxyTools` | Register per-server `mcp__<server>` wrappers (default: true). Set to `false` to omit them from the model's tool list; `mcp`, `mcpScript`, and direct tools are unaffected. References such as `mcp:<server>` that rely on a wrapper will no longer resolve. Run `/reload` after changing this setting. |
+| `directTools` | Global default for all servers (default: false). `true`, `false`, or `"search"`. Per-server overrides this. On Pi 0.99 and later, `"search"` tools are Pi deferred tools; see [search-activated direct tools](tools.md#search-activated-direct-tools). Every other cached tool is also a Pi deferred tool named `mcp__<server>__<tool>`, whatever this is set to; see [codemode and tool_search](tools.md#codemode-and-tool_search). |
+| `namespaceProxyTools` | Register per-server `mcp__<server>` wrappers (default: true). Set to `false` to omit them from the model's tool list; `mcp` and direct tools are unaffected. References such as `mcp:<server>` that rely on a wrapper will no longer resolve. Run `/reload` after changing this setting. |
 | `strictDirectToolArguments` | Validate direct-tool inputs against their advertised schemas and recover one JSON string layer for object and array properties (default: false). |
 | `directToolResultDetails` | Direct-tool result details: `"lean"` (default) or `"bounded"` to retain the guarded raw MCP result. |
 | `warnOnLargeDirectTools` | Show the advisory when 75 or more direct tools resolve (default: `true`). Set to `false` to suppress only this advisory. |
 | `freezeDirectTools` | Keep direct-tool registration stable after the initial sync so metadata updates and explicit reconnects do not rebuild the system prompt. Proxy/search/cache metadata still refreshes. Default: false. |
-| `scriptMode` | Register the MCP-only `mcpScript` plain-JavaScript tool and its bundled skill (default: false). Read when Pi loads the adapter; run `/reload` after changing it. |
-| `scriptSkill` | How the model finds the bundled `mcp-scripting` skill when `scriptMode` is on: `"manual"` (default) keeps it to `/skill:mcp-scripting`; `"model"` adds its path to the `mcpScript` description so the model reads it before writing a script. |
 | `exposeResources` | Expose MCP resources as tools (default: `true`). Set to `false` to disable globally across all servers. Per-server `exposeResources` overrides this. |
-| `jev` | Optional System One Jev settings. A valid System One key enables semantic search across every enabled MCP server by default; `semanticSearch: false` disables it. `scriptEvaluation` remains disabled by default and requires an `allowedServers` source allowlist when enabled. `jev: false` disables both. Run `/mcp-adapter jev setup` for guided configuration. |
+| `semanticSearch` | Semantic tool search through a Pi classifier model: `allowedServers`, `model` (`"provider/id"`), `candidateLimit` and `minProbability`. On by default for every enabled server when `model` is set or Pi has a credential for a default Jev model; `false` turns it off. Run `/mcp-adapter semantic setup` to choose the servers ([Semantic search](scripting.md#semantic-search)). |
+| `extraction` | Read typed values from MCP tool results with Cloudflare's Clairic model: `allowedServers` (required, the servers whose results may be sent) and `model` (`"cloudflare-workers-ai/clairic"` or `"cloudflare-ai-gateway/clairic"`). Off unless set; adds the `extract` parameter to `mcp` ([Typed values from tool results](scripting.md#typed-values-from-tool-results)). |
 | `disableProxyTool` | Hide the `mcp` proxy tool once configured direct tools are fully available from cache. Ignored while any server uses `directTools: "search"`, whose tools are registered inactive and are activated through the gateway (`mcp({ search })` or a successful `mcp({ tool })` call), or by Pi's `tool_search` on Pi 0.99 and later. |
 | `autoAuth` | Auto-run OAuth on `connect`/tool calls when a server needs auth, then retry once (default: false). |
 | `sampling` | Allow MCP servers to sample through Pi models, honoring `modelPreferences.hints` before current/default fallback (default: true when UI approval is available). |
@@ -221,3 +229,41 @@ Accepting a browser (URL) request from the server, and its completion, also coun
 | `trace` | Opt-in metadata-only protocol tracing. Set `{ enabled: true }` globally or `trace: true` on a server. The per-session JSONL file defaults to `.pi/mcp-traces/`; `file`, `maxBytes` (default 262144), and `maxEvents` (default 10000) can be set. Raw MCP payloads, prompts, tool arguments/results, auth data, and URLs are never persisted. |
 
 Per-server `idleTimeout`, `requestTimeoutMs`, `approveTools`, and `exposeResources` override the global settings. `debug` remains stderr display and is unrelated to protocol tracing.
+
+A config that still sets the settings of the adapter's removed script tool loads as before. The adapter shows a notice that names the file and the keys to remove; Pi's `codemode` replaces that tool ([MCP scripting](scripting.md#scripting-mcp-calls-with-pis-codemode)).
+
+A config that still sets `settings.jev` loads too, and a notice names the file and says how to move to `settings.semanticSearch` ([Moving from a System One key](scripting.md#moving-from-a-system-one-key)).
+
+## Script tools
+
+`scriptTools` is a top-level key, next to `mcpServers` and `settings`, that saves codemode scripts as tools. [Script tools](scripting.md#script-tools) explains how they run and how the model reaches them. They need Pi 0.99.0 or later.
+
+```json
+{
+  "scriptTools": {
+    "stale_issues": {
+      "description": "List a repository's open issues with no activity for the given number of days",
+      "file": "scripts/stale-issues.js",
+      "inputSchema": {
+        "type": "object",
+        "properties": { "repo": { "type": "string" }, "days": { "type": "number" } },
+        "required": ["repo", "days"]
+      },
+      "declare": false
+    }
+  }
+}
+```
+
+Each key is the tool's name, which becomes the Pi tool `mcp__script__<name>`. It starts with a lowercase letter and has only lowercase letters, digits and underscores, up to 48 characters.
+
+| Field | Description |
+|-------|-------------|
+| `description` | Required. What the tool does, as the model and search see it. |
+| `file` | Required. The script file. A relative path is relative to the folder of the config file that sets it; `~/` paths and absolute paths work too. The file is read on every call. |
+| `inputSchema` | JSON Schema for the arguments, with `"type": "object"`. The script gets them as `input`. Without it the tool takes no arguments. |
+| `declare` | `true` puts the tool in the model's tool list from the start. Default `false`: the tool is a Pi deferred tool, found by search. |
+
+Set `scriptTools` in `mcp-adapter.json` or any of the shared MCP files above; Pi's own `mcp.json` files don't read it. An entry in a higher-precedence file replaces the same-named entry as a whole. An entry with an unknown key or a bad value isn't loaded, and the file's other entries and servers still are. Each problem shows a warning that names the file, once per session, and is listed in `/mcp-adapter`. A tool whose name is already taken, by a direct MCP tool, a server's `mcp__<server>` tool, or another extension's tool, isn't loaded either. Entries in project files need project trust and approval; see [Project server trust](#project-server-trust).
+
+The model can also save a script it wrote as a script tool, with `mcp({ action: "save-script" })`. Pi shows you the change and the script first, and writes the script file and its entry only after you approve. See [Saving a script as a tool](scripting.md#saving-a-script-as-a-tool).

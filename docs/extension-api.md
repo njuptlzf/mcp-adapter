@@ -76,7 +76,7 @@ export default function plugin(pi) {
 
 The config uses the format of Pi's `mcp.json` and is translated the same way as that file (see [configuration](configuration.md#file-layout)); a server the adapter can't run, such as an SSE server, is not connected and is reported. Registrations made while extensions load connect with the session; registering or unregistering later applies right away. Registering a name again with a different config replaces the server (the same config keeps the existing connection, as in Pi's built-in MCP), and `pi.unregisterMcpServer(name)` disconnects it.
 
-These servers are proxy-tool-only, like the adapter's own runtime registrations below. Of Pi's exposure settings only `"exposure": "hidden"` and `"enabled": false` apply, both as `disabled: true`; `direct` and `deferred` exposure are ignored and reported. A config entry with the same name wins, and so does an earlier registration through the adapter's event below; the other registration is reported as overridden.
+These servers get no direct tools, like the adapter's own runtime registrations below; on Pi 0.99 and later their cached tools are Pi deferred tools like every other server's. Of Pi's exposure settings only `"exposure": "hidden"` and `"enabled": false` apply, both as `disabled: true`; `direct` and `deferred` exposure are ignored and reported. A config entry with the same name wins, and so does an earlier registration through the adapter's event below; the other registration is reported as overridden.
 
 The adapter's own registration event still works on every supported Pi version, for example for a plugin host that discovers plugins after load:
 
@@ -117,7 +117,7 @@ export default function pluginHost(pi) {
 
 Cross-extension registration uses Pi's shared event bus and does not require a runtime import from `pi-mcp-adapter`. Emit during `session_start` or later so the adapter listener is installed. The adapter writes `request.result` synchronously; the first adapter listener to respond wins.
 
-Runtime registrations are session scoped and never written to config files. Duplicate server names fail closed against configured servers and other registrations. Registered servers use the normal lazy connection, OAuth, approval, and shutdown behavior, but they are proxy-tool-only and their tools become visible at the next tool sync. To change a definition, dispose the registration and register again.
+Runtime registrations are session scoped and never written to config files. Duplicate server names fail closed against configured servers and other registrations. Registered servers use the normal lazy connection, OAuth, approval, and shutdown behavior, but they get no direct tools, and their tools become visible at the next tool sync. On Pi 0.99 and later, their cached tools are Pi deferred tools like every other server's (see [codemode and tool_search](tools.md#codemode-and-tool_search)). To change a definition, dispose the registration and register again.
 
 ## Runtime tool calls from other extensions
 
@@ -144,6 +144,8 @@ if (!outcome.ok) throw outcome.error;
 ```
 
 `tool` and `server` resolve the same way as `mcp({ tool, server })`, and approval settings and disabled servers apply as they do for that call. The adapter sets `request.result` to a promise during `emit()`; await it. A tool error or denied approval resolves with `ok: false`. Emit during `session_start` or later; calls fail after the session shuts down.
+
+A call through this event is guarded by the [output guard](tools.md#output-guard) like a model's call. A tool of yours that calls an MCP tool through Pi's `ctx.executeTool()` instead gets the whole result, without the guard, so limit what your tool returns to the model.
 
 ## SDK configuration
 
@@ -227,7 +229,7 @@ Every call goes through the approval broker (`pi-mcp-adapter:tool-approval-reque
 
 On `notifications/tools/list_changed` the adapter lists the server's tools again. A selected tool that changed or disappeared is retired for the life of the adapter; if the re-list fails, every selected tool on that server is retired. Calls wait for a running re-list and are refused as `not_sent` both before `onToolCall` and inside `dispatch()`. The model is told to start a new session.
 
-After `dispatch()` resolves, `call.linkedResource(uri)` prepares a read of a `resource_link` from that result. The read needs its own broker approval (origin `resource`, args `{ uri }`) and uses the same connection. It returns a `readId` and a single-use `dispatch()`, so you can record the read before it happens. A URI that is not linked throws, and a read is refused as `not_sent` once the parent call has settled.
+After `dispatch()` resolves, `call.linkedResource(uri)` prepares a read of a `resource_link` from that result. The read needs its own broker approval (origin `resource`, args `{ uri }`) and uses the same connection. It returns a `readId` and a single-use `dispatch()`, so you can record the read before it happens. A URI that is not linked throws, and a read is refused as `not_sent` once the parent call has settled. When the approval gate denies a read, the `HostManagedMcpError` also has `denied: true` and, if the approver gave one, a `denyReason` (control characters removed, at most 8 KB), so `onToolCall` can pass the reason on in its result; an `abstain` or a lost broker leaves both unset.
 
 Supplied transports must not carry an OAuth `authProvider` or any retry or replay behavior. The adapter sends each `tools/call` at most once at its own layer. It turns off the SDK's multi-round-trip auto-fulfilment, passes the tool definition so the SDK cannot resend on a header mismatch, and never recovers a session or reconnects. This mode does not read config files, use OAuth or the credential store, register commands, UI, or the `mcp` proxy tool, expose resource tools or prompts, or answer sampling or elicitation requests.
 

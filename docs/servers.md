@@ -48,7 +48,7 @@ In the configuration examples below, `30000` is illustrative only. If `requestTi
 | `bearerTokenStore` | Set to `true` to read a static bearer token from the adapter-owned OS credential store when `auth` is `"bearer"` and no `bearerToken` or `bearerTokenEnv` is configured. Stored records are keyed only by the server name, bind to the resolved server URL, and are never named by config. Store a token with `pi-mcp-adapter token set <server>`, which reads it from a masked prompt or stdin pipe and never from an argument. `/mcp-adapter token status <server>` and `/mcp-adapter token remove <server>` manage non-secret state inside Pi; `/mcp-adapter token set` stays disabled until Pi exposes masked secret input. |
 | `lifecycle` | `"lazy"` (default), `"eager"`, `"keep-alive"`, or `"lazy-keep-alive"` |
 | `idleTimeout` | Minutes before idle disconnect (overrides global) |
-| `requestTimeoutMs` | Request timeout in milliseconds for live MCP calls (overrides global; if omitted or `<= 0`, the MCP SDK default timeout is used). For a tool call, the timeout restarts whenever the tool reports progress; task-augmented calls instead apply it to each task request |
+| `requestTimeoutMs` | Request timeout in milliseconds for live MCP calls (overrides global; if omitted or `<= 0`, the MCP SDK default timeout is used). For a tool call, the timeout restarts whenever the tool reports progress; task-augmented calls instead apply it to each task request. When it is omitted or `<= 0`, Executor's `execute` and `call` get at least 6 minutes (see [Executor approvals](prompts-and-ui.md#executor-approvals)) |
 | `protocolVersion` | `"legacy"` (default), `"auto"`, or `"2026-07-28"`; modern negotiation is opt-in |
 | `tasks` | MCP Tasks extension support on 2026-07-28 connections (default: true; set `false` to opt out); see [Task-augmented tool calls](#task-augmented-tool-calls) |
 | `exposeResources` | Expose MCP resources as tools (default: true) |
@@ -57,11 +57,15 @@ In the configuration examples below, `30000` is illustrative only. If `requestTi
 | `includeTools` | `string[]` of tool names or glob patterns to expose (matches original names like `get_screenshot`, generated resource names like `read_figjam`, and prefixed names like `figma_get_screenshot`) |
 | `excludeTools` | `string[]` of tool names or glob patterns to hide (applied after `includeTools`) |
 | `searchKeywords` | `{ "tool-or-glob": ["keyword", ...] }` — extra keywords that boost `mcp({ search })` ranking for matching tools; never shown to the model |
-| `openUi` | Set to `false` to never open MCP App UIs for this server's tools (default: true). Its tools still run and return their results inline; sign-in and URL elicitation are unaffected |
+| `openUi` | Set to `false` to never open MCP App UIs for this server's tools (default: true). The server is told the host has no UI, so tools that would defer to an MCP App form run and return their results inline; sign-in and URL elicitation are unaffected |
+| `appendStructuredContent` | Set to `false` to show the model only a tool result's `content` when it has any (default: true); `structuredContent` is still shown when `content` is empty. Use it for a server whose `content` already says what the model needs, so its machine payload doesn't cost context on every call |
+| `roots` | Set to `false` to not send this server the Pi session directory as its root (default: true). Use it for servers that let client roots replace the directories in their own args, such as the official filesystem server, when those directories should stay in force |
 | `description` | What the server offers, in a sentence (same key as Pi's `mcp.json`). `mcp({ server })` shows it under the listing header, `mcp({ search })` ranks the server's tools by it like tool descriptions, and the `/mcp-adapter` panel shows it when the server is expanded. Without it, the panel shows the first line of the server's instructions. A non-string value is ignored with a warning. |
-| `debug` | Show server stderr (default: false) |
+| `debug` | Show server stderr (default: false). Log messages a server sends over MCP always go to `~/.pi/agent/mcp.log`, which moves to `mcp.log.1` past 5 MB |
 | `trace` | Enable metadata-only JSONL protocol tracing for this server; payloads, prompts, tool arguments/results, authorization data, and URLs are never persisted |
 | `disabled` | Keep the server visible in config and status, but prevent connections, authentication, tools, and resource calls (only literal `true` disables it) |
+
+Wherever a field supports `${VAR}`, `${VAR:-default}` uses `default` when `VAR` is unset, as in Claude Code's `.mcp.json`. A variable that is set but empty stays empty, and a variable with a default is never reported as missing.
 
 ### Custom HTTPS trust
 
@@ -83,20 +87,66 @@ Use `"2026-07-28"` to pin that revision. Pinning has no legacy or SSE fallback a
 
 ### Task-augmented tool calls
 
-The adapter supports the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview) (`io.modelcontextprotocol/tasks`, SEP-2663), which lets long-running tools return a durable task handle instead of blocking the connection. Support is negotiated per connection and needs no configuration: the task session only activates when a 2026-07-28 connection's server advertises the extension, so nothing changes for servers without task support. Set `tasks: false` on a server to opt out and keep the plain synchronous call path. Legacy (2025-11-25) experimental tasks are not supported.
+The adapter supports the [MCP Tasks extension](https://modelcontextprotocol.io/extensions/tasks/overview) (`io.modelcontextprotocol/tasks`, SEP-2663), which lets long-running tools return a durable task handle instead of blocking the connection. Tasks need an MCP 2026-07-28 connection, and the default `"legacy"` handshake doesn't offer one, so set `protocolVersion` on the server:
 
-When active, tool calls keep their normal contract from the model's point of view:
+```json
+{
+  "mcpServers": {
+    "ci": { "url": "https://ci.example.com/mcp", "protocolVersion": "auto" }
+  }
+}
+```
 
-- A tool that returns a task handle is transparently polled to completion, honoring the server's suggested poll interval; the final result is returned as if the call had been synchronous.
-- If the task pauses for input (`input_required`), elicitation requests are routed through the same interactive elicitation UI as direct `elicitation/create` requests, and answers are delivered back via `tasks/update`.
-- Cancelling the Pi tool call sends a cooperative `tasks/cancel` to the server.
-- A task that fails with a JSON-RPC error surfaces as the same error a synchronous call would have produced; a tool result with `isError: true` is returned as a normal tool error.
+The task session then activates only when the server advertises the extension, so nothing changes for servers without task support. Set `tasks: false` on a server to opt out and keep the plain synchronous call path. Legacy (2025-11-25) experimental tasks are not supported.
 
-Task traffic is dispatched on a dedicated raw channel below the SDK client (the published MCP SDK does not yet decode task result shapes itself), built on the official `@modelcontextprotocol/ext-tasks` requester package. The channel chains onto the connected transport's handlers without replacing the transport, and raw task frames appear in `/mcp-trace` in both directions. Task status notifications (`notifications/tasks`) are not consumed; polling is used exclusively. `requestTimeoutMs` applies per task request (the initiating call and each poll), not to the overall task duration — a task that runs for hours holds the Pi tool call for as long as the model waits for it.
+When the server answers a call with a task, Pi doesn't wait for it:
+
+- The tool call returns right away with the task id, and the agent keeps working. The adapter polls the task in the background, honoring the server's suggested poll interval.
+- When the task ends, its result reaches the model once, as a new message that starts `MCP task <id> (<server>/<tool>) completed.` (or `failed.`, `cancelled.` or `outcome unknown.`). If the agent is idle, the message starts a turn; if it is busy, the message waits until the current turn ends. Results go through the same output guard as a normal call. A failed task delivers its error, and a tool result with `isError: true` arrives as a tool error.
+- If the task asks a question (`input_required`), the same form or browser prompt opens as for a direct `elicitation/create` request, even though the call already returned. Your answer goes back via `tasks/update`.
+- Esc while the call is still waiting for the server cancels the task with a cooperative `tasks/cancel`. Once the task id is back, Esc no longer touches the task. To stop it, run `/mcp-adapter tasks`, which lists running tasks with their latest status, then `/mcp-adapter tasks stop <server>/<taskId>`. The footer shows how many tasks are running.
+- The agent can stop a task too, for example when you ask it to. The call's result tells it the key, and `mcp({ cancelTask: "<server>/<taskId>" })` sends the same `tasks/cancel`; the task's message then says the agent stopped it. It only stops work the agent started, so like the command it needs no tool approval. This works only while the `mcp` tool is available; with `disableProxyTool` the call's result leaves the hint out, and only `/mcp-adapter tasks stop` can stop the task.
+
+Some calls still wait for the result, because their caller needs the value or nobody would see a later message:
+
+- calls from code: Pi's codemode scripts, other tools, and other extensions through the runtime tool-call event
+- MCP UI tools and the UI window's own tool calls
+- [Executor](https://executor.sh) tools
+- sessions outside the interactive terminal: print, JSON and RPC modes, which includes Pi subagents
+
+For those calls, cancelling the Pi tool call sends `tasks/cancel`, and a failed task surfaces as the same error a synchronous call would have produced.
+
+Running tasks keep going when the adapter replaces a server's connection: after a failed health check, when the server's HTTP session expires, or after `/mcp-adapter reconnect`. The adapter follows each task on the new connection and sends no cancel.
+
+Switching to another session, forking, reloading or quitting Pi saves the running tasks in the session file instead of cancelling them. When that same session starts again, with `/resume` (which reopens a saved session) or by opening it after a restart, the adapter reconnects to each task's server, follows the task and delivers its result once. A fork or a new session doesn't pick them up.
+
+These still cancel a running task with `tasks/cancel`, and the model is told once for each:
+
+- `/mcp-adapter tasks stop <server>/<taskId>` and `mcp({ cancelTask })`
+- `/mcp-adapter logout <server>`, which closes the connection to clear its credentials
+- a connection that closes with no new connection to replace it, such as when the server process exits
+
+Disabling a server with `/mcp-adapter disable <server>`, or removing it from the config, takes effect at `/reload`. The reload saves the server's running tasks like any other session stop, and when the session starts again without that server, the model is told the outcome is unknown. No cancel is sent, so the task may still finish on the server.
+
+When the adapter can't follow a task after a reconnect or a restart, the model gets one message: `MCP task <id> (<server>/<tool>) outcome unknown.`, the reason, and a note that calling the tool again may repeat the work. The reason is one of these:
+
+- 'Server "<server>" is not configured in this session; the task may still be running on it', when the server was removed or disabled
+- 'Server "<server>" was reconfigured since this task started', when the server's url or command changed
+- "Expired on the server", when the server no longer knows the task id (it answers `tasks/get` with error `-32602`)
+- 'Could not reach "<server>"', when the connection fails or the server needs sign-in
+- "It could not be followed after its connection changed", for any other cause
+
+Limits:
+
+- A stdio server's process usually exits when Pi does, and the task with it, so a task resumed on a stdio server usually ends as "outcome unknown".
+- A change to a server's `env` or headers isn't detected, so the adapter follows the task as if the server were the same.
+- If a result hasn't reached the model when the session stops, a task restored from the session file is resumed and delivered on the next start. For a task started in the current session, that result can be lost.
+
+Task traffic is dispatched on a dedicated raw channel below the SDK client (the published MCP SDK does not yet decode task result shapes itself), built on the official `@modelcontextprotocol/ext-tasks` requester package. The channel chains onto the connected transport's handlers without replacing the transport, and raw task frames appear in `/mcp-trace` in both directions. Task status notifications (`notifications/tasks`) are not consumed; polling is used exclusively. `requestTimeoutMs` applies per task request (the initiating call and each poll), not to the overall task duration, so a task can run for hours. While a task runs, its server's connection stays open instead of closing when idle.
 
 One trade-off while tasks are active: every `tools/call` on that connection is dispatched through the task-aware path instead of `Client.callTool`, so the SDK's client-side output-schema validation of `structuredContent` and SEP-2243 `Mcp-Param-*` header mirroring do not run for those calls. Servers still validate their own results; only the client-side double-check is skipped.
 
-The stable SDK handles era-specific request envelopes, result decoding, list-changed subscriptions, cancellation, and multi-round-trip sampling/elicitation. The SDK's embedded-input progress callback does not expose the originating tool or resource identity, so the adapter cannot maintain a durable per-tool waiting status row; interactive sessions keep the existing input dialog visible, and proxy calls show request progress when UI is available. The adapter keeps strict OAuth issuer validation in every mode. Adapter-level roots support, standard MCP logging presentation, and configuration/UI for protocol cache hints are not yet implemented.
+The stable SDK handles era-specific request envelopes, result decoding, list-changed subscriptions, cancellation, and multi-round-trip sampling/elicitation. The SDK's embedded-input progress callback does not expose the originating tool or resource identity, so the adapter cannot maintain a durable per-tool waiting status row; interactive sessions keep the existing input dialog visible, and proxy calls show request progress when UI is available. The adapter keeps strict OAuth issuer validation in every mode. It answers `roots/list` with the Pi session directory, the same root Pi's built-in MCP sends. Server log messages (`notifications/message`) are appended to `~/.pi/agent/mcp.log` in the same format as Pi's built-in MCP. Configuration/UI for protocol cache hints is not yet implemented.
 
 ### Stdio environment boundaries
 

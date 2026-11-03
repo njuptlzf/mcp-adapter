@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, Message, Model, TextContent } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, ModelThinkingLevel, TextContent } from "@earendil-works/pi-ai";
 import { truncateAtWord } from "./utils.ts";
 import { throwIfAborted } from "./abort.ts";
 import type { ExtensionUIContext, ModelRegistry } from "@earendil-works/pi-coding-agent";
@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/client";
 
 export type SamplingUIContext = Pick<ExtensionUIContext, "confirm">;
-export type SamplingModelRegistry = Pick<ModelRegistry, "getAvailable" | "complete">;
+export type SamplingModelRegistry = Pick<ModelRegistry, "getAvailable" | "complete"> & Partial<Pick<ModelRegistry, "streamSimple">>;
 
 export interface SamplingHandlerOptions {
   serverName: string;
@@ -20,6 +20,7 @@ export interface SamplingHandlerOptions {
   ui?: SamplingUIContext;
   modelRegistry: SamplingModelRegistry;
   getCurrentModel: () => Model<Api> | undefined;
+  getThinkingLevel: () => ModelThinkingLevel;
   getSignal: () => AbortSignal | undefined;
 }
 
@@ -65,19 +66,24 @@ export async function handleSamplingRequest(
   );
   throwIfAborted(signal);
 
-  const result = await options.modelRegistry.complete(
-    model,
-    {
-      ...(params.systemPrompt !== undefined ? { systemPrompt: params.systemPrompt } : {}),
-      messages,
-    },
-    {
-      maxTokens: params.maxTokens,
-      ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
-      ...(params.metadata !== undefined ? { metadata: params.metadata as Record<string, unknown> } : {}),
-      ...(signal ? { signal } : {}),
-    },
-  );
+  const context = {
+    ...(params.systemPrompt !== undefined ? { systemPrompt: params.systemPrompt } : {}),
+    messages,
+  };
+  const requestOptions = {
+    maxTokens: params.maxTokens,
+    ...(params.temperature !== undefined ? { temperature: params.temperature } : {}),
+    ...(params.metadata !== undefined ? { metadata: params.metadata as Record<string, unknown> } : {}),
+    ...(signal ? { signal } : {}),
+  };
+  const thinkingLevel = options.getThinkingLevel();
+  // Only streamSimple applies the thinking level; Pi before 0.86 has no streamSimple, so sampling runs with thinking off there.
+  const result = options.modelRegistry.streamSimple
+    ? await options.modelRegistry.streamSimple(model, context, {
+      ...requestOptions,
+      ...(thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+    }).result()
+    : await options.modelRegistry.complete(model, context, requestOptions);
 
   const converted = convertAssistantResult(result);
   throwIfAborted(signal);

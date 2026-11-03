@@ -19,13 +19,13 @@ function textOf(result: any): string {
   return result.content.map((c: any) => c.text ?? "").join("\n");
 }
 
-function makeState(callToolResult: unknown, toolName = "tool") {
+function makeState(callToolResult: unknown, toolName = "tool", server: Record<string, unknown> = {}) {
   const connection = {
     status: "connected",
     client: { callTool: vi.fn(async () => callToolResult) },
   };
   return {
-    config: { settings: {}, mcpServers: { demo: { command: "demo" } } },
+    config: { settings: {}, mcpServers: { demo: { command: "demo", ...server } } },
     toolMetadata: new Map([
       ["demo", [{ name: `demo_${toolName}`, originalName: toolName, description: toolName }]],
     ]),
@@ -81,6 +81,24 @@ describe("structuredContent fallback — direct tool executor", () => {
       { type: "text", text: "summary" },
       { type: "text", text: `structuredContent:\n${JSON.stringify(structured, null, 2)}` },
     ]);
+  });
+
+  it("shows only content when the server sets appendStructuredContent: false", async () => {
+    const { createDirectToolExecutor } = await import("../direct-tools.ts");
+    const state = makeState(
+      { isError: false, content: [{ type: "text", text: "summary" }], structuredContent: { status: "ok" } },
+      "tool",
+      { appendStructuredContent: false },
+    );
+    const executor = createDirectToolExecutor(
+      () => state,
+      () => null,
+      { serverName: "demo", originalName: "tool", prefixedName: "demo_tool", description: "Tool" },
+    );
+
+    const result = await executor("id", {}, undefined as any, () => {}, undefined as any);
+
+    expect(result.content).toEqual([{ type: "text", text: "summary" }]);
   });
 
   it("still shows (empty result) when both content and structuredContent are empty", async () => {
@@ -146,6 +164,19 @@ describe("structuredContent fallback — proxy executeCall", () => {
       { type: "text", text: "summary" },
       { type: "text", text: `structuredContent:\n${JSON.stringify(structured, null, 2)}` },
     ]);
+  });
+
+  it("shows only content when the server sets appendStructuredContent: false", async () => {
+    const { executeCall } = await import("../proxy-modes.ts");
+    const state = makeState(
+      { isError: false, content: [{ type: "text", text: "summary" }], structuredContent: { status: "ok" } },
+      "tool",
+      { appendStructuredContent: false },
+    );
+
+    const result = await executeCall(state, "demo_tool", {}, "demo");
+
+    expect(result.content).toEqual([{ type: "text", text: "summary" }]);
   });
 
   it("still shows (empty result) when both content and structuredContent are empty", async () => {

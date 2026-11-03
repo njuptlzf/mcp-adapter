@@ -689,7 +689,6 @@ describe("config discovery", () => {
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-config-project-"));
     process.env.HOME = home;
     process.chdir(project);
-    const realProject = realpathSync(project);
 
     writeJson(join(home, ".config", "mcp", "mcp.json"), {
       settings: { idleTimeout: 5, requestTimeoutMs: 1500, showStatusIcon: true, allowInstall: true },
@@ -1002,16 +1001,16 @@ describe("config discovery", () => {
     expect(existsSync(target)).toBe(false);
   });
 
-  it.each(["Jev settings", "project server override"])("preserves a broken config symlink when writing %s", async (kind) => {
+  it.each(["semantic search settings", "project server override"])("preserves a broken config symlink when writing %s", async (kind) => {
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-broken-pi-link-"));
     const path = join(project, ".pi", "mcp-adapter.json");
     const target = join(project, "missing.json");
     mkdirSync(dirname(path), { recursive: true });
     symlinkSync(target, path);
-    const { writeJevSemanticSearchConfig, writeProjectServerDisabledOverride } = await import("../config.ts");
+    const { writeSemanticSearchConfig, writeProjectServerDisabledOverride } = await import("../config.ts");
 
-    if (kind === "Jev settings") {
-      expect(() => writeJevSemanticSearchConfig(undefined, project, ["demo"])).toThrow();
+    if (kind === "semantic search settings") {
+      expect(() => writeSemanticSearchConfig(undefined, project, ["demo"])).toThrow();
     } else {
       expect(() => writeProjectServerDisabledOverride(undefined, project, "demo", true)).toThrow();
     }
@@ -1019,15 +1018,15 @@ describe("config discovery", () => {
     expect(existsSync(target)).toBe(false);
   });
 
-  it.each(["Jev settings", "project server override"])("updates an existing blank config when writing %s", async (kind) => {
+  it.each(["semantic search settings", "project server override"])("updates an existing blank config when writing %s", async (kind) => {
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-blank-pi-config-"));
     const path = join(project, ".pi", "mcp-adapter.json");
     writeText(path, "  \n");
-    const { writeJevSemanticSearchConfig, writeProjectServerDisabledOverride } = await import("../config.ts");
+    const { writeSemanticSearchConfig, writeProjectServerDisabledOverride } = await import("../config.ts");
 
-    if (kind === "Jev settings") {
-      expect(writeJevSemanticSearchConfig(undefined, project, ["demo"]).changed).toBe(true);
-      expect(JSON.parse(readFileSync(path, "utf-8")).settings.jev.allowedServers).toEqual(["demo"]);
+    if (kind === "semantic search settings") {
+      expect(writeSemanticSearchConfig(undefined, project, ["demo"]).changed).toBe(true);
+      expect(JSON.parse(readFileSync(path, "utf-8")).settings.semanticSearch.allowedServers).toEqual(["demo"]);
     } else {
       expect(writeProjectServerDisabledOverride(undefined, project, "demo", true).changed).toBe(true);
       expect(JSON.parse(readFileSync(path, "utf-8")).mcpServers.demo.disabled).toBe(true);
@@ -1883,6 +1882,65 @@ describe("config discovery", () => {
     expect(readFileSync(path, "utf-8")).toBe(contents);
   });
 
+  it("adds a script tool entry, creating the file and the scriptTools object, and keeps every other key", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mcp-script-tool-entry-"));
+    const { buildUnifiedDiff, previewScriptToolEntryTexts, writeScriptToolEntry } = await import("../config.ts");
+    const entry = { description: "Close stale issues", file: "mcp-scripts/close_stale.js" };
+
+    const missing = join(root, "missing", "mcp-adapter.json");
+    const preview = previewScriptToolEntryTexts(missing, "close_stale", entry);
+    expect(preview).toMatchObject({ existed: false, beforeText: "" });
+    expect(buildUnifiedDiff(preview.beforeText, preview.afterText)).toContain('+   "scriptTools": {');
+    expect(existsSync(missing)).toBe(false);
+    expect(writeScriptToolEntry(missing, "close_stale", entry)).toBe(missing);
+    expect(readFileSync(missing, "utf-8")).toBe(preview.afterText);
+    expect(JSON.parse(preview.afterText)).toEqual({ scriptTools: { close_stale: entry } });
+
+    const existing = join(root, "existing.json");
+    writeJson(existing, { mcpServers: { demo: { command: "demo" } }, settings: { toolPrefix: "short" }, scriptTools: { other: { description: "Other", file: "other.js" } } });
+    writeScriptToolEntry(existing, "close_stale", entry);
+    expect(JSON.parse(readFileSync(existing, "utf-8"))).toEqual({
+      mcpServers: { demo: { command: "demo" } },
+      settings: { toolPrefix: "short" },
+      scriptTools: { other: { description: "Other", file: "other.js" }, close_stale: entry },
+    });
+  });
+
+  it("counts lines as diff -u does when it shows context, and lists every line without it", async () => {
+    const { buildUnifiedDiff } = await import("../config.ts");
+    expect(buildUnifiedDiff("", "a\nb\n", { context: 3 })).toBe("--- before\n+++ after\n@@ -0,0 +1,2 @@\n+ a\n+ b");
+    expect(buildUnifiedDiff("a\n", "a", { context: 3 })).toBe("--- before\n+++ after\n(only the final newline differs)");
+    expect(buildUnifiedDiff("", "a\n")).toBe("--- before\n+++ after\n+ a\n  ");
+  });
+
+  it("refuses a script tool entry for a non-object scriptTools, malformed JSON or a dangling symlink, writing nothing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mcp-script-tool-entry-invalid-"));
+    const { previewScriptToolEntryTexts, writeScriptToolEntry } = await import("../config.ts");
+    const entry = { description: "D", file: "mcp-scripts/a.js" };
+
+    const nonObject = join(root, "non-object.json");
+    writeText(nonObject, '{"scriptTools":["a"]}\n');
+    for (const call of [previewScriptToolEntryTexts, writeScriptToolEntry]) {
+      expect(() => call(nonObject, "a", entry)).toThrow(`Failed to update MCP config at ${nonObject}: scriptTools must be an object`);
+    }
+    expect(readFileSync(nonObject, "utf-8")).toBe('{"scriptTools":["a"]}\n');
+
+    const malformed = join(root, "malformed.json");
+    writeText(malformed, "{ malformed");
+    for (const call of [previewScriptToolEntryTexts, writeScriptToolEntry]) {
+      expect(() => call(malformed, "a", entry)).toThrow(`Failed to read MCP config at ${malformed}`);
+    }
+    expect(readFileSync(malformed, "utf-8")).toBe("{ malformed");
+
+    const link = join(root, "link.json");
+    symlinkSync(join(root, "absent.json"), link);
+    for (const call of [previewScriptToolEntryTexts, writeScriptToolEntry]) {
+      expect(() => call(link, "a", entry)).toThrow(`Failed to read MCP config at ${link}`);
+    }
+    expect(existsSync(join(root, "absent.json"))).toBe(false);
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  });
+
   it("preserves a malformed imports list when adding compatibility imports", async () => {
     const path = join(mkdtempSync(join(tmpdir(), "pi-mcp-invalid-imports-")), "mcp.json");
     const contents = '{"imports":["cursor",42]}\n';
@@ -2013,6 +2071,236 @@ describe("config discovery", () => {
     });
   });
 
+  it("reports settings OpenCode ignores on imported local servers instead of reading them", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const openCodePath = join(home, ".config", "opencode", "opencode.json");
+    writeJson(adapterPath, { imports: ["opencode"], mcpServers: {} });
+    writeJson(openCodePath, {
+      mcp: {
+        calendar: { type: "local", command: ["calendar-mcp"], enabled: true, args: ["--x"], extra: true },
+        plain: { type: "local", command: ["plain-mcp"], environment: { TOKEN: "t" } },
+      },
+    });
+
+    const { getLegacyMcpMigrationNotices, getServerProvenance, loadMcpConfig } = await import("../config.ts");
+    const { createMcpPanel } = await import("../mcp-panel.ts");
+    const config = loadMcpConfig();
+    expect(config.mcpServers).toEqual({
+      calendar: { command: "calendar-mcp", args: [] },
+      plain: { command: "plain-mcp", args: [], env: { TOKEN: "t" } },
+    });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `${openCodePath}: OpenCode ignores these settings, so the import does too (details in /mcp-adapter): "calendar": args, extra.`,
+    ]);
+    const provenance = getServerProvenance(undefined, project);
+    expect(provenance.get("plain")).toEqual({ path: adapterPath, kind: "import", importKind: "opencode" });
+    const callbacks = {
+      reconnect: async () => true,
+      canAuthenticate: () => false,
+      authenticate: async () => ({ ok: false }),
+      getConnectionStatus: () => "idle" as const,
+      refreshCacheAfterReconnect: () => null,
+    };
+    const panel = createMcpPanel(config, null, provenance, callbacks, { requestRender: () => {} }, () => {});
+    const output = panel.render(140).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    panel.dispose();
+    expect(output).toContain(`Ignored OpenCode settings: args, extra`);
+  });
+
+  it("reports settings OpenCode ignores on imported remote servers", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-remote-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-remote-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const openCodePath = join(home, ".config", "opencode", "opencode.json");
+    writeJson(adapterPath, { imports: ["opencode"], mcpServers: {} });
+    writeJson(openCodePath, {
+      mcp: {
+        docs: { type: "remote", url: "https://docs.test/mcp", headers: { Authorization: "Bearer t" }, directTools: true },
+        plain: { type: "remote", url: "https://plain.test/mcp", headers: { Authorization: "Bearer t" }, oauth: false, enabled: true, timeout: 5000 },
+      },
+    });
+
+    const { getLegacyMcpMigrationNotices, getServerProvenance, loadMcpConfig } = await import("../config.ts");
+    expect(loadMcpConfig().mcpServers).toEqual({
+      docs: { url: "https://docs.test/mcp", headers: { Authorization: "Bearer t" } },
+      plain: { url: "https://plain.test/mcp", headers: { Authorization: "Bearer t" }, oauth: false },
+    });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `${openCodePath}: OpenCode ignores these settings, so the import does too (details in /mcp-adapter): "docs": directTools.`,
+    ]);
+    const provenance = getServerProvenance(undefined, project);
+    expect(provenance.get("docs")?.ignoredSettings).toEqual(["directTools"]);
+    expect(provenance.get("plain")).toEqual({ path: adapterPath, kind: "import", importKind: "opencode" });
+  });
+
+  it("says which file's credentials a url override in another file drops", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-dropped-credentials-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-dropped-credentials-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    const sharedPath = join(home, ".config", "mcp", "mcp.json");
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const headers = { Authorization: "Bearer secret-token" };
+    writeJson(sharedPath, { mcpServers: { github: { url: "https://api.githubcopilot.com/mcp/", headers } } });
+    writeJson(adapterPath, { mcpServers: { github: { url: "https://api.githubcopilot.com/mcp", auth: "oauth" } } });
+
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
+    expect(loadMcpConfig(undefined, project).mcpServers.github).toEqual({ url: "https://api.githubcopilot.com/mcp", auth: "oauth" });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `"github": ignoring headers from ${sharedPath}, because ${adapterPath} sets a different url for this server. Use one url, or set it next to that url.`,
+    ]);
+
+    writeJson(adapterPath, { mcpServers: { github: { url: "https://api.githubcopilot.com/mcp/", auth: "oauth" } } });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+
+    writeJson(adapterPath, { mcpServers: { github: { url: "https://api.githubcopilot.com/mcp", headers } } });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+  });
+
+  it("names the OpenCode file that supplied a dropped credential, not the project file that inherits it", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-dropped-opencode-home-"));
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-dropped-opencode-project-")));
+    process.env.HOME = home;
+    process.chdir(project);
+    const globalOpenCode = join(home, ".config", "opencode", "opencode.json");
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    writeJson(globalOpenCode, { mcp: { docs: { type: "remote", url: "https://docs.test/mcp", headers: { Authorization: "Bearer t" } } } });
+    writeJson(join(project, "opencode.json"), { mcp: { docs: { timeout: 5000 } } });
+    writeJson(adapterPath, { imports: ["opencode"], mcpServers: { docs: { url: "https://docs.test/v2/mcp" } } });
+
+    const { getLegacyMcpMigrationNotices } = await import("../config.ts");
+    expect(getLegacyMcpMigrationNotices(project)).toContain(
+      `"docs": ignoring headers from ${globalOpenCode}, because ${adapterPath} sets a different url for this server. Use one url, or set it next to that url.`,
+    );
+  });
+
+  it("loads a config that still sets mcpScript's settings, and names each such file in one notice", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-removed-script-home-"));
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-removed-script-project-")));
+    process.env.HOME = home;
+    process.chdir(project);
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const projectPath = join(project, ".pi", "mcp-adapter.json");
+    writeJson(adapterPath, { mcpServers: { docs: { url: "https://docs.test/mcp" } }, settings: { scriptMode: true, scriptSkill: "model", toolPrefix: "short" } });
+    writeJson(projectPath, { mcpServers: {}, settings: { scriptSkill: "manual" } });
+
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
+    const config = loadMcpConfig(undefined, project);
+    expect(config.mcpServers.docs).toEqual({ url: "https://docs.test/mcp" });
+    expect(config.settings?.toolPrefix).toBe("short");
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `${adapterPath}: pi-mcp-adapter no longer has mcpScript, so settings.scriptMode and settings.scriptSkill do nothing. Remove them, and add "+codemode" to defaultTools in Pi's settings to script MCP calls with Pi's codemode.`,
+      `${projectPath}: pi-mcp-adapter no longer has mcpScript, so settings.scriptSkill does nothing. Remove it, and add "+codemode" to defaultTools in Pi's settings to script MCP calls with Pi's codemode.`,
+    ]);
+  });
+
+  it("gives no mcpScript notice for a config that sets neither scriptMode nor scriptSkill", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-no-script-home-"));
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-no-script-project-")));
+    process.env.HOME = home;
+    process.chdir(project);
+    writeJson(join(home, ".pi", "agent", "mcp-adapter.json"), { mcpServers: { docs: { url: "https://docs.test/mcp" } }, settings: { toolPrefix: "short" } });
+
+    const { getLegacyMcpMigrationNotices } = await import("../config.ts");
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+  });
+
+  it("loads a config that still sets settings.jev, and says once per file what replaced it", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-removed-jev-home-"));
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-removed-jev-project-")));
+    process.env.HOME = home;
+    process.chdir(project);
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const projectPath = join(project, ".pi", "mcp-adapter.json");
+    writeJson(adapterPath, {
+      mcpServers: { docs: { url: "https://docs.test/mcp" } },
+      settings: { scriptMode: false, jev: { semanticSearch: true, scriptEvaluation: true, maxRetries: 9, evaluationBudget: 2 } },
+    });
+    writeJson(projectPath, { mcpServers: { local: { command: "local-mcp" } }, settings: { jev: false } });
+
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
+    expect(Object.keys(loadMcpConfig(undefined, project).mcpServers).sort()).toEqual(["docs", "local"]);
+    const replaced = "settings.jev was replaced by settings.semanticSearch, and semantic search now uses Pi's classifier models instead of a System One key. Move allowedServers there (semanticCandidateLimit is now candidateLimit and semanticMinProbability is minProbability), or run /mcp-adapter semantic setup.";
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `${adapterPath}: pi-mcp-adapter no longer has mcpScript, so settings.scriptMode does nothing. Remove it, and add "+codemode" to defaultTools in Pi's settings to script MCP calls with Pi's codemode.`,
+      `${adapterPath}: ${replaced}`,
+      `${projectPath}: settings.jev was replaced by settings.semanticSearch, and settings.jev: false no longer turns semantic search off. Set settings.semanticSearch to false to keep it off.`,
+    ]);
+  });
+
+  it("reports a key a project OpenCode entry inherits from the global file, against the global file", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-merge-home-"));
+    const project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-opencode-ignored-merge-project-")));
+    process.env.HOME = home;
+    process.chdir(project);
+    const adapterPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    const globalOpenCode = join(home, ".config", "opencode", "opencode.json");
+    writeJson(adapterPath, { imports: ["opencode"], mcpServers: {} });
+    writeJson(globalOpenCode, {
+      mcp: { calendar: { type: "local", command: ["calendar-mcp"], env: { FROM: "global" }, args: ["--x"] } },
+    });
+    writeJson(join(project, "opencode.json"), { mcp: { calendar: { environment: { FROM: "project" } } } });
+
+    const { getLegacyMcpMigrationNotices, getProjectPiConfigPath, getServerProvenance, loadMcpConfig } = await import("../config.ts");
+    expect(loadMcpConfig().mcpServers.calendar).toEqual({ command: "calendar-mcp", args: [], env: { FROM: "project" } });
+    expect(getServerProvenance(undefined, project).get("calendar")?.ignoredSettings).toEqual(["args"]);
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([
+      `${globalOpenCode}: OpenCode ignores these settings, so the import does too (details in /mcp-adapter): "calendar": args.`,
+    ]);
+
+    // An adapter entry that redefines the server replaces the import, so the OpenCode line no longer applies to it.
+    writeJson(adapterPath, { imports: ["opencode"], mcpServers: { calendar: { command: "calendar-mcp", env: { FROM: "adapter" } } } });
+    expect(getServerProvenance(undefined, project).get("calendar")).toEqual({ path: adapterPath, kind: "user" });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+
+    // A project file that imports OpenCode replaces the global definition, so the warning comes back.
+    writeJson(adapterPath, { mcpServers: { calendar: { command: "calendar-mcp", env: { FROM: "adapter" } } } });
+    writeJson(getProjectPiConfigPath(project), { imports: ["opencode"] });
+    expect(loadMcpConfig(undefined, project).mcpServers.calendar).toEqual({ command: "calendar-mcp", args: [], env: { FROM: "project" } });
+    expect(getLegacyMcpMigrationNotices(project)).toHaveLength(1);
+  });
+
+  it("accepts env as another name for environment in OpenCode imports", async () => {
+    const home = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-env-alias-home-"));
+    const project = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-env-alias-project-"));
+    process.env.HOME = home;
+    process.chdir(project);
+    const globalOpenCode = join(home, ".config", "opencode", "opencode.json");
+    const projectOpenCode = join(project, "opencode.json");
+    writeJson(join(home, ".pi", "agent", "mcp-adapter.json"), { imports: ["opencode"], mcpServers: {} });
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
+    const calendar = () => loadMcpConfig(undefined, project).mcpServers.calendar;
+
+    writeJson(globalOpenCode, { mcp: { calendar: { type: "local", command: ["calendar-mcp"], env: { KEY: "from-env" } } } });
+    expect(calendar()).toEqual({ command: "calendar-mcp", args: [], env: { KEY: "from-env" } });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+
+    // OpenCode runs `environment`, so it wins when both are set.
+    writeJson(globalOpenCode, {
+      mcp: { calendar: { type: "local", command: ["calendar-mcp"], env: { KEY: "from-env" }, environment: { KEY: "from-environment" } } },
+    });
+    expect(calendar()?.env).toEqual({ KEY: "from-environment" });
+
+    // A project entry that changes the command drops inherited variables, whichever name set them.
+    writeJson(globalOpenCode, { mcp: { calendar: { type: "local", command: ["calendar-mcp"], env: { KEY: "from-env" } } } });
+    writeJson(projectOpenCode, { mcp: { calendar: { command: ["other-mcp"] } } });
+    expect(calendar()).toEqual({ command: "other-mcp", args: [] });
+
+    // An empty `env` counts as set, exactly like an empty `environment`.
+    writeJson(globalOpenCode, { mcp: { calendar: { type: "local", command: ["calendar-mcp"], environment: { KEY: "global" } } } });
+    writeJson(projectOpenCode, { mcp: { calendar: { environment: {} } } });
+    const withEnvironment = calendar();
+    writeJson(projectOpenCode, { mcp: { calendar: { env: {} } } });
+    expect(calendar()).toEqual(withEnvironment);
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+  });
+
   it("imports OpenCode v2 project servers through host discovery", async () => {
     const home = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-v2-home-"));
     const project = mkdtempSync(join(tmpdir(), "pi-mcp-opencode-v2-project-"));
@@ -2075,8 +2363,12 @@ describe("config discovery", () => {
       mcp: { shouldNotLoad: { type: "local", command: ["unexpected"] } },
     });
 
-    const { loadMcpConfig } = await import("../config.ts");
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
     expect(loadMcpConfig().mcpServers).toEqual({});
+    writeJson(join(home, ".config", "opencode", "opencode.json"), {
+      mcp: { shouldNotLoad: { type: "local", command: ["unexpected"], env: { A: "1" } } },
+    });
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
   });
 
   it("imports OpenCode servers from the project V1 config", async () => {
@@ -2267,6 +2559,12 @@ describe("config discovery", () => {
       protocolVersion: "auto",
       directTools: true,
     });
+    expect(KNOWN_SERVER_PRESETS.find(({ id }) => id === "github")?.entry).toEqual({
+      url: "https://api.githubcopilot.com/mcp/",
+      auth: "bearer",
+      bearerToken: "!gh auth token",
+      protocolVersion: "auto",
+    });
     expect(KNOWN_SERVER_PRESETS.find(({ id }) => id === "chrome-devtools")?.entry.protocolVersion).toBeUndefined();
   });
 
@@ -2311,18 +2609,49 @@ describe("config discovery", () => {
 
 });
 
-describe("Jev config validation", () => {
-  it("accepts bounded settings and rejects invalid token budgets at the file boundary", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-mcp-jev-config-"));
+describe("semantic search config validation", () => {
+  it("accepts bounded settings and rejects unknown or out-of-range ones at the file boundary", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mcp-semantic-config-"));
     const valid = join(root, "valid.json");
-    const invalid = join(root, "invalid.json");
-    writeJson(valid, { settings: { jev: { scriptEvaluation: true, allowedServers: ["safe"], model: "jev-1.13.0", maxRetries: 1, maxEvaluationTokensPerScript: 32_768 } }, mcpServers: {} });
-    writeJson(invalid, { settings: { jev: { scriptEvaluation: true, maxEvaluationTokensPerScript: 0 } }, mcpServers: {} });
+    const unknown = join(root, "unknown.json");
+    const outOfRange = join(root, "out-of-range.json");
+    const semanticSearch = { allowedServers: ["safe"], model: "openrouter/typesafe/jev-1.13", candidateLimit: 40, minProbability: 0.3 };
+    writeJson(valid, { settings: { semanticSearch }, mcpServers: {} });
+    writeJson(unknown, { settings: { semanticSearch: { semanticSearch: true } }, mcpServers: {} });
+    writeJson(outOfRange, { settings: { semanticSearch: { candidateLimit: 128 } }, mcpServers: {} });
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { loadMcpConfig } = await import("../config.ts");
-    expect(loadMcpConfig(valid, root).settings?.jev).toMatchObject({ scriptEvaluation: true, model: "jev-1.13.0", maxRetries: 1, maxEvaluationTokensPerScript: 32_768 });
-    expect(loadMcpConfig(invalid, root).settings?.jev).toBeUndefined();
-    expect(warning).toHaveBeenCalledWith(expect.stringContaining("Failed to load"), expect.any(Error));
+    expect(loadMcpConfig(valid, root).settings?.semanticSearch).toEqual(semanticSearch);
+    expect(loadMcpConfig(unknown, root).settings?.semanticSearch).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("Failed to load"), expect.objectContaining({ message: "settings.semanticSearch.semanticSearch is not supported" }));
+    expect(loadMcpConfig(outOfRange, root).settings?.semanticSearch).toBeUndefined();
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining("Failed to load"), expect.objectContaining({ message: "settings.semanticSearch.candidateLimit must be an integer from 2 to 127" }));
+    rmSync(root, { recursive: true, force: true });
+  });
+});
+
+describe("extraction config validation", () => {
+  it.each([
+    [{ allowedServers: ["safe", "safe"], model: "cloudflare-ai-gateway/clairic" }, undefined],
+    [{ allowedServers: [] }, "settings.extraction.allowedServers must name at least one server"],
+    [{ model: "cloudflare-workers-ai/clairic" }, "settings.extraction.allowedServers must name at least one server"],
+    [{ allowedServers: ["safe"], route: "x" }, "settings.extraction.route is not supported"],
+    [{ allowedServers: ["safe"], model: "openrouter/clairic" }, 'settings.extraction.model must be "cloudflare-workers-ai/clairic" or "cloudflare-ai-gateway/clairic"'],
+  ])("loads %j only when valid, otherwise drops the file with the reason", async (extraction, reason) => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mcp-extraction-config-"));
+    const path = join(root, "mcp.json");
+    writeJson(path, { settings: { extraction }, mcpServers: { safe: { command: "safe" } } });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { loadMcpConfig } = await import("../config.ts");
+    const config = loadMcpConfig(path, root);
+    if (reason === undefined) {
+      expect(config.settings?.extraction).toEqual(extraction);
+      expect(config.mcpServers).toHaveProperty("safe");
+    } else {
+      expect(config.mcpServers).not.toHaveProperty("safe");
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining("Failed to load"), expect.objectContaining({ message: reason }));
+    }
+    warning.mockRestore();
     rmSync(root, { recursive: true, force: true });
   });
 });
@@ -2381,5 +2710,185 @@ describe("server description", () => {
     warning.mockRestore();
     vi.unstubAllEnvs();
     rmSync(home, { recursive: true, force: true });
+  });
+});
+
+describe("scriptTools", () => {
+  let home: string;
+  let project: string;
+  let globalPath: string;
+  let projectPath: string;
+
+  beforeEach(() => {
+    home = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-script-tools-home-")));
+    project = realpathSync(mkdtempSync(join(tmpdir(), "pi-mcp-script-tools-project-")));
+    vi.stubEnv("HOME", home);
+    vi.stubEnv("PI_PACKAGE_DIR", "");
+    vi.stubEnv("PI_CODING_AGENT_DIR", "");
+    vi.stubEnv("PI_MCP_CONFIG_MODE", "merge");
+    vi.resetModules();
+    globalPath = join(home, ".pi", "agent", "mcp-adapter.json");
+    projectPath = join(project, ".pi", "mcp-adapter.json");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  const schema = { type: "object", properties: { repo: { type: "string" } }, required: ["repo"] };
+
+  it("loads script tools from a global and a project file, a project entry replacing a global one whole", async () => {
+    writeJson(globalPath, {
+      mcpServers: { docs: { url: "https://docs.test/mcp" } },
+      scriptTools: {
+        close_stale: { description: "Global close", file: "./global.js", inputSchema: schema, declare: true },
+        triage: { description: "Triage", file: "./triage.js" },
+      },
+    });
+    writeJson(projectPath, { scriptTools: { close_stale: { description: "Project close", file: "./project.js" } } });
+
+    const { loadMcpConfig } = await import("../config.ts");
+    const { loadedScriptToolIssues } = await import("../project-server-trust.ts");
+    const config = loadMcpConfig(undefined, project);
+
+    expect(config.mcpServers.docs).toEqual({ url: "https://docs.test/mcp" });
+    expect(config.scriptTools).toEqual({
+      close_stale: { description: "Project close", file: join(project, ".pi", "project.js") },
+      triage: { description: "Triage", file: join(home, ".pi", "agent", "triage.js") },
+    });
+    expect(loadedScriptToolIssues(config)).toEqual([]);
+  });
+
+  it("drops each bad entry with the config path, its name and the reason, and keeps the file's servers", async () => {
+    const patternProperties = { "(": { type: "string" } };
+    writeJson(globalPath, {
+      mcpServers: { docs: { url: "https://docs.test/mcp" } },
+      settings: { toolPrefix: "short" },
+      scriptTools: {
+        "Close-Stale": { description: "Bad name", file: "./a.js" },
+        [`a${"b".repeat(48)}`]: { description: "Too long", file: "./a.js" },
+        not_object: "./a.js",
+        no_description: { file: "./a.js" },
+        blank_description: { description: "  ", file: "./a.js" },
+        no_file: { description: "No file" },
+        empty_file: { description: "Empty file", file: "" },
+        string_schema: { description: "String schema", file: "./a.js", inputSchema: { type: "string" } },
+        array_schema: { description: "Array schema", file: "./a.js", inputSchema: [] },
+        broken_schema: { description: "Broken schema", file: "./a.js", inputSchema: { type: "object", patternProperties } },
+        string_declare: { description: "String declare", file: "./a.js", declare: "yes" },
+        extra_key: { description: "Extra key", file: "./a.js", command: "node" },
+        good: { description: "Good", file: "./good.js" },
+      },
+    });
+
+    const { getLegacyMcpMigrationNotices, loadMcpConfig } = await import("../config.ts");
+    const { loadedScriptToolIssues } = await import("../project-server-trust.ts");
+    const config = loadMcpConfig(undefined, project);
+
+    expect(config.mcpServers.docs).toEqual({ url: "https://docs.test/mcp" });
+    expect(config.settings?.toolPrefix).toBe("short");
+    expect(config.scriptTools).toEqual({ good: { description: "Good", file: join(home, ".pi", "agent", "good.js") } });
+    const dropped = (name: string, reason: string) => `${globalPath}: script tool ${JSON.stringify(name)} was not loaded — ${reason}.`;
+    const badName = "its name must start with a lowercase letter and have only lowercase letters, digits and underscores, at most 48 characters";
+    const objectSchema = 'inputSchema must be a JSON Schema object with "type": "object"';
+    expect(loadedScriptToolIssues(config)).toEqual([
+      dropped("Close-Stale", badName),
+      dropped(`a${"b".repeat(48)}`, badName),
+      dropped("not_object", "it must be an object"),
+      dropped("no_description", "description must be a non-empty string"),
+      dropped("blank_description", "description must be a non-empty string"),
+      dropped("no_file", "file must be a non-empty string"),
+      dropped("empty_file", "file must be a non-empty string"),
+      dropped("string_schema", objectSchema),
+      dropped("array_schema", objectSchema),
+      dropped("broken_schema", "inputSchema is not a usable JSON Schema (Invalid regular expression: /(/u: Unterminated group)"),
+      dropped("string_declare", "declare must be true or false"),
+      dropped("extra_key", 'it has unknown key "command"'),
+    ]);
+    // Script-tool problems are not migration notices, which reach mcp({}).
+    expect(getLegacyMcpMigrationNotices(project)).toEqual([]);
+  });
+
+  it("reports a scriptTools block that is not an object, and keeps the file's servers", async () => {
+    writeJson(projectPath, { mcpServers: { docs: { url: "https://docs.test/mcp" } }, scriptTools: ["close_stale"] });
+
+    const { loadMcpConfig } = await import("../config.ts");
+    const { loadedScriptToolIssues } = await import("../project-server-trust.ts");
+    const config = loadMcpConfig(undefined, project);
+
+    expect(config.mcpServers.docs).toEqual({ url: "https://docs.test/mcp" });
+    expect(config.scriptTools).toBeUndefined();
+    expect(loadedScriptToolIssues(config)).toEqual([
+      `${projectPath}: scriptTools was not loaded — it must be an object that maps tool names to script tools.`,
+    ]);
+  });
+
+  it("resolves file against home, as an absolute path, or against the defining file's directory", async () => {
+    const absolute = join(project, "elsewhere", "abs.js");
+    writeJson(globalPath, {
+      scriptTools: {
+        tilde: { description: "Tilde", file: "~/scripts/tilde.js" },
+        absolute: { description: "Absolute", file: absolute },
+        global_relative: { description: "Relative", file: "scripts/rel.js" },
+      },
+    });
+    writeJson(join(project, ".mcp.json"), { scriptTools: { shared_relative: { description: "Shared", file: "./scripts/shared.js" } } });
+    writeJson(projectPath, { scriptTools: { project_relative: { description: "Project", file: "../scripts/up.js" } } });
+
+    const { loadMcpConfig } = await import("../config.ts");
+    const files = Object.fromEntries(Object.entries(loadMcpConfig(undefined, project).scriptTools ?? {}).map(([name, tool]) => [name, tool.file]));
+
+    expect(files).toEqual({
+      tilde: join(home, "scripts", "tilde.js"),
+      absolute,
+      global_relative: join(home, ".pi", "agent", "scripts", "rel.js"),
+      shared_relative: join(project, "scripts", "shared.js"),
+      project_relative: join(project, "scripts", "up.js"),
+    });
+  });
+
+  it("never touches the script file at load", async () => {
+    const unreadable = join(project, "unreadable.js");
+    writeText(unreadable, "return 1;");
+    chmodSync(unreadable, 0o000);
+    const insideFile = join(unreadable, "nested.js");
+    writeJson(projectPath, {
+      scriptTools: {
+        missing: { description: "Missing", file: "./does/not/exist.js" },
+        unreadable: { description: "Unreadable", file: unreadable },
+        not_a_path: { description: "Under a file", file: insideFile },
+      },
+    });
+
+    try {
+      const { loadMcpConfig } = await import("../config.ts");
+      const { loadedScriptToolIssues } = await import("../project-server-trust.ts");
+      const config = loadMcpConfig(undefined, project);
+      expect(Object.keys(config.scriptTools ?? {})).toEqual(["missing", "unreadable", "not_a_path"]);
+      expect(loadedScriptToolIssues(config)).toEqual([]);
+    } finally {
+      chmodSync(unreadable, 0o644);
+    }
+  });
+
+  it("loads a file that has scriptTools and no mcpServers", async () => {
+    writeJson(projectPath, { scriptTools: { close_stale: { description: "Close", file: "./close.js", inputSchema: schema, declare: false } } });
+
+    const { loadMcpConfig } = await import("../config.ts");
+    const config = loadMcpConfig(undefined, project);
+
+    expect(config.mcpServers).toEqual({});
+    expect(config.scriptTools).toEqual({
+      close_stale: { description: "Close", file: join(project, ".pi", "close.js"), inputSchema: schema, declare: false },
+    });
+  });
+
+  it("keeps the config the same without script tools", async () => {
+    writeJson(globalPath, { mcpServers: { docs: { url: "https://docs.test/mcp" } } });
+
+    const { loadMcpConfig } = await import("../config.ts");
+    expect(loadMcpConfig(undefined, project)).toEqual({ mcpServers: { docs: { url: "https://docs.test/mcp" } } });
   });
 });

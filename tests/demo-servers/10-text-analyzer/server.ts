@@ -87,7 +87,7 @@ server.tool("language_detect", "Detect language of text", {
   let detected = 'unknown';
   if (enScore > esScore && enScore > frScore) detected = 'english';
   else if (esScore > enScore && esScore > frScore) detected = 'spanish';
-  else if (frScore > enScore && frScore > enScore) detected = 'french';
+  else if (frScore > enScore && frScore > esScore) detected = 'french';
   
   return { content: [{ type: "text", text: JSON.stringify({ language: detected, confidence: Math.max(enScore, esScore, frScore) / words.length }) }] };
 });

@@ -9,6 +9,7 @@ import type {
 } from "@modelcontextprotocol/client";
 
 // ajv-formats types target its bundled ajv; the runtime accepts both instances.
+// oxlint-disable-next-line anti-slop/no-chained-type-assertions
 const addFormats = addFormatsImport as unknown as (instance: Ajv) => void;
 
 // Rust servers built with schemars annotate numbers with these formats. The
@@ -56,8 +57,11 @@ export function createJsonSchemaValidator(): JsonSchemaValidatorProvider {
       const dialect = schemaDialect(schema);
       if (dialect.status === "unstamped" || DRAFT_2020_12_SCHEMA_URIS.has(dialect.uri)) {
         draft2020Validator ??= (() => {
+          // The CJS default export is typed apart from the named Ajv class it extends.
+          // oxlint-disable-next-line anti-slop/no-chained-type-assertions
           const Ajv2020 = Ajv2020Import as unknown as typeof Ajv;
-          const ajv = new Ajv2020({ strict: false, allErrors: true });
+          // Ajv diagnostics must not bypass Pi's renderer and overwrite its editor.
+          const ajv = new Ajv2020({ strict: false, allErrors: true, logger: false });
           addKnownFormats(ajv);
           return new AjvJsonSchemaValidator(ajv);
         })();
@@ -73,6 +77,7 @@ export function createJsonSchemaValidator(): JsonSchemaValidatorProvider {
           validateFormats: true,
           validateSchema: false,
           allErrors: true,
+          logger: false,
         });
         addKnownFormats(ajv);
         return new AjvJsonSchemaValidator(ajv);

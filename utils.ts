@@ -1,10 +1,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import stripJsonComments from "strip-json-comments";
 import type { McpConfig, McpToolAnnotations, ServerEntry } from "./types.ts";
+
+/** Check whether an HTTP server configuration permits OAuth. */
+export function supportsOAuth(definition: ServerEntry): boolean {
+  if (!definition.url) return false;
+  if (definition.auth === false || definition.oauth === false) return false;
+  if (definition.auth === "oauth") return true;
+  // Custom headers take precedence over implicit OAuth detection.
+  if (definition.headers && Object.keys(definition.headers).length > 0) return false;
+  return definition.auth === undefined;
+}
 
 export function stripUtf8Bom(raw: string): string {
   return raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
@@ -137,16 +147,17 @@ export function interpolateEnvVars(value: string): string;
 export function interpolateEnvVars(value: string, environment: NodeJS.ProcessEnv): string;
 export function interpolateEnvVars(value: string, environment: NodeJS.ProcessEnv = process.env): string {
   return value
-    .replace(/\$\{(\w+)\}/g, (_, name) => environment[name] ?? "")
+    // `${NAME:-default}` uses the default only when NAME is unset, as Claude Code does.
+    .replace(/\$\{(\w+)(?::-([^}]*))?\}/g, (_, name, fallback: string | undefined) => environment[name] ?? fallback ?? "")
     .replace(/\$env:(\w+)/g, (_, name) => environment[name] ?? "")
     .replace(/\{env:(\w+)\}/g, (_, name) => environment[name] ?? "");
 }
 
 export function getMissingEnvVars(value: string, environment: NodeJS.ProcessEnv = process.env): string[] {
   const missing = new Set<string>();
-  for (const match of value.matchAll(/\$\{(\w+)\}|\$env:(\w+)|\{env:(\w+)\}/g)) {
-    const name = match[1] ?? match[2] ?? match[3];
-    if (name && environment[name] === undefined) {
+  for (const match of value.matchAll(/\$\{(\w+)(:-[^}]*)?\}|\$env:(\w+)|\{env:(\w+)\}/g)) {
+    const name = match[1] ?? match[3] ?? match[4];
+    if (name && match[2] === undefined && environment[name] === undefined) {
       missing.add(name);
     }
   }
@@ -180,6 +191,41 @@ export function interpolateEnvRecord(values: Record<string, string> | undefined,
 const COMMAND_SECRET_TIMEOUT_MS = 10_000;
 const COMMAND_SECRET_MAX_OUTPUT_BYTES = 1024 * 1024;
 
+let windowsCommandBash: string | null | undefined;
+
+function isLegacyWslBash(path: string): boolean {
+  return /^[a-z]:\\windows\\(?:system32|sysnative)\\bash\.exe$/.test(path.replace(/\//g, "\\").toLowerCase());
+}
+
+function findWindowsBash(): string | null {
+  const installs = [process.env.ProgramFiles, process.env["ProgramFiles(x86)"]]
+    .filter((dir): dir is string => Boolean(dir))
+    .map(dir => `${dir}\\Git\\bin\\bash.exe`);
+  const found = installs.find(path => existsSync(path));
+  if (found) return found;
+  try {
+    const result = spawnSync("where", ["bash.exe"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+    if (result.status !== 0 || !result.stdout) return null;
+    return result.stdout.split(/\r?\n/)
+      .map(line => line.trim())
+      .find(path => path && !isLegacyWslBash(path) && existsSync(path)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * On Windows, the bash used to run `!command` values: Git Bash in its standard
+ * install locations, then bash.exe on PATH (skipping the legacy WSL launcher),
+ * as Pi does. Undefined elsewhere or when none is found, so callers keep the
+ * platform default shell.
+ */
+export function getWindowsCommandBash(): string | undefined {
+  if (process.platform !== "win32") return undefined;
+  if (windowsCommandBash === undefined) windowsCommandBash = findWindowsBash();
+  return windowsCommandBash ?? undefined;
+}
+
 /** Resolve a secret value, executing only a single leading `!` command marker. */
 export function resolveCommandSecret(value: string, context: string): string;
 export function resolveCommandSecret(value: undefined, context: string): undefined;
@@ -189,14 +235,17 @@ export function resolveCommandSecret(value: string | undefined, context: string)
   if (value.startsWith("!!")) return interpolateEnvVars(value.slice(1));
   if (!value.startsWith("!")) return interpolateEnvVars(value);
 
-  const result = spawnSync(value.slice(1), {
-    shell: true,
+  const options: SpawnSyncOptionsWithStringEncoding = {
     encoding: "utf8",
     timeout: COMMAND_SECRET_TIMEOUT_MS,
     maxBuffer: COMMAND_SECRET_MAX_OUTPUT_BYTES,
     stdio: ["ignore", "pipe", "ignore"],
     windowsHide: true,
-  });
+  };
+  const bash = getWindowsCommandBash();
+  const result = bash === undefined
+    ? spawnSync(value.slice(1), { ...options, shell: true })
+    : spawnSync(bash, ["-c", value.slice(1)], { ...options, shell: false });
   if (result.error) {
     const code = (result.error as NodeJS.ErrnoException).code;
     const reason = code === "ETIMEDOUT"
@@ -305,6 +354,11 @@ export function sanitizeTerminalText(text: string): string {
     .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** Keep the full destination clickable when Pi wraps the visible label. */
+export function terminalHyperlink(label: string, url: string): string {
+  return `\u001B]8;;${sanitizeTerminalText(url)}\u001B\\${sanitizeTerminalText(label)}\u001B]8;;\u001B\\`;
 }
 
 export function formatTerminalError(error: unknown): string {

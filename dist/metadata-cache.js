@@ -5,7 +5,7 @@ import { getAgentPath } from "./agent-dir.js";
 import { createHash } from "node:crypto";
 import { isBuiltInAgentPlugin } from "./agent-plugin-provenance.js";
 import { getToolUiResourceUri } from "./ui-app-bridge-helpers.js";
-import { createToolSelectorCandidateIndex, formatPromptCommandName, formatToolName, getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership } from "./types.js";
+import { createToolSelectorCandidateIndex, EXECUTOR_APP_TOOL_CAP, formatPromptCommandName, formatToolName, getToolNameCandidates, isServerDisabled, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership } from "./types.js";
 import { resourceNameToToolName } from "./resource-tools.js";
 import { extractToolAnnotations, extractToolUiStreamMode, interpolateEnvRecord, interpolateEnvVars, resolveBearerToken, resolveConfigPath, resolveServerUrl, stableStringify, } from "./utils.js";
 import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.js";
@@ -31,10 +31,30 @@ export function loadMetadataCache() {
         return null;
     }
 }
+/**
+ * The cache plus what this session already listed. Private or zero-TTL listings are never
+ * persisted as valid, but this session's own listing still counts for this session.
+ */
+export function withSessionMetadata(cache, config, sessionMetadata) {
+    if (!sessionMetadata?.size)
+        return cache;
+    const servers = { ...cache?.servers };
+    for (const [serverName, entry] of sessionMetadata) {
+        const definition = config.mcpServers[serverName];
+        if (!definition || isServerDisabled(definition))
+            continue;
+        if (entry.configHash !== computeServerHash(definition))
+            continue;
+        const { ttlMs: _sessionTtl, cacheScope: _sessionScope, ...sessionEntry } = entry;
+        servers[serverName] = { ...sessionEntry, cachedAt: Date.now() };
+    }
+    return { version: CACHE_VERSION, servers };
+}
 export function saveMetadataCache(cache, options = {}) {
     updateMetadataCacheFile(servers => {
         const next = { ...servers };
-        for (const [name, entry] of Object.entries(cache.servers)) {
+        for (const [name, listed] of Object.entries(cache.servers)) {
+            const entry = withoutSessionOnlyCatalog(listed);
             // Startup batch: a catalog is written unless disk has a newer catalog for the same config, and keeps output shapes
             // saved meanwhile. A failure marker is written only if disk is unchanged since the startup snapshot, so it never
             // destroys what another session wrote during the pass.
@@ -50,7 +70,11 @@ export function saveMetadataCache(cache, options = {}) {
                 if ((disk.cachedAt ?? 0) > entry.cachedAt)
                     continue;
                 const outputShapes = { ...entry.outputShapes, ...keepOutputShapes(disk, entry.configHash, entry.tools) };
-                next[name] = Object.keys(outputShapes).length > 0 ? { ...entry, outputShapes } : entry;
+                const merged = Object.keys(outputShapes).length > 0 ? { ...entry, outputShapes } : entry;
+                // An Executor app catalog another pass saved since the snapshot stays, unless this listing is session-only.
+                next[name] = merged.executorApps === undefined && disk.executorApps !== undefined
+                    ? withoutSessionOnlyCatalog({ ...merged, executorApps: disk.executorApps })
+                    : merged;
             }
             else {
                 next[name] = entry;
@@ -58,6 +82,13 @@ export function saveMetadataCache(cache, options = {}) {
         }
         return next;
     });
+}
+/** A private or zero-TTL listing's Executor app catalog stays in the session that fetched it. */
+function withoutSessionOnlyCatalog(entry) {
+    if (!entry.executorApps || (entry.cacheScope !== "private" && entry.ttlMs !== 0))
+        return entry;
+    const { executorApps: _sessionOnly, ...persisted } = entry;
+    return persisted;
 }
 /** Reads the cache file, applies one update, and writes the result; an update returning undefined skips the write. */
 function updateMetadataCacheFile(update) {
@@ -113,6 +144,8 @@ export function computeServerHash(definition, environment = process.env) {
         exposeResources: definition.exposeResources,
         includeTools: definition.includeTools,
         excludeTools: definition.excludeTools,
+        // Servers may list different tools when the host has no UI. Only false is hashed so other caches stay valid.
+        ...(definition.openUi === false ? { openUi: false } : {}),
     };
     const normalized = stableStringify(identity);
     return createHash("sha256").update(normalized).digest("hex");
@@ -148,6 +181,35 @@ export function keepOutputShapes(previous, configHash, tools) {
         return before !== undefined && after !== undefined && outputShapeKey(before) === outputShapeKey(after);
     });
     return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
+/** Adds an Executor server's app catalog to its cache entry on disk, if that entry is still the same, persistable listing. */
+export function saveExecutorCatalog(serverName, configHash, catalog) {
+    updateMetadataCacheFile(servers => {
+        const entry = servers[serverName];
+        if (!entry || entry.configHash !== configHash || entry.discoveryFailed || entry.cacheScope === "private" || entry.ttlMs === 0)
+            return undefined;
+        return { ...servers, [serverName]: { ...entry, executorApps: catalog } };
+    });
+}
+/**
+ * Adds one Executor app tool's full signature to the catalog on disk, if that entry is still the
+ * same listing and its catalog still has the tool. Only that item changes, so a newer catalog
+ * another session saved meanwhile is kept.
+ * @internal
+ */
+export function saveExecutorSignature(serverName, configHash, path, signature) {
+    updateMetadataCacheFile(servers => {
+        const entry = servers[serverName];
+        const catalog = entry?.executorApps;
+        if (!entry || entry.configHash !== configHash || !Array.isArray(catalog?.tools))
+            return undefined;
+        const index = catalog.tools.findIndex(tool => isUsableCachedAppTool(tool) && tool.path === path);
+        if (index === -1)
+            return undefined;
+        const tools = [...catalog.tools];
+        tools[index] = { ...tools[index], signature };
+        return { ...servers, [serverName]: { ...entry, executorApps: { ...catalog, tools } } };
+    });
 }
 export function isServerCacheValid(entry, definition, 
 // 0 means no age limit: without a server-declared TTL, an entry stays valid until the next connect refreshes it.
@@ -273,7 +335,53 @@ export function reconstructToolMetadata(serverName, entry, prefix, definition, c
             });
         }
     }
-    return resolveUniqueNameOwnership(metadata, (tool) => tool.name).unique;
+    const unique = resolveUniqueNameOwnership(metadata, (tool) => tool.name).unique;
+    const takenNames = new Set(unique.map((tool) => tool.name));
+    return [...unique, ...executorAppToolMetadata(serverName, entry, effectivePrefix, definition, selectorCandidateIndex, takenNames)];
+}
+/**
+ * The tool metadata of an Executor server's cached app tools, named by canonical path, after
+ * includeTools/excludeTools. Executor's own `tools.executor.*` tools are never app tools, and an
+ * app tool never takes an adapter name in `takenNames` or one an earlier app tool took, so the
+ * first in Executor's order wins; without `takenNames` (the Pi registry, which hashes shared
+ * names) names are not checked. Executor gives no JSON Schema, so the input is any object and the
+ * description carries the TypeScript input type. A corrupt cached item is skipped.
+ */
+export function executorAppToolMetadata(serverName, entry, effectivePrefix, definition, selectorCandidateIndex, takenNames) {
+    const metadata = [];
+    const taken = takenNames ? new Set(takenNames) : undefined;
+    for (const tool of (entry.executorApps?.tools ?? []).slice(0, EXECUTOR_APP_TOOL_CAP)) {
+        if (!isUsableCachedAppTool(tool) || !isExecutorAppToolAllowed(tool, serverName, effectivePrefix, definition, selectorCandidateIndex))
+            continue;
+        const name = formatToolName(tool.canonicalPath, serverName, effectivePrefix);
+        if (taken) {
+            if (taken.has(name))
+                continue;
+            taken.add(name);
+        }
+        metadata.push({
+            name,
+            originalName: tool.canonicalPath,
+            description: `${tool.description ? `${tool.description}\n\n` : ""}Executor app tool ${tool.canonicalPath}. Input: ${tool.inputType}${tool.inputTruncated ? " (cut short by Executor)" : ""}`,
+            inputSchema: { type: "object", properties: {} },
+            executorPath: tool.path,
+        });
+    }
+    return metadata;
+}
+/** A cached catalog item with the fields every reader needs; a corrupt cache file can hold anything. */
+export function isUsableCachedAppTool(tool) {
+    const candidate = tool;
+    return typeof candidate?.canonicalPath === "string" && candidate.canonicalPath !== "" && typeof candidate.path === "string";
+}
+/** Executor lists its own admin API as `tools.executor.*`; those are never app tools. */
+export function isExecutorOwnTool(tool) {
+    return tool.canonicalPath.startsWith("executor.");
+}
+/** Whether one of an Executor server's catalog tools is an app tool its includeTools/excludeTools allow. */
+export function isExecutorAppToolAllowed(tool, serverName, effectivePrefix, definition, selectorCandidateIndex) {
+    return !isExecutorOwnTool(tool)
+        && isToolAllowed(tool.canonicalPath, serverName, effectivePrefix, definition.includeTools, definition.excludeTools, selectorCandidateIndex);
 }
 export function createCachedToolSelectorCandidateIndex(configuredServers, cache, prefix) {
     const candidates = new Set();
@@ -294,6 +402,12 @@ export function createCachedToolSelectorCandidateIndex(configuredServers, cache,
                 for (const candidate of getToolNameCandidates(baseName, serverName, effectivePrefix, false))
                     candidates.add(candidate);
             }
+        }
+        for (const tool of (entry.executorApps?.tools ?? []).slice(0, EXECUTOR_APP_TOOL_CAP)) {
+            if (!isUsableCachedAppTool(tool) || isExecutorOwnTool(tool))
+                continue;
+            for (const candidate of getToolNameCandidates(tool.canonicalPath, serverName, effectivePrefix, false))
+                candidates.add(candidate);
         }
     }
     return createToolSelectorCandidateIndex(candidates);

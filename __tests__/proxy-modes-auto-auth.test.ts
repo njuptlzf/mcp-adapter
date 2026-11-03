@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
-  supportsOAuth: vi.fn(),
   lazyConnect: vi.fn(),
   updateServerMetadata: vi.fn(),
   updateMetadataCache: vi.fn(),
@@ -22,7 +21,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../mcp-auth-flow.ts", () => ({
   authenticate: mocks.authenticate,
-  supportsOAuth: mocks.supportsOAuth,
 }));
 
 vi.mock("../init.ts", () => ({
@@ -80,7 +78,6 @@ describe("proxy auto auth", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.authenticate.mockReset().mockResolvedValue("authenticated");
-    mocks.supportsOAuth.mockReset().mockReturnValue(true);
     mocks.lazyConnect.mockReset().mockResolvedValue(false);
     mocks.updateServerMetadata.mockReset();
     mocks.updateMetadataCache.mockReset();

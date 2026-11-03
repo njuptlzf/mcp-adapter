@@ -1,10 +1,11 @@
 import { getToolUiResourceUri } from "./ui-app-bridge-helpers.ts";
 import type { McpExtensionState } from "./state.ts";
-import type { ToolMetadata, McpTool, McpResource, ServerEntry, ToolPrefix } from "./types.ts";
-import { createToolSelectorCandidateIndex, formatToolName, getToolNameCandidates, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership } from "./types.ts";
+import type { ToolMetadata, McpTool, McpResource, ServerCacheEntry, ServerEntry, ToolPrefix } from "./types.ts";
+import { createToolSelectorCandidateIndex, EXECUTOR_APP_TOOL_CAP, formatToolName, getToolNameCandidates, isToolAllowed, resolveToolPrefix, resolveUniqueNameOwnership } from "./types.ts";
 import { resourceNameToToolName } from "./resource-tools.ts";
 import { extractToolAnnotations, extractToolUiStreamMode } from "./utils.ts";
 import { extractUiToolVisibility, isUiToolVisibleToModel } from "./ui-tool-visibility.ts";
+import { loadMetadataCache, type MetadataCache } from "./metadata-cache.ts";
 
 export function buildToolMetadata(
   tools: McpTool[],
@@ -134,14 +135,91 @@ export function buildToolMetadata(
   return { metadata: ownership.unique, failedTools };
 }
 
+/**
+ * A server's own tools: its metadata without Executor app tools. Every tool count and name list
+ * uses this; app tools are counted only in the +N Executor app tools line and the cap line.
+ */
+export function ownTools(metadata: readonly ToolMetadata[] | undefined): ToolMetadata[] {
+  return metadata?.filter(tool => tool.executorPath === undefined) ?? [];
+}
+
 export function getToolNames(state: McpExtensionState, serverName: string): string[] {
-  return state.toolMetadata.get(serverName)?.map(m => m.name) ?? [];
+  return ownTools(state.toolMetadata.get(serverName)).map(m => m.name);
+}
+
+/**
+ * The one line that stands for an Executor server's app tools wherever its tools are listed by
+ * name, since there can be a thousand of them; undefined for any other server.
+ */
+export function executorAppToolsLine(state: McpExtensionState, serverName: string, readCache?: () => MetadataCache | null): string | undefined {
+  const { count, catalog, cap, capped } = executorAppToolCounts(state, serverName, readCache);
+  if (count === 0) return undefined;
+  const scope = !catalog
+    ? "in Executor's catalog"
+    : capped
+      ? `${catalog.total} in Executor's catalog, capped at ${cap}`
+      : `${catalog.total} in Executor's catalog`;
+  return `+${count} Executor app tools (${scope}); find them with mcp({ search: "..." }).`;
+}
+
+/** The `/mcp-adapter` status line for an Executor server's app tools; undefined for any other server. */
+export function executorAppToolsStatus(state: McpExtensionState, serverName: string, readCache?: () => MetadataCache | null): string | undefined {
+  const { count, catalog, capped } = executorAppToolCounts(state, serverName, readCache);
+  if (!catalog && count === 0) return undefined;
+  return capped
+    ? `${serverName}: ${count} of ${catalog!.total} Executor app tools registered (cap)`
+    : `${serverName}: ${count} Executor app tools`;
+}
+
+/**
+ * A server's Executor app catalog: this session's, or the cache file's. `readCache` lets a caller
+ * that asks about many servers read the cache file once.
+ */
+export function executorCatalogOf(state: McpExtensionState, serverName: string, readCache: () => MetadataCache | null = loadMetadataCache) {
+  return (state.sessionMetadata?.get(serverName) ?? readCache()?.servers[serverName])?.executorApps;
+}
+
+/** Reads the metadata cache file on first use only. */
+export function cacheReader(): () => MetadataCache | null {
+  let cache: MetadataCache | null | undefined;
+  return () => cache === undefined ? (cache = loadMetadataCache()) : cache;
+}
+
+/** The ⚠ line for each app an Executor server's catalog couldn't list. */
+export function unavailableAppNotes(serverName: string, unavailableApps: NonNullable<ServerCacheEntry["executorApps"]>["unavailableApps"]): string[] {
+  return (unavailableApps ?? []).filter(app => typeof app?.name === "string").map(app =>
+    `${serverName}: Executor could not list the app ${app.name}, so its tools are missing${typeof app.reason === "string" ? ` — ${app.reason}` : "."}`);
+}
+
+/**
+ * The Executor catalog notes `/mcp-adapter` shows: this session's for a server whose catalog was
+ * refreshed or failed, else the unavailable apps of its cached catalog, so a lazy server that
+ * hasn't connected yet still shows them.
+ */
+export function executorCatalogNotes(state: McpExtensionState, readCache?: () => MetadataCache | null): string[] {
+  return Object.keys(state.config.mcpServers).flatMap(serverName => {
+    const notes = state.executorCatalogNotes?.get(serverName);
+    if (notes) return notes;
+    const { catalog } = executorAppToolCounts(state, serverName, readCache);
+    return unavailableAppNotes(serverName, catalog?.unavailableApps);
+  });
+}
+
+function executorAppToolCounts(state: McpExtensionState, serverName: string, readCache?: () => MetadataCache | null) {
+  const metadata = state.toolMetadata.get(serverName) ?? [];
+  const count = metadata.length - ownTools(metadata).length;
+  // Only an Executor server can have a catalog, so any other server skips the cache file.
+  const catalog = count === 0 && !state.sessionMetadata?.get(serverName)?.executorApps ? undefined : executorCatalogOf(state, serverName, readCache);
+  // A catalog cached under a larger cap is still read only up to this one.
+  const cap = catalog ? Math.min(catalog.cap, EXECUTOR_APP_TOOL_CAP) : EXECUTOR_APP_TOOL_CAP;
+  const capped = catalog !== undefined && catalog.total > cap;
+  return { count, catalog, cap, capped };
 }
 
 export function totalToolCount(state: McpExtensionState): number {
   let count = 0;
   for (const metadata of state.toolMetadata.values()) {
-    count += metadata.length;
+    count += ownTools(metadata).length;
   }
   return count;
 }
@@ -152,6 +230,25 @@ export function findToolByName(metadata: ToolMetadata[] | undefined, toolName: s
   if (exact) return exact;
   const normalized = toolName.replace(/-/g, "_");
   return metadata.find(m => m.name.replace(/-/g, "_") === normalized);
+}
+
+/** Keep only plain structural schemas compact; preserve everything else as original JSON. */
+export function isPlainTypeSchema(schema: unknown): boolean {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return false;
+  const s = schema as Record<string, unknown>;
+  if (Object.keys(s).some(key => !["type", "properties", "required", "items"].includes(key))) return false;
+  if (s.type === "integer" || Array.isArray(s.type)) return false;
+
+  const properties = s.properties;
+  if (properties !== undefined) {
+    if (s.type !== "object" || !properties || typeof properties !== "object" || Array.isArray(properties)) return false;
+    if (!Object.values(properties).every(isPlainTypeSchema)) return false;
+  }
+  if (s.required !== undefined) {
+    if (!Array.isArray(s.required) || s.required.some(name => typeof name !== "string" || !Object.hasOwn(properties ?? {}, name))) return false;
+  }
+  if (s.items !== undefined && (s.type !== "array" || !isPlainTypeSchema(s.items))) return false;
+  return true;
 }
 
 /** Whether the schema formatter has field descriptions worth showing beside a compact shape. */

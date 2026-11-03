@@ -24,13 +24,17 @@ function install(scriptMode = false): UniversalMcpHost {
 }
 
 describe("Phase 1.6 acceptance: UniversalMcpHost + upstream engine", () => {
-	it("C1: registers mcp proxy tool by default; mcpScript requires settings.scriptMode (upstream #744 opt-in)", () => {
+	it("C1: registers mcp proxy tool by default; mcpScript never surfaces (upstream #870 codemode cutover)", () => {
 		const host = install();
 		expect(host.tools.has("mcp")).toBe(true);
 		expect(host.tools.has("mcpScript")).toBe(false);
 		expect(host.getActiveTools()).toEqual(expect.arrayContaining(["mcp"]));
+		// v7.0.0 #870 deleted the adapter's own script tool; codemode lives in the
+		// Pi package and its bridge only warns on non-Pi hosts, so scriptMode:true
+		// changes nothing on this host surface anymore.
 		const scripted = install(true);
-		expect(scripted.tools.has("mcpScript")).toBe(true);
+		expect(scripted.tools.has("mcpScript")).toBe(false);
+		expect(scripted.tools.has("codemode")).toBe(false);
 	});
 
 	it("C2: proxy tool exposes the rich schema (args object|string, instructions, limit, offset, server)", () => {
@@ -48,7 +52,8 @@ describe("Phase 1.6 acceptance: UniversalMcpHost + upstream engine", () => {
 		const host = install(true);
 		host.setActiveTools(["mcp"]);
 		expect(host.getActiveTools()).toEqual(["mcp"]);
-		expect(host.getAllTools().map((t) => t.name)).toEqual(expect.arrayContaining(["mcp", "mcpScript"]));
+		// #870: mcpScript is gone; only the proxy tool remains on this surface.
+		expect(host.getAllTools().map((t) => t.name)).toEqual(expect.arrayContaining(["mcp"]));
 	});
 
 	it("A-lifecycle: session_start / input / session_shutdown handlers fire without throwing", async () => {

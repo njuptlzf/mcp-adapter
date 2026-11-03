@@ -1,5 +1,7 @@
 import { mkdirSync, statSync } from "node:fs";
 import { BlockList, isIP } from "node:net";
+import { basename } from "node:path";
+import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
   Client,
@@ -17,6 +19,9 @@ import {
   type McpSubscription,
   type SubscriptionFilter,
   type CacheableRequestOptions,
+  type ElicitRequestFormParams,
+  type ElicitRequestURLParams,
+  type ElicitResult,
   type RequestOptions,
   RegistrationRejectedError,
   type UrlElicitationRequiredError,
@@ -44,7 +49,7 @@ import { logger } from "./logger.ts";
 import { RESOURCE_MIME_TYPE } from "./ui-app-bridge-helpers.ts";
 import { isBuiltInAgentPlugin } from "./agent-plugin-provenance.ts";
 import { McpOAuthProvider } from "./mcp-oauth-provider.ts";
-import { explainRegistrationRejection, extractOAuthConfig, supportsOAuth, type McpOAuthRuntime } from "./mcp-auth-flow.ts";
+import { explainRegistrationRejection, extractOAuthConfig, type McpOAuthRuntime } from "./mcp-auth-flow.ts";
 import {
   captureOAuthAuthority,
   inspectAuthForUrl,
@@ -54,10 +59,14 @@ import {
 } from "./mcp-auth.ts";
 import { getBearerTokenForUrl } from "./mcp-bearer-store.ts";
 import { handleSamplingRequest, registerSamplingHandler, type ServerSamplingConfig } from "./sampling-handler.ts";
+import { appendServerLogMessage } from "./server-log.ts";
+import { getAgentPath } from "./agent-dir.ts";
 import {
   handleElicitationRequest,
+  handleFormElicitation,
   handleUrlElicitation,
   registerElicitationHandler,
+  whileAdapterPromptOpen,
   type ServerElicitationConfig,
 } from "./elicitation-handler.ts";
 import { attachTaskSession, type RawRequestChannel } from "./mcp-tasks.ts";
@@ -67,10 +76,10 @@ import {
   expandHomePath,
   providerAuthUrlError,
   resolveBearerToken,
-  resolveCommandSecret,
   resolveCommandSecretsRecord,
   resolveConfigPath,
   resolveServerUrl,
+  supportsOAuth,
 } from "./utils.ts";
 import { abortable, throwIfAborted } from "./abort.ts";
 import { combineAbortSignals } from "./runtime-owner.ts";
@@ -141,7 +150,7 @@ export function isUnauthorizedHttpError(error: unknown): boolean {
     || (error instanceof SdkHttpError && error.status === 401)
     // Some pinned-SDK transport paths emit this plain Error when bearer
     // request headers are used without an OAuth authProvider.
-    || (error instanceof Error && /^Error POSTing to endpoint \(HTTP 401\):/.test(error.message));
+    || (error instanceof Error && error.message.startsWith("Error POSTing to endpoint (HTTP 401):"));
 }
 
 function shouldFallbackToSse(error: unknown, definition: ServerDefinition): boolean {
@@ -247,6 +256,9 @@ type UiStreamListener = (serverName: string, notification: ServerStreamResultPat
 type MetadataListChangedListener = (serverName: string, reason: string) => void;
 type ListenStateChangedListener = (serverName: string, state: McpListenState) => void;
 type ResourceUpdatedListener = (serverName: string, uri: string) => void;
+/** Awaited before the replaced connection is disposed, so work on it can move to the fresh one first. */
+type ConnectionReplacedListener = (serverName: string, fresh: ServerConnection) => Promise<void>;
+type ConnectionInitializedListener = (serverName: string) => void;
 
 export type ToolRefreshResult = "updated" | "unchanged" | "superseded" | "refresh-timeout";
 
@@ -362,6 +374,8 @@ export class McpServerManager {
   private samplingConfig: ServerSamplingConfig | undefined;
   private metadataListChangedListener: MetadataListChangedListener | undefined;
   private listenStateChangedListener: ListenStateChangedListener | undefined;
+  private connectionReplacedListener: ConnectionReplacedListener | undefined;
+  private connectionInitializedListener: ConnectionInitializedListener | undefined;
   private resourceUpdatedListeners = new Map<string, {
     serverName: string;
     uri: string;
@@ -385,7 +399,7 @@ export class McpServerManager {
   private providerToken: ((provider: string) => Promise<string | undefined>) | undefined;
   private stopped = false;
 
-  /** Default cwd for stdio servers without an explicit config `cwd`. */
+  /** Session cwd: the root sent to servers, and the default cwd for stdio servers without a config `cwd`. */
   constructor(private readonly defaultCwd?: string) {}
 
   setSamplingConfig(config: ServerSamplingConfig | undefined): void {
@@ -398,6 +412,15 @@ export class McpServerManager {
 
   setListenStateChangedListener(listener: ListenStateChangedListener | undefined): void {
     this.listenStateChangedListener = listener;
+  }
+
+  setConnectionReplacedListener(listener: ConnectionReplacedListener | undefined): void {
+    this.connectionReplacedListener = listener;
+  }
+
+  /** Called once a connection attempt's initialize handshake succeeds, before tool discovery. */
+  setConnectionInitializedListener(listener: ConnectionInitializedListener | undefined): void {
+    this.connectionInitializedListener = listener;
   }
 
   publishMetadataChanged(
@@ -421,6 +444,38 @@ export class McpServerManager {
 
   setElicitationConfig(config: ServerElicitationConfig | undefined): void {
     this.elicitationConfig = config;
+  }
+
+  /** Shows a server-supplied MCP form with Pi's dialogs. Undefined when this session cannot prompt. */
+  async promptFormElicitation(
+    name: string,
+    params: ElicitRequestFormParams,
+    signal?: AbortSignal,
+  ): Promise<ElicitResult | undefined> {
+    const config = this.elicitationConfig;
+    if (!config) return undefined;
+    return whileAdapterPromptOpen(
+      this.connections.get(name)?.client,
+      () => handleFormElicitation({ ...config, serverName: name }, params, signal),
+    );
+  }
+
+  /**
+   * A prompt that shows an adapter-supplied URL with the URL-elicitation consent dialog and opens
+   * it on accept. Undefined when this session cannot open URLs: headless, non-TUI or shut down.
+   */
+  urlElicitationPrompt(name: string): ((params: ElicitRequestURLParams, signal?: AbortSignal) => Promise<ElicitResult>) | undefined {
+    const config = this.elicitationConfig;
+    if (this.runtimeSignal?.aborted || !config?.allowUrl) return undefined;
+    return async (params, signal) => {
+      const result = await whileAdapterPromptOpen(
+        this.connections.get(name)?.client,
+        () => handleUrlElicitation({ ...config, serverName: name }, params, signal),
+      );
+      // The browser step can outlast the call that started it; give the user one idle timeout to finish.
+      if (result.action === "accept") this.touch(name);
+      return result;
+    };
   }
 
   setRuntimeSignal(signal: AbortSignal | undefined): void {
@@ -564,7 +619,7 @@ export class McpServerManager {
     const generation = this.closeGenerations.get(name) ?? 0;
     const attemptController = new AbortController();
     const attemptSignal = combineAbortSignals(ownedSignal, attemptController.signal);
-    const connectionAttempt = this.createConnection(
+    const promise = this.createConnection(
       name,
       definition,
       attemptSignal,
@@ -573,9 +628,6 @@ export class McpServerManager {
       oauthAuthority,
       attemptController,
     );
-    const promise = definition.url
-      ? connectionAttempt.catch(async error => { throw await this.enrichHttpConnectionError(definition, error); })
-      : connectionAttempt;
     this.connectPromises.set(name, promise);
     if (oauthAuthority) this.connectOAuthAuthorities.set(name, oauthAuthority);
     this.connectAttempts.set(name, attemptController);
@@ -1058,7 +1110,7 @@ export class McpServerManager {
     const generation = this.closeGenerations.get(name) ?? 0;
     const credentialsInvalidated = staleConnection.status === "needs-auth"
       && staleConnection.credentialsInvalidated === true;
-    const candidateAttempt = this.createConnection(
+    const fresh = await this.createConnection(
       name,
       definition,
       signal,
@@ -1067,9 +1119,6 @@ export class McpServerManager {
       oauthAuthority,
       attemptOwner,
     );
-    const fresh = definition.url
-      ? await candidateAttempt.catch(async error => { throw await this.enrichHttpConnectionError(definition, error); })
-      : await candidateAttempt;
 
     // An explicit close or a concurrent replacement supersedes this candidate.
     // Dispose only the candidate we own; never close whichever route is now
@@ -1097,6 +1146,11 @@ export class McpServerManager {
     // Publish first so calls route to the fresh image while the exact displaced
     // child is terminated and reaped. Late close callbacks are identity-guarded.
     staleConnection.status = "closed";
+    try {
+      await this.connectionReplacedListener?.(name, fresh);
+    } catch (error) {
+      logger.warn(`MCP: handing work over to the new ${name} connection failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
     try {
       await this.disposeConnection(staleConnection);
     } catch (error) {
@@ -1197,6 +1251,7 @@ export class McpServerManager {
       }
       transport = stdioTransport;
     } else if (definition.url) {
+      // Only a failure before initialize completes says anything about the endpoint, so only it is probed.
       const httpConnection = await this.connectHttpClient(
         definition,
         name,
@@ -1206,7 +1261,7 @@ export class McpServerManager {
         invalidated,
         oauthAuthority,
         attemptOwner,
-      );
+      ).catch(async error => { throw await this.enrichHttpConnectionError(definition, error); });
       client = httpConnection.client;
       transport = httpConnection.transport;
       invalidated = httpConnection.credentialsInvalidated;
@@ -1242,6 +1297,7 @@ export class McpServerManager {
       if (!clientConnected) {
         await this.connectClientWithAbort(client, transport, requestOptions, signal);
       }
+      this.connectionInitializedListener?.(name);
       this.attachAdapterNotificationHandlers(name, client);
 
       const instructions = client.getInstructions?.();
@@ -1307,7 +1363,8 @@ export class McpServerManager {
             transport,
             requestTimeoutMs: this.getResolvedRequestTimeoutMs(definition),
             clientInfo: { name: `pi-mcp-${name}`, version: "1.0.0" },
-            clientCapabilities: this.buildClientCapabilities(),
+            clientCapabilities: this.buildClientCapabilities(definition),
+            roots: this.rootsFor(definition),
             ...(this.elicitationConfig
               ? {
                   onElicitation: (request: Parameters<typeof handleElicitationRequest>[1], signal?: AbortSignal) =>
@@ -1324,8 +1381,10 @@ export class McpServerManager {
                     handleSamplingRequest({
                       ...this.samplingConfig!,
                       serverName: name,
-                      // Cancelling the task should also stop the local sampling run.
-                      getSignal: () => combineAbortSignals(this.samplingConfig!.getSignal(), signal),
+                      // The task's input signal ends when the task is cancelled, closed or settles, and a
+                      // blocking call closes its execution on abort. The current turn's signal stays out,
+                      // so an Esc on a later turn can't abort a background task's sampling.
+                      getSignal: () => combineAbortSignals(this.runtimeSignal, signal),
                     }, request),
                 }
               : {}),
@@ -1449,14 +1508,14 @@ export class McpServerManager {
     }
   }
 
-  private buildClientCapabilities() {
+  private buildClientCapabilities(definition: ServerDefinition) {
     return {
-      extensions: {
-        "io.modelcontextprotocol/ui": {
-          mimeTypes: [RESOURCE_MIME_TYPE],
-        },
-      },
+      // openUi: false tells the server there is no UI, so MCP App tools return results instead of deferring to a form.
+      ...(definition.openUi === false
+        ? {}
+        : { extensions: { "io.modelcontextprotocol/ui": { mimeTypes: [RESOURCE_MIME_TYPE] } } }),
       ...(this.samplingConfig ? { sampling: {} } : {}),
+      ...(this.rootsFor(definition) ? { roots: {} } : {}),
       ...(this.elicitationConfig
         ? {
             elicitation: {
@@ -1468,8 +1527,14 @@ export class McpServerManager {
     };
   }
 
+  /** The session directory as the server's only root, unless there is no session cwd or the server opted out. */
+  private rootsFor(definition: ServerDefinition) {
+    if (this.defaultCwd === undefined || definition.roots === false) return undefined;
+    return [{ uri: pathToFileURL(this.defaultCwd).href, name: basename(this.defaultCwd) }];
+  }
+
   private createClient(serverName: string, definition: ServerDefinition): Client {
-    const capabilities = this.buildClientCapabilities();
+    const capabilities = this.buildClientCapabilities(definition);
     const versionNegotiation = resolveVersionNegotiation(definition);
     let client: Client;
     client = new AdapterClient(
@@ -1498,6 +1563,12 @@ export class McpServerManager {
       },
     );
     clientMetadata.set(client, () => (client as AdapterClient).requestMetadata());
+    const roots = this.rootsFor(definition);
+    if (roots) client.setRequestHandler("roots/list", () => ({ roots }));
+    let logPath: string | undefined;
+    client.setNotificationHandler("notifications/message", notification => {
+      appendServerLogMessage(logPath ??= getAgentPath("mcp.log"), serverName, notification.params);
+    });
     if (this.samplingConfig) {
       registerSamplingHandler(client, { ...this.samplingConfig, serverName });
     }
@@ -1695,9 +1766,7 @@ export class McpServerManager {
         oauthAuthority,
       );
       provider.setAuthFetch(createOAuthFetch(serverUrl, () => serviceHeaders,
-        combineAbortSignals(this.oauthRuntime?.signal, signal), {
-          ...(caFetch ? { delegate: caFetch.fetch } : {}),
-        }));
+        combineAbortSignals(this.oauthRuntime?.signal, signal), caFetch ? { delegate: caFetch.fetch } : {}));
       return provider;
     };
 
@@ -1784,10 +1853,10 @@ export class McpServerManager {
       try {
         await this.connectClientWithAbort(client, transport, requestOptions, signal);
         return { status: "connected", client, transport };
-      } catch (error) {
-        if (error instanceof SseError && sseFetchFailure !== undefined) {
-          error = new AggregateError([error, sseFetchFailure], error.message);
-        }
+      } catch (caught) {
+        const error = caught instanceof SseError && sseFetchFailure !== undefined
+          ? new AggregateError([caught, sseFetchFailure], caught.message)
+          : caught;
         const abortCleanupFailed = error instanceof AggregateError
           && error.message === "MCP connection abort cleanup failed";
         if (!abortCleanupFailed) {

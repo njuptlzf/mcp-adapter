@@ -83,11 +83,6 @@ function printHelp(log = console.log) {
   log("  pi-mcp-adapter token set <server>     Store a token read from stdin (masked prompt or pipe; never argv)");
   log("  pi-mcp-adapter token status <server>  Report whether a stored token matches the configured URL");
   log("  pi-mcp-adapter token remove <server>  Remove the stored token");
-  log("");
-  log("Jev API key storage (SYSTEMONE_ENDPOINT selects the provider endpoint):");
-  log("  pi-mcp-adapter key set systemone     Store a key read from stdin (masked prompt or pipe; never argv)");
-  log("  pi-mcp-adapter key status systemone  Report the effective credential source without revealing it");
-  log("  pi-mcp-adapter key remove systemone  Remove the stored key");
 }
 
 function readJsonFile(filePath) {
@@ -226,8 +221,8 @@ async function importTokenModules(error) {
   }
 }
 
-function readSecretFromStdin(stdin, prompt = "Enter bearer token (input hidden): ") {
-  if (stdin.isTTY) return readSecretMasked(stdin, prompt);
+function readSecretFromStdin(stdin) {
+  if (stdin.isTTY) return readSecretMasked(stdin, "Enter bearer token (input hidden): ");
   return new Promise((resolve, reject) => {
     let data = "";
     stdin.setEncoding("utf8");
@@ -364,60 +359,6 @@ async function runToken(argv, log, error, stdin) {
   return 0;
 }
 
-async function runKey(argv, log, error, stdin) {
-  const [action, provider, ...extra] = argv;
-  // `typesafe` is the pre-endpoint provider name, kept for existing scripts.
-  if (!["set", "status", "remove"].includes(action) || (provider !== "systemone" && provider !== "typesafe")) {
-    error("Usage: pi-mcp-adapter key <set|status|remove> systemone");
-    error("`key set` reads the API key from stdin only. Never pass the key as an argument.");
-    return 1;
-  }
-  if (extra.length > 0) {
-    error("Unexpected extra arguments. The API key must not be passed on the command line; pipe it on stdin or use the interactive prompt.");
-    return 1;
-  }
-  let store;
-  try { store = await import("./dist/jev-key-store.js"); }
-  catch (err) {
-    error("Unable to load Jev key command module.");
-    error(`Import failed: ${err instanceof Error ? err.message : String(err)}`);
-    return 1;
-  }
-  const resolution = store.resolveJevEndpoint();
-  if (resolution.status === "unavailable") {
-    error("SYSTEMONE_ENDPOINT is set but invalid, so no key can be stored or read for it.");
-    error(resolution.message);
-    return 1;
-  }
-  const endpoint = resolution.endpoint;
-
-  if (action === "status") {
-    const status = store.resolveJevCredential(process.env, endpoint);
-    if (status.status === "present") { log(`source=${status.source}`); log(`endpoint=${endpoint.href}`); return 0; }
-    if (status.status === "unavailable") { error(`unavailable: ${status.message}`); return 1; }
-    log("missing");
-    return 1;
-  }
-  if (action === "set") {
-    const apiKey = await readSecretFromStdin(stdin, `Enter Jev API key for ${endpoint.href} (input hidden): `);
-    if (!apiKey) { error("No API key provided on stdin."); return 1; }
-    try { store.saveJevApiKey(apiKey, endpoint); }
-    catch (err) { error(err instanceof Error ? err.message : "Jev API key could not be stored."); return 1; }
-    log("Jev API key stored in the OS secure credential store.");
-    log(`endpoint=${endpoint.href}`);
-  } else {
-    try { store.removeJevApiKey(endpoint); }
-    catch (err) { error(err instanceof Error ? err.message : "Jev API key could not be removed."); return 1; }
-    log("Jev API key removed from the OS secure credential store.");
-  }
-  if (Object.hasOwn(process.env, "SYSTEMONE_API_KEY")) log("Note: SYSTEMONE_API_KEY is present and overrides the stored key.");
-  else if (endpoint.origin === store.OPENROUTER_ORIGIN && Object.hasOwn(process.env, "OPENROUTER_API_KEY")) log("Note: OPENROUTER_API_KEY is present and overrides the stored key.");
-  else if (Object.hasOwn(process.env, "TYPESAFE_API_KEY")) log(endpoint.href === store.JEV_DEFAULT_ENDPOINT
-    ? "Note: TYPESAFE_API_KEY is present and overrides the stored key."
-    : `Note: TYPESAFE_API_KEY is ignored for ${endpoint.href}; it is a TypeSafe credential and is never sent there.`);
-  return 0;
-}
-
 const DOCTOR_CONNECT_TIMEOUT_MS = 15_000;
 
 // A second layer behind describeConnectError: messages can still name configured values.
@@ -457,6 +398,7 @@ function describeConnectError(err, definition, url) {
     return err.message;
   }
   let status;
+  let invalid;
   const codes = new Set();
   const pending = [err];
   const seen = new Set();
@@ -467,7 +409,27 @@ function describeConnectError(err, definition, url) {
     if (typeof current.status === "number") status ??= current.status;
     status ??= /\(HTTP (\d{3})\)/.exec(current.message ?? "")?.[1];
     if (typeof current.code === "string" && /^E[A-Z]+$/.test(current.code)) codes.add(current.code);
+    if (current.code === "INVALID_RESULT") invalid ??= current;
     pending.push(current.cause, current.data?.cause, ...(current instanceof AggregateError ? current.errors : []));
+  }
+  if (invalid) {
+    // The SDK's message ends with Zod's issue list as JSON. Print only each issue's path and expected
+    // type: its message and other fields can quote what the server sent. The method comes from this
+    // message, which names the client's own request; `data.method` can be a name the server chose.
+    const [, method, detail] = /^Invalid result for (\S+): (.*)$/s.exec(invalid.message) ?? [];
+    let issues;
+    try {
+      issues = JSON.parse(detail);
+    } catch {}
+    const fields = (Array.isArray(issues) ? issues : []).filter((issue) => Array.isArray(issue?.path)).map((issue) => {
+      // Keys under a schema's `properties` are names the server chose, so the path stops there.
+      const end = issue.path.indexOf("properties") + 1;
+      const keys = end > 0 ? issue.path.slice(0, end) : issue.path;
+      const path = keys.map((key, index) => typeof key === "number" ? `[${key}]` : `${index > 0 ? "." : ""}${key}`).join("");
+      return end === 0 && typeof issue.expected === "string" && /^[a-z]+$/.test(issue.expected) ? `${path} (expected ${issue.expected})` : path;
+    });
+    const shown = fields.length > 3 ? [...fields.slice(0, 3), `${fields.length - 3} more`] : fields;
+    return `server sent an invalid ${method ? `${method} ` : ""}result${shown.length > 0 ? `: ${shown.join(", ")}` : ""}`;
   }
   const parts = [...(status ? [`HTTP ${status}`] : []), ...codes];
   // server-manager appends the probe classification to the original message, keeping it as cause.
@@ -511,9 +473,17 @@ async function importPiCore() {
       if (/node_modules[\\/]@earendil-works[\\/]pi-coding-agent[\\/]/i.test(fs.readFileSync(bin, "utf8")) && isPiCore(shimmed)) root = shimmed;
     } else {
       // npm links bin/pi to a file inside Pi's package; only the package that owns that file counts.
-      for (let dir = path.dirname(fs.realpathSync(bin)); !root; dir = path.dirname(dir)) {
+      const real = fs.realpathSync(bin);
+      for (let dir = path.dirname(real); !root; dir = path.dirname(dir)) {
         if (isPiCore(dir)) root = dir;
         else if (path.dirname(dir) === dir) break;
+      }
+      // Pi's own installer makes bin/pi a shell launcher in the agent dir that runs the release
+      // named by install/current-version, so look where that launcher looks.
+      const current = path.join(path.dirname(path.dirname(real)), "install", "current-version");
+      if (!root && fs.existsSync(current)) {
+        const managed = path.join(path.dirname(current), "releases", fs.readFileSync(current, "utf8").trim(), "node_modules", PI_CORE_PACKAGE);
+        if (isPiCore(managed)) root = managed;
       }
     }
     if (!root) throw err;
@@ -530,16 +500,16 @@ async function runDoctor(argv, log, error) {
     error("Usage: pi-mcp-adapter doctor [--json]");
     return 1;
   }
-  let config, trust, manager, auth, authFlow, utils, agentDir;
+  let config, trust, manager, auth, utils, agentDir, types;
   try {
-    [config, trust, manager, auth, authFlow, utils, agentDir] = await Promise.all([
+    [config, trust, manager, auth, utils, agentDir, types] = await Promise.all([
       import("./dist/config.js"),
       import("./dist/project-server-trust.js"),
       import("./dist/server-manager.js"),
       import("./dist/mcp-auth.js"),
-      import("./dist/mcp-auth-flow.js"),
       import("./dist/utils.js"),
       import("./dist/agent-dir.js"),
+      import("./dist/types.js"),
     ]);
   } catch (err) {
     error("Unable to load doctor command modules.");
@@ -557,6 +527,7 @@ async function runDoctor(argv, log, error) {
     error("Pi 0.99 or later wasn't found on PATH, so Pi's own mcp.json files were not checked.");
   }
   const loaded = config.loadMcpConfigWithSources(undefined, cwd);
+  const provenance = config.getServerProvenance(undefined, cwd);
   let projectTrusted = false;
   if (loaded.projectServers.size > 0) {
     try {
@@ -580,6 +551,8 @@ async function runDoctor(argv, log, error) {
   const serverManager = new manager.McpServerManager(cwd);
   serverManager.setDefaultRequestTimeoutMs(effective.settings?.requestTimeoutMs);
   serverManager.setAuthStorageOptions(authOptions);
+  const initialized = new Set();
+  serverManager.setConnectionInitializedListener((name) => initialized.add(name));
 
   const check = async (name, definition, signal) => {
     const block = blockedServers.get(name);
@@ -600,7 +573,7 @@ async function runDoctor(argv, log, error) {
         return { state: "failed", message: missing.length > 0 ? `URL uses unset environment variables: ${missing.join(", ")}` : "URL is invalid" };
       }
       // Report a missing sign-in from stored credentials instead of starting OAuth.
-      if (authFlow.supportsOAuth(definition)) {
+      if (utils.supportsOAuth(definition)) {
         const stored = auth.inspectAuthForUrl(name, url, authOptions);
         if (stored.status === "unavailable") return { state: "failed", message: stored.message };
         // A record without tokens is an unfinished sign-in.
@@ -628,7 +601,8 @@ async function runDoctor(argv, log, error) {
     const timedOut = new Promise((resolve) => {
       timer = setTimeout(() => {
         controller.abort();
-        resolve({ state: "failed", message: `no response within ${DOCTOR_CONNECT_TIMEOUT_MS / 1000}s` });
+        const step = initialized.has(name) ? "connected, but did not finish listing its tools, resources and prompts" : "did not finish connecting";
+        resolve({ state: "failed", message: `${step} within ${DOCTOR_CONNECT_TIMEOUT_MS / 1000}s` });
       }, DOCTOR_CONNECT_TIMEOUT_MS);
     });
     const result = await Promise.race([
@@ -636,11 +610,13 @@ async function runDoctor(argv, log, error) {
       timedOut,
     ]);
     clearTimeout(timer);
+    const ignoredSettings = types.describeIgnoredSettings(provenance.get(name));
     return {
       name,
       state: result.state,
       tools: result.tools ?? null,
       message: result.message ? utils.sanitizeTerminalText(redactDoctorMessage(result.message, definition, utils)) : null,
+      ...(ignoredSettings ? { ignoredSettings: utils.sanitizeTerminalText(ignoredSettings) } : {}),
     };
   }));
 
@@ -654,6 +630,7 @@ async function runDoctor(argv, log, error) {
       for (const result of results) {
         const tools = result.tools === null ? "" : `, ${result.tools} tool${result.tools === 1 ? "" : "s"}`;
         log(`${utils.sanitizeTerminalText(result.name)}: ${result.state}${tools}${result.message ? ` — ${result.message}` : ""}`);
+        if (result.ignoredSettings) log(`  ${result.ignoredSettings}`);
       }
     }
   } finally {
@@ -677,10 +654,6 @@ export async function main(argv = process.argv.slice(2), log = console.log, erro
 
   if (command === "token") {
     return runToken(rest, log, error, stdin);
-  }
-
-  if (command === "key") {
-    return runKey(rest, log, error, stdin);
   }
 
   if (command === "doctor") {

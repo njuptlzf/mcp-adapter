@@ -69,6 +69,15 @@ describe("metadata cache ttl hints", () => {
     expect(isServerCacheValid({ ...fresh, cacheScope: "public" }, server)).toBe(true);
   });
 
+  it("rediscovers after openUi is turned off, without invalidating other caches", () => {
+    const server = definition();
+    const cached = entry(server, 0);
+
+    expect(computeServerHash({ ...server, openUi: true })).toBe(computeServerHash(server));
+    expect(isServerCacheValid(cached, { ...server, openUi: true })).toBe(true);
+    expect(isServerCacheValid(cached, { ...server, openUi: false })).toBe(false);
+  });
+
   it("keeps list hints at the result and cache-entry levels, not on tools", async () => {
     const manager = new McpServerManager();
     const result = await (manager as any).fetchAllTools({

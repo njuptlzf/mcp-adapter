@@ -1,13 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
 function writeJson(path: string, value: unknown): void {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(value)}\n`);
 }
+
+const caseInsensitiveFs = (() => {
+  const probe = mkdtempSync(join(tmpdir(), "mcp-case-probe-"));
+  try {
+    return existsSync(join(dirname(probe), basename(probe).toUpperCase()));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 
 describe("project MCP server trust", () => {
   let root: string;
@@ -137,6 +146,19 @@ describe("project MCP server trust", () => {
     expect(statSync(join(home, ".pi", "agent", "mcp-project-approvals.json")).mode & 0o777).toBe(0o600);
   });
 
+  it.skipIf(!caseInsensitiveFs)("keeps an approval when the same project folder is opened with different casing", async () => {
+    writeJson(join(cwd, ".mcp.json"), { mcpServers: { local: { command: "node", args: ["one.js"] } } });
+    const differentlyCased = join(root, "PROJECT");
+    const { config, trust } = await load();
+    const select = vi.fn().mockResolvedValue("Allow");
+
+    await trust.applyProjectServerTrust(config.loadMcpConfigWithSources(undefined, differentlyCased), context({ cwd: differentlyCased, hasUI: true, mode: "tui", ui: { select } }));
+    const result = await trust.applyProjectServerTrust(config.loadMcpConfigWithSources(undefined, cwd), context({ hasUI: true, mode: "tui", ui: { select } }));
+
+    expect(result.blockedServers.size).toBe(0);
+    expect(select).toHaveBeenCalledTimes(1);
+  });
+
   it("shares approvals across a repository's git worktrees but not with directories that only claim one", async () => {
     const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "ignore" });
     git(cwd, "init", "-q");
@@ -186,13 +208,19 @@ describe("project MCP server trust", () => {
     expect(select).toHaveBeenCalledTimes(6);
   });
 
-  it("skips unapproved servers headlessly unless the global policy allows them", async () => {
+  it.each([
+    { hasUI: false, mode: "print" },
+    { hasUI: true, mode: "rpc" },
+  ])("skips unapproved servers without a dialog in $mode mode unless the global policy allows them", async (session) => {
     writeJson(join(cwd, ".mcp.json"), { settings: { projectServers: "allow" }, mcpServers: { local: { command: "node" } } });
     let modules = await load();
     const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const select = vi.fn();
     let loaded = modules.config.loadMcpConfigWithSources(undefined, cwd);
     expect(loaded.projectServerPolicy).toBe("ask");
-    expect((await modules.trust.applyProjectServerTrust(loaded, context())).blockedServers.has("local")).toBe(true);
+    const blocked = (await modules.trust.applyProjectServerTrust(loaded, context({ ...session, ui: { select } }))).blockedServers;
+    expect(blocked.get("local")?.reason).toBe("approval-required");
+    expect(select).not.toHaveBeenCalled();
     expect(warning).toHaveBeenCalledWith(expect.stringContaining("Ignoring settings.projectServers"));
 
     writeJson(join(home, ".pi", "agent", "mcp-adapter.json"), { settings: { projectServers: "allow" }, mcpServers: {} });
@@ -200,7 +228,8 @@ describe("project MCP server trust", () => {
     modules = await load();
     loaded = modules.config.loadMcpConfigWithSources(undefined, cwd);
     expect(loaded.projectServerPolicy).toBe("allow");
-    expect((await modules.trust.applyProjectServerTrust(loaded, context())).blockedServers.size).toBe(0);
+    expect((await modules.trust.applyProjectServerTrust(loaded, context({ ...session, ui: { select } }))).blockedServers.size).toBe(0);
+    expect(select).not.toHaveBeenCalled();
   });
 
   it("denies on the preselected option or escape and keeps the server blocked for the session", async () => {
@@ -262,7 +291,7 @@ describe("project MCP server trust", () => {
   it("gates repo-local imports enabled by global config", async () => {
     writeJson(join(home, ".pi", "agent", "mcp-adapter.json"), { imports: ["vscode"], mcpServers: {} });
     writeJson(join(cwd, ".vscode", "mcp.json"), { mcpServers: { host: { command: "node" } } });
-    const { config, trust } = await load();
+    const { config } = await load();
     const loaded = config.loadMcpConfigWithSources(undefined, cwd);
 
     expect(loaded.projectServers.get("host")?.path).toBe(join(cwd, ".vscode", "mcp.json"));
@@ -276,7 +305,7 @@ describe("project MCP server trust", () => {
     writeJson(join(cwd, "opencode.json"), { mcp: {
       host: { type: "local", command: ["node", "marker.js"] },
     } });
-    const { config, trust } = await load();
+    const { config } = await load();
     const loaded = config.loadMcpConfigWithSources(undefined, cwd);
 
     expect(loaded.projectServers.get("host")?.path).toBe(join(cwd, "opencode.json"));
@@ -295,7 +324,7 @@ describe("project MCP server trust", () => {
   it("gates home-level imports requested by a project config", async () => {
     writeJson(join(cwd, ".mcp.json"), { imports: ["cursor"], mcpServers: {} });
     writeJson(join(home, ".cursor", "mcp.json"), { mcpServers: { home: { command: "node" } } });
-    const { config, trust } = await load();
+    const { config } = await load();
     const loaded = config.loadMcpConfigWithSources(undefined, cwd);
 
     expect(loaded.projectServers.get("home")?.path).toBe(join(cwd, ".mcp.json"));
@@ -318,5 +347,123 @@ describe("project MCP server trust", () => {
     expect(loaded.projectServers.get(name)?.path).toBe(join(cwd, ".pi", "settings.json"));
     const result = await trust.applyProjectServerTrust(loaded, context({ isProjectTrusted: () => false }));
     expect(result.config.mcpServers[name]).toMatchObject({ disabled: true, lifecycle: "eager" });
+  });
+
+  describe("project script tools", () => {
+    const globalPath = () => join(home, ".pi", "agent", "mcp-adapter.json");
+    const projectPath = () => join(cwd, ".pi", "mcp-adapter.json");
+    const closeStale = { description: "Close stale issues", file: "./close.js", inputSchema: { type: "object", properties: { repo: { type: "string" } } } };
+    const tui = (select: ReturnType<typeof vi.fn>) => context({ hasUI: true, mode: "tui", ui: { select } });
+    async function gate(ctx: any) {
+      const { config, trust } = await load();
+      return trust.applyProjectServerTrust(config.loadMcpConfigWithSources(undefined, cwd), ctx);
+    }
+
+    it("records which script tools a project file set last, and leaves them out before trust is known", async () => {
+      writeJson(globalPath(), { scriptTools: { kept: { description: "Global", file: "/g.js" }, close_stale: { description: "Global", file: "/g.js" } } });
+      writeJson(projectPath(), { scriptTools: { close_stale: closeStale } });
+      const { config, trust } = await load();
+      const loaded = config.loadMcpConfigWithSources(undefined, cwd);
+
+      expect([...loaded.projectScriptTools!]).toEqual([["close_stale", { path: projectPath() }]]);
+      expect(trust.hasProjectScriptToolDefinitions(config.loadMcpConfig(undefined, cwd))).toBe(true);
+      expect(Object.keys(trust.excludeProjectServersAtLoadTime(loaded).scriptTools ?? {})).toEqual(["kept"]);
+    });
+
+    it("blocks a project script tool in an untrusted project, and never gates a global one", async () => {
+      writeJson(globalPath(), { scriptTools: { triage: { description: "Global", file: "/g.js" } } });
+      writeJson(projectPath(), { scriptTools: { close_stale: closeStale } });
+      const select = vi.fn();
+      const result = await gate({ ...tui(select), isProjectTrusted: () => false });
+
+      expect(Object.keys(result.config.scriptTools ?? {})).toEqual(["triage"]);
+      expect(result.blockedScriptTools).toEqual(new Map([["close_stale", { reason: "untrusted", source: { path: projectPath() } }]]));
+      expect(select).not.toHaveBeenCalled();
+    });
+
+    it("needs approval in a trusted project without a dialog, unless user-global projectServers is \"allow\"", async () => {
+      writeJson(projectPath(), { scriptTools: { close_stale: closeStale } });
+      const blocked = await gate(context());
+      expect(blocked.config.scriptTools).toEqual({});
+      expect(blocked.blockedScriptTools?.get("close_stale")?.reason).toBe("approval-required");
+
+      writeJson(globalPath(), { settings: { projectServers: "allow" } });
+      vi.resetModules();
+      const allowed = await gate(context());
+      expect(Object.keys(allowed.config.scriptTools ?? {})).toEqual(["close_stale"]);
+      expect(allowed.blockedScriptTools?.size).toBe(0);
+    });
+
+    it("asks with the tool, the config file and the script path; Allow keeps the tool and records it, Enter denies", async () => {
+      writeJson(projectPath(), { scriptTools: { close_stale: closeStale } });
+      const allow = vi.fn().mockResolvedValue("Allow");
+      const allowed = await gate(tui(allow));
+
+      expect(allow).toHaveBeenCalledWith(
+        `Allow project script tool “close_stale”?\nProject config: ${projectPath()}\nScript: ${join(cwd, ".pi", "close.js")}\n\nThis tool runs the script in Pi's codemode, where it can call your MCP and Pi tools. The script file can change without asking you again.`,
+        ["Don't allow", "Allow"],
+      );
+      expect(Object.keys(allowed.config.scriptTools ?? {})).toEqual(["close_stale"]);
+      expect(JSON.parse(readFileSync(join(home, ".pi", "agent", "mcp-project-approvals.json"), "utf8")).approvals)
+        .toEqual([expect.objectContaining({ serverName: "scriptTools/close_stale" })]);
+
+      rmSync(join(home, ".pi", "agent", "mcp-project-approvals.json"));
+      // Pi preselects the first choice.
+      const enter = vi.fn().mockResolvedValue("Don't allow");
+      const denied = await gate(tui(enter));
+      expect(denied.config.scriptTools).toEqual({});
+      expect(denied.blockedScriptTools?.get("close_stale")?.reason).toBe("denied");
+      expect(existsSync(join(home, ".pi", "agent", "mcp-project-approvals.json"))).toBe(false);
+    });
+
+    it("keeps an approval across restarts until the entry changes, its file, inputSchema or declare included", async () => {
+      writeJson(projectPath(), { scriptTools: { close_stale: closeStale } });
+      await gate(tui(vi.fn().mockResolvedValue("Allow")));
+      vi.resetModules();
+      expect(Object.keys((await gate(context())).config.scriptTools ?? {})).toEqual(["close_stale"]);
+
+      for (const changed of [
+        { ...closeStale, file: "./other.js" },
+        { ...closeStale, inputSchema: { type: "object", properties: {} } },
+        { ...closeStale, declare: true },
+        { ...closeStale, description: "Close old issues" },
+      ]) {
+        writeJson(projectPath(), { scriptTools: { close_stale: changed } });
+        vi.resetModules();
+        expect((await gate(context())).blockedScriptTools?.get("close_stale")?.reason, JSON.stringify(changed)).toBe("approval-required");
+      }
+      // A project server of the same name gets nothing from the script tool's approval.
+      writeJson(projectPath(), { mcpServers: { close_stale: { command: "node" } }, scriptTools: { close_stale: closeStale } });
+      vi.resetModules();
+      const both = await gate(context());
+      expect(both.blockedServers.get("close_stale")?.reason).toBe("approval-required");
+      expect(Object.keys(both.config.scriptTools ?? {})).toEqual(["close_stale"]);
+    });
+
+    it("never lets a server approval stand in for a script tool's, nor the reverse", async () => {
+      const definition = { description: "Close stale issues", file: "/abs/close.js" };
+      writeJson(projectPath(), {
+        mcpServers: { "scriptTools/close_stale": { ...definition } },
+        scriptTools: { close_stale: { ...definition } },
+      });
+      // Allow the server, deny the script tool.
+      const select = vi.fn(async (title: string) => title.startsWith("Allow project MCP server") ? "Allow" : "Don't allow");
+      const first = await gate(tui(select));
+      expect(first.blockedScriptTools?.get("close_stale")?.reason).toBe("denied");
+
+      vi.resetModules();
+      const second = await gate(context());
+      expect(Object.keys(second.config.scriptTools ?? {})).toEqual([]);
+      expect(second.blockedScriptTools?.get("close_stale")?.reason).toBe("approval-required");
+
+      // Now allow only the script tool: the server stays unapproved.
+      rmSync(join(home, ".pi", "agent", "mcp-project-approvals.json"));
+      vi.resetModules();
+      await gate(tui(vi.fn(async (title: string) => title.startsWith("Allow project script tool") ? "Allow" : "Don't allow")));
+      vi.resetModules();
+      const third = await gate(context());
+      expect(Object.keys(third.config.scriptTools ?? {})).toEqual(["close_stale"]);
+      expect(third.blockedServers.get("scriptTools/close_stale")?.reason).toBe("approval-required");
+    });
   });
 });

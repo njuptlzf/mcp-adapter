@@ -1,132 +1,229 @@
 # MCP scripting
 
-Semantic tool search with Jev, the opt-in `mcpScript` tool, and composable search from scripts.
+Semantic tool search with Pi's classifier models, scripts that call MCP tools through Pi's `codemode`, and script tools that save a script as a tool.
 
-## Jev semantic search and opt-in script evaluation
+## Semantic search
 
-A valid System One key makes semantic search available across every enabled MCP server; it does not run Jev searches automatically. A search uses Jev only when `searchMode: "semantic"` is explicitly requested. Jev ranks matching tools but never executes them. Script evaluation remains disabled until `scriptEvaluation: true` is configured. Requests use the pinned model from `settings.jev.model` (`jev-1.13.0` by default) against the endpoint in `SYSTEMONE_ENDPOINT`, which defaults to TypeSafe at `https://api.typesafe.ai/v1/systemone`. Review your provider's current legal terms — for TypeSafe, [legal terms](https://docs.typesafe.ai/legal), including privacy and retention; a no-training commitment does not mean zero retention.
+Word search matches the words of a query against tool names and descriptions. Semantic search asks a classifier model in Pi which tool fits what the query means, so "plan my week" can find a calendar tool that never says "plan". It runs only when a search asks for it, and it ranks tools but never runs them:
 
 ```text
 Normal search
 mcp({ search: "calendar" })
         │
-        └── local lexical search
-            no Jev request
+        └── local word search
+            nothing leaves the machine
 
 Explicit semantic search
 mcp({ search: "calendar", searchMode: "semantic" })
         │
-        └── Jev ranks matching tools
+        └── a Pi classifier model ranks matching tools
             no tool is executed
 ```
 
-The quickest desktop setup is:
+Semantic search uses Pi's own logins, so there is no separate key to set up. Without a model setting, the adapter uses the first of these that Pi has a credential for:
 
-```sh
-pi-mcp-adapter key set systemone
-```
+1. `typesafe/jev-latest`, with `TYPESAFE_API_KEY`
+2. `openrouter/typesafe/jev-1.13`, with `/login` to OpenRouter or `OPENROUTER_API_KEY`
+3. `cloudflare-workers-ai/typesafe/jev`, with `CLOUDFLARE_API_KEY` and `CLOUDFLARE_ACCOUNT_ID`
+4. `opencode/jev-1.13`, with `OPENCODE_API_KEY`
+5. `vercel-ai-gateway/typesafe-ai/jev`, with `AI_GATEWAY_API_KEY`
 
-That is enough to use semantic search across all enabled MCP tools. Run `/mcp-adapter jev setup` in Pi when you want to restrict which enabled servers may share semantic-search data. The command saves a project-scoped allowlist and reloads Pi automatically. Verify the stored credential at any time with `pi-mcp-adapter key status systemone`.
-
-`SYSTEMONE_API_KEY` is for CI/headless use and overrides the keyring. Stdio MCP subprocesses inherit the host environment by default, so set `inheritEnv: false` where they must not receive it. The script worker receives no key, SDK, endpoint, headers, or environment.
-
-### Choosing a provider endpoint
-
-System One decisions are the same API at different origins, so pointing at another provider needs an endpoint and, usually, a model:
-
-| Provider | `SYSTEMONE_ENDPOINT` | Model |
-| --- | --- | --- |
-| TypeSafe (default) | `https://api.typesafe.ai/v1/systemone` | `jev-1.13.0` |
-| OpenCode Zen | `https://opencode.ai/zen/v1/systemone` | `jev-1.13` |
-| Command Code | `https://api.commandcode.ai/provider/v1/systemone` | `typesafe/jev` |
-| OpenRouter | `https://openrouter.ai/api/alpha/decisions` | `typesafe/jev-1.13` |
-| Local server | `http://127.0.0.1:8080/v1/systemone` | the model your server serves |
-
-These are example configurations, subject to each provider's current documentation ([OpenCode Zen](https://opencode.ai/docs/zen/), [Command Code](https://commandcode.ai/docs/provider), [OpenRouter](https://openrouter.ai/docs/guides/community/jev), [TypeSafe](https://docs.typesafe.ai/)).
-
-With `SYSTEMONE_ENDPOINT` pointed at OpenRouter, an existing `OPENROUTER_API_KEY` works as the key and the model defaults to `typesafe/jev-1.13`. `OPENROUTER_API_KEY` is never sent to any other endpoint, and `SYSTEMONE_API_KEY` takes precedence over it.
-
-The endpoint must be an absolute `https` URL with a path; plain `http` is accepted only on `localhost`, `127.0.0.0/8`, or `[::1]`, so the key and payload never leave the machine unencrypted. A local server that ignores keys still needs some non-empty `SYSTEMONE_API_KEY`, because Jev does not run without a key. A set-but-invalid `SYSTEMONE_ENDPOINT` disables Jev instead of falling back to the default. Treat the endpoint as trusted configuration: it receives the API key and the judgment payload. Credentials are stored per endpoint, so switching endpoints does not overwrite a saved key. Set the model with:
+To use another model, set `settings.semanticSearch.model` to any classifier in Pi's model list, written as `"provider/id"`: Cloudflare's Clef (`cloudflare-workers-ai/@cf/cloudflare/clef`), OpenAI's GPT-6 Luna (`openai/gpt-6-luna`), or a model on a local llama.cpp server that you added to Pi's `models.json`. Pi's [classifier models](https://pi.dev/docs/latest/models#use-classifier-models) page lists them. A model you name is used without checking for a credential first, because a local server may need none.
 
 ```json
-{ "settings": { "jev": { "model": "jev-1.13" } } }
+{ "settings": { "semanticSearch": { "model": "cloudflare-workers-ai/@cf/cloudflare/clef" } } }
 ```
 
-The older `TYPESAFE_API_KEY` variable still works for the default TypeSafe endpoint and is never sent to any other endpoint.
+Semantic search sends the query text, server names, normalized and original tool names, tool paths, and descriptions to the model's provider through Pi. It does not send tool results. Review your provider's terms for privacy and retention.
 
-Semantic search sends the query text, server names, normalized and original tool names, tool paths, and descriptions to the configured endpoint. It does not send tool results. `allowedServers` restricts semantic search to named servers. `scriptEvaluation` is a separate opt-in that may send the state and MCP-derived results declared in each evaluation; when enabled, it requires an explicit source allowlist.
+When more tools are eligible than fit in one request and they come from several servers, the search makes two calls. The first sends the query, the server names and up to 40 tool names per server, and asks which servers fit. The second ranks tools taken from those servers first, so a tool whose name and description share no words with the query can still be found.
+
+By default every enabled server's tools may be sent. Run `/mcp-adapter semantic setup` to choose which servers may share them: it names the model it will use, saves a project-scoped `allowedServers` list, removes the old `jev` setting from that file, and reloads Pi. To turn semantic search off, set `{ "settings": { "semanticSearch": false } }`. `candidateLimit` caps how many tools go into one request (2 to 127, default 127), and below `minProbability` (default 0.2) the search answers that no tool fits.
+
+Request semantic search with `mcp({ search: "triage customer reports", searchMode: "semantic" })`. Regex can't be combined with it. If the model times out after 5 seconds, is rate limited or is down, the search falls back to word search and marks the result as a fallback. A missing credential, an unknown model, a server outside `allowedServers`, or an invalid answer returns an error that says what to fix, and the provider's own error text is never shown. On Pi before 0.99, which has no classifier models, semantic search says so and word search keeps working. When the model decides no tool fits, the result says so, for example `typesafe/jev-latest found no suitable tool for "query"`. Result details name the provider and model that ranked the tools.
+
+Results show the parameter shape only for tools that scored at least a quarter of the top match. The rest get one line with a short description, and `mcp({ describe, server })` shows any of them in full.
+
+On 15 sample catalogs with 31 queries that have a right tool, the measured models picked:
+
+| Model | Right tool first | Median time |
+| --- | --- | --- |
+| `typesafe/jev-latest` | 31 of 31 | 213 ms |
+| `cloudflare-workers-ai/typesafe/jev` | 30 of 31 | 257 ms |
+| `cloudflare-workers-ai/@cf/cloudflare/clef` | 30 of 31 | 398 ms |
+| `cloudflare-workers-ai/@cf/cloudflare/clef-flash` | 30 of 31 | 292 ms |
+
+The default `minProbability` of 0.2 was enough for all four: on the 15 queries with no right tool, each model answered that none fit. In an earlier live test with Jev, 12 everyday requests and 95 tools and resources, Jev put the expected result first in 10 of 11 answerable cases, where word search did so in 5.
+
+`allowedServers` only covers the searches the adapter makes. A codemode script can pass MCP results to a classifier with `models.classify()`; those calls use Pi's credentials and don't go through the adapter, so `allowedServers` doesn't apply to them.
+
+### Moving from a System One key
+
+The adapter no longer stores its own key. `pi-mcp-adapter key`, `SYSTEMONE_ENDPOINT` and `SYSTEMONE_API_KEY` are gone, and the adapter doesn't read `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` itself; Pi does. Give Pi the credential instead: `/login` to OpenRouter, `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in Pi's environment, or a provider in Pi's `models.json`, which also covers a local server. `settings.jev` is replaced by `settings.semanticSearch`: `allowedServers` moves as it is; `model` now names a Pi model as `"provider/id"`, such as `typesafe/jev-latest`, so an old name like `jev-1.13.0` must be rewritten; `semanticCandidateLimit` is now `candidateLimit`, `semanticMinProbability` is now `minProbability`, and the timeout, retry and request-size settings are gone. `/mcp-adapter semantic setup` writes the new setting for you. A key you stored with `pi-mcp-adapter key set systemone` stays in the OS credential store under the service `pi-mcp-adapter.service-key`; delete it there if you don't need it.
+
+## Typed values from tool results
+
+Many tools return a long page of text when the agent needs two numbers from it. With `extract`, the agent names the values it wants and gets only those back, as real numbers and dates, so a 40 KB order page costs a line of context instead. The full result is saved to a file the agent can still read.
+
+```js
+mcp({ tool: "get_order", args: { id: "B-1001" }, extract: { total: "number", due: { type: "date", description: "Delivery date" } } })
+```
+
+It is off until you name the servers whose results may be sent:
+
+```json
+{ "settings": { "extraction": { "allowedServers": ["orders"] } } }
+```
+
+Only then does the `mcp` tool show the `extract` parameter, so sessions without the setting pay nothing for it. For an allowed server, the adapter sends the tool's own text to Cloudflare: its text blocks, the text of embedded resources, and `structuredContent` as JSON (for a result over 16 KiB or a codemode call, only when the server's `appendStructuredContent` isn't `false`), never images or binary resources, and at most 100 KiB. In a result over 16 KiB or a codemode call, a binary resource is sent as the adapter's short note about it: its URI, MIME type and the local path where it was saved. Nothing is sent for any other server. Review [Cloudflare's terms](https://www.cloudflare.com/service-specific-terms-developer-platform/) for how long it keeps what you send.
+
+Search results mark the tools of those servers `(extract allowed)`, so the agent knows which calls can take `extract` before it makes one.
+
+The credentials come from Pi, so there is no key to store in the adapter. Two routes reach Clairic:
+
+| `model` | What Pi needs |
+| --- | --- |
+| `cloudflare-workers-ai/clairic` | `CLOUDFLARE_API_KEY` and `CLOUDFLARE_ACCOUNT_ID`, or the `cloudflare-workers-ai` login |
+| `cloudflare-ai-gateway/clairic` | `CLOUDFLARE_API_KEY`, `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_GATEWAY_ID`, for the gateway's logs, caching and rate limits |
+
+Without `model`, the adapter uses Workers AI if Pi has a credential for it, then the gateway. The AI Gateway route has been checked only against a test server, not a live gateway.
+
+Each field is a type name, or an object with `type` and an optional `description` (what to look for), `unit` (number and duration fields) and `decimals` (0 to 6; number, duration and `list.number` fields). Ask for 1 to 16 fields per call.
+
+| Type | Value |
+| --- | --- |
+| `text` | a string |
+| `number`, `integer` | a number |
+| `date`, `time`, `datetime` | `2026-11-02`, `14:30`, `2026-11-02T14:30` |
+| `duration`, `duration.minutes` (or `seconds`, `hours`, `days`, `weeks`, `months`, `years`) | a number in that unit |
+| `list`, `list.number`, `list.date` | a list of strings, numbers or dates |
+
+The result is one line of JSON. Every field you asked for is in `values`: its value, or `null` when it isn't in the result. A value Clairic is less than 0.80 sure of is withheld as `null` and listed in `uncertain` with its guess, and `"truncated": true` means only part of the text was read, because it was over 100 KiB or Clairic cut it:
+
+```json
+{"values":{"total":42.1,"due":"2026-11-02","carrier":null},"uncertain":{"carrier":{"guess":"UPS","confidence":0.62}},"fullResult":"/tmp/pi-mcp-output-AbC/output-1a2b3c4d.txt"}
+```
+
+If the full result can't be saved, `fullResult` is `null` and the tool's normal result follows the values. A date or time that doesn't exist, such as `2026-02-31`, counts as an invalid answer.
+
+When nothing can be sent, the agent gets the tool's normal result after one line that says why, and result details carry the code under `extraction`:
+
+| Code | Line |
+| --- | --- |
+| `server_not_allowed` | `Extraction skipped: server "<name>" is not in settings.extraction.allowedServers.` |
+| `tool_error` | `Extraction skipped: the tool returned an error.` |
+| `background_task` | `Extraction skipped: the call runs as a background task.` |
+| `no_text` | `Extraction skipped: the result has no text.` |
+| `no_source` | `Extraction skipped: the tool's own text is not available.` |
+| `call_failed` | no line; the call's own error already says what failed |
+
+If the request itself fails, the line is `Extraction failed (<code>): <message>`, with a code such as `no_credentials`, `authentication_failed`, `payment_required`, `rate_limited`, `timeout` (5 seconds), `service_unavailable` or `invalid_response`. Cloudflare's own error text is never shown. `extract` works with MCP tools only, not script tools.
+
+A codemode script parses the line:
+
+```js
+const result = await tools.mcp({ tool: "orders_get_order", args: { id: "B-1001" }, extract: { total: "number" } });
+const { values } = JSON.parse(result);
+return values.total;
+```
+
+On Workers AI, reading 100 KiB of text takes about 1 second.
+
+## Scripting MCP calls with Pi's codemode
+
+Pi's `codemode` tool (Pi 0.99 and later) runs a JavaScript script that calls other tools, and only the script's output reaches the model. Use it to loop over, filter, chain, or fan out MCP calls in one step. For a single call, search, describe, status check, or auth action, use `mcp`.
+
+Pi turns `codemode` on by itself only for its built-in MCP servers, and the adapter replaces those, so turn it on yourself. Add it to `defaultTools` in `~/.pi/agent/settings.json` or a project's `.pi/settings.json`:
+
+```json
+{ "defaultTools": ["+codemode"] }
+```
+
+For one run, use `pi --tools +codemode`. See Pi's [Enable codemode](https://pi.dev/docs/latest/cli#enable-codemode).
+
+Every cached adapter tool is callable from a script as `tools.mcp__<server>__<tool>(args)`. Characters that aren't valid in a JavaScript identifier become `_`, so `mcp__dev-radius__search` is `tools.mcp__dev_radius__search`. A tool with a direct or search-mode registration keeps its own name. [Codemode and tool_search](tools.md#codemode-and-tool_search) explains the names in full.
+
+These tools aren't listed in the `codemode` description, so a script finds them with `searchTools(query, { namespace: "mcp__<server>" })`, reads a tool's TypeScript declaration with `describeTool(name)`, and gets a server's tool names and instructions with `describeNamespace("mcp__<server>")`. `ALL_TOOLS` lists every callable tool. Pi's [codemode docs](https://pi.dev/docs/latest/codemode#globals) describe these globals and the rest of the script API.
+
+A call resolves to the MCP `CallToolResult`: `content`, `structuredContent` when the server sent it, and `isError`. Use `structuredContent` when it's there; otherwise most JSON APIs put their payload in `content[0].text`, so parse it. Results returned to a script are not truncated by the adapter's [output guard](tools.md#output-guard); Pi limits what the script returns to the model, to 10,000 tokens by default (`max_output_tokens`), and saves longer output to a temp file. A call that fails at the server or is denied by the adapter resolves with `isError: true`, so check it. A call that Pi blocks before it runs, for example through a permission extension, rejects with an `Error`; `Promise.allSettled()` keeps the results of the other calls.
+
+```js
+const found = await searchTools("search issues", { namespace: "mcp__github" });
+if (!found.some((tool) => tool.name === "mcp__github__search_issues")) return found;
+
+const result = await tools.mcp__github__search_issues({ query: "is:open label:bug" });
+if (result.isError) return result.content;
+return result.structuredContent ?? JSON.parse(result.content[0].text);
+```
+
+Each call from a script is a Pi tool call under the tool's registered name, with the `codemode` call as its parent, so Pi's `tool_call` hooks and permission extensions see it. The adapter's own gates still run once per call: `approveTools` and the approval broker ([Tool approval](tools.md#tool-approval)). A call connects its server first when it isn't connected yet, and on Pi 1.2 and later a script that names a server whose tools aren't registered yet connects that server before it runs.
+
+Scripts run in Pi's QuickJS sandbox, with no file system, network, timers, or Node APIs of their own; they reach the outside world only through tools. Pi's [limits](https://pi.dev/docs/latest/codemode#limits) apply. To classify results, call `models.classify()` with a classifier such as Jev, as described in Pi's [Models](https://pi.dev/docs/latest/codemode#models).
+
+## Script tools
+
+A workflow you repeat, such as checking a repository for stale issues, can be saved as a script tool: a codemode script with a name, a description and fixed inputs. The model calls it like any other tool instead of writing the script again, a subagent can be limited to it by name, and a permission extension can match that name. Script tools need Pi 0.99.0 or later; on older Pi none are loaded, and a warning says so. You don't need to turn `codemode` on for the model to use them.
+
+Add a `scriptTools` object to an adapter config file, such as `~/.pi/agent/mcp-adapter.json`:
 
 ```json
 {
-  "settings": {
-    "jev": {
-      "scriptEvaluation": true,
-      "allowedServers": ["github"],
-      "maxEvaluationTokensPerScript": 32768
+  "scriptTools": {
+    "stale_issues": {
+      "description": "List a repository's open issues with no activity for the given number of days",
+      "file": "scripts/stale-issues.js",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "repo": { "type": "string", "description": "owner/name" },
+          "days": { "type": "number" }
+        },
+        "required": ["repo", "days"]
+      }
     }
   }
 }
 ```
 
-Request semantic discovery explicitly with `mcp({ search: "triage customer reports", searchMode: "semantic" })` or `tools.search({ query: "triage customer reports", searchMode: "semantic" })`. Regex is incompatible. Timeout, rate-limit, and service failures return marked lexical fallback; credential, policy, configuration, and response failures do not. If no allowed server has cached tools, search explains how to connect a server or update the allowlist; if Jev decides no tool fits, the result says that Jev abstained.
+A relative `file` is relative to the folder of the config file that sets it, so this one is `~/.pi/agent/scripts/stale-issues.js`. [Script tools](configuration.md#script-tools) in the configuration docs lists every field. The adapter reads the file on every call, so an edit applies to the next call without `/reload`. A file that is missing, empty or larger than 1 MiB isn't run.
 
-Optional `jev` controls bound timeout/retries, request and script budgets, semantic candidates (at most 127), and minimum probability. The cumulative token budget uses provider-reported input plus output usage. Exact pre-response admission is unavailable without the provider tokenizer, so byte/question/state limits bound requests before dispatch; a response that exceeds the remaining token budget is discarded and exhausts it. The endpoint is set by `SYSTEMONE_ENDPOINT`; headers and SDK logging are not configurable.
-
-`await jev.evaluate({ state, questions, sources })` returns `{ ok, data }` or `{ ok: false, error }`. `sources` must name every MCP server represented in `state`. The host also conservatively taints the whole script with every server-attributed MCP call result or error: declared and observed sources must all be enabled and in `allowedServers`, so copying data or omitting/mislabeling `sources` cannot bypass policy. The taint remains for later direct evaluations and semantic searches even when the script did not retain the call result. Direct and semantic provider attempts share the per-script count, UTF-8 request-byte, token, and deadline budgets; later `tools.call` operations still require normal authentication and approval. See `examples/jev-semantic-filter.mjs` and `examples/jev-accessibility-loop.mjs`.
-
-`allowedServers` only covers the Jev calls the adapter makes: semantic search and `jev.evaluate()`. On Pi 0.99+, Pi's `codemode` scripts can call MCP tools through `mcp` and pass the results to a classifier model such as Jev with `models.classify()`. Those calls don't go through the adapter, so `allowedServers` doesn't apply to them.
-
-Semantic search sends your request and the available tool descriptions to Jev, which works out which tools best match what you’re trying to do. In a live test with 12 everyday requests and 95 tools and resources, Jev chose the expected result first in 10 of 11 answerable cases and placed it second once. Regular text search found the expected result first in 5 cases. Jev also correctly returned no result for an unrelated request. This was a small test using one local setup, so results will vary with different tools and queries.
-
-For multi-call MCP work, write ordinary JavaScript: discover, inspect, call, loop, filter, chain, or fan out, then return one result. Run that code with the `mcpScript` tool, which is off by default; set `settings.scriptMode` to `true` to register it and its bundled skill. For a single MCP call, search, describe, status check, or auth action, use `mcp` instead.
-
-The bundled `mcp-scripting` skill is manual-only: use `/skill:mcp-scripting`, or set `settings.scriptSkill` to `"model"` so the `mcpScript` description tells the model where to read it.
-
-For example, this is the JavaScript passed as the `code` argument to `mcpScript`:
+The file is an ordinary codemode script, as described above. The call's arguments are in `input`, after Pi checks them against `inputSchema`; a tool without `inputSchema` takes no arguments and gets `{}`. What the script returns is the tool's result, and it goes through the [output guard](tools.md#output-guard) like any MCP result that goes to the model.
 
 ```js
-const { items } = await tools.search({ query: "search issues", server: "github" });
-const candidate = items[0];
-if (!candidate) return { error: "No matching tool" };
-
-const details = await tools.describe({ path: candidate.path });
-if (details.error) return details;
-
-const result = await tools.call(details.path, { query: "is:open label:bug" });
-if (!result.ok) return result;
-emit({ tool: details.path, completed: true });
-return result.data;
+const since = new Date(Date.now() - input.days * 86_400_000).toISOString().slice(0, 10);
+const result = await tools.mcp__github__search_issues({ query: `repo:${input.repo} is:issue is:open updated:<${since}` });
+if (result.isError) return result.content;
+return result.structuredContent ?? JSON.parse(result.content[0].text);
 ```
 
-For tool calls, successful `result.data` is the raw MCP `CallToolResult`, not the domain payload; resource reads return text. Use `result.data.structuredContent` when present. Otherwise most JSON APIs return their payload as text, so parse `result.data.content[0].text`. If neither shape is understood, return the envelope for inspection instead of coercing it to an empty collection.
+The adapter defines `input` by adding one line to the start of the script. A `// @options:` line stays first, so a script tool can still set its own limits there. Because of the added line, line numbers in a script's errors are one higher than in the file. Pi's `codemode.mode` and `codemode.inlineBudget` settings change how Pi offers `codemode` to the model; they don't affect script tools. Like any codemode script, a script tool can call `models.classify()` and `models.generateImages()`, which use the session's credentials and are billed to the session.
 
-## Composable tool search
+A script tool is a Pi tool named `mcp__script__<name>`, so the one above is `mcp__script__stale_issues`. Like the adapter's other MCP tools, it isn't in the model's tool list: `mcp({ search })`, `tool_search` and codemode's `searchTools()` find it, and `mcp({ tool: "stale_issues", args })` calls it. In `mcp({ search })`, word and regex search find script tools, and semantic search ranks MCP tools only. Set `"declare": true` to put it in the model's tool list from the start instead, which adds its description and schema to every turn. When a script tool has the same name as an MCP tool, `mcp({ tool })` runs the script tool, and its result says how to call the MCP tool with `mcp({ tool, server })`. An MCP server named `script` shares the `mcp__script` namespace, so codemode's `searchTools()` and `describeNamespace("mcp__script")` list its tools together with the script tools; all of them stay callable. Under `MCP_DIRECT_TOOLS=__none__` no script tool is registered, but `mcp` still finds and runs them.
 
-Use JavaScript to filter, sort, or combine search results before describing or calling tools. This adds no model context until a script runs.
+A script tool can't run inside another script, including a `codemode` script the model wrote, because Pi doesn't let a script start a second one. Such a call returns `Script tool "<name>" cannot run inside another script. Pi does not let a codemode script start another script, so call this tool directly.` Call it directly or through `mcp({ tool })`.
 
-```js
-const found = await tools.search({ query: "issue", server: "github", limit: 50 });
-if (found.error) return found.error;
+Each tool call inside a script tool is a nested Pi tool call under the script tool, so Pi's `tool_call` hooks, permission extensions and `approveTools` each see it once. `approveTools` matches the MCP calls inside a script tool, never the script tool itself; a permission extension can match the script tool as `mcp__script__<name>`. When `mcp` runs the script itself, under `MCP_DIRECT_TOOLS=__none__` or once `freezeDirectTools` has frozen the tool surface, the MCP results the script gets go through the output guard, so a large result reaches the script cut short.
 
-const readOnly = [];
-for (const hit of found.items) {
-  const details = await tools.describe({ path: hit.path, server: hit.server });
-  if (details.annotations?.readOnlyHint) readOnly.push(hit.path);
-}
-return readOnly;
-```
+Script tools set in a project file, such as `.pi/mcp-adapter.json`, follow the [project server trust](configuration.md#project-server-trust) rules. They load only when Pi trusts the project, and Pi asks when the session starts, showing the config file and the script's path; the prompt starts on "Don't allow". In print, JSON and RPC sessions they are skipped unless `"projectServers": "allow"` or `--mcp-project-servers allow` is set, which admits project script tools as well as project servers. The approval covers the entry as configured, not the script file's contents, so the file can change without Pi asking again. A relative `file` resolves to a different path in each git worktree, so each worktree asks once. When a project entry that isn't approved has the same name as a global script tool, neither is loaded.
 
-- `tools.search` runs the same search as `mcp({ search })`: ranked words by default, `regex: true` for a pattern, or `searchMode: "semantic"` for Jev. An empty `query` with a `server` lists that server's tools. Results come one page at a time (`limit` defaults to 12); follow `nextOffset` for the rest.
-- Every hit carries its `server`. Pass it on with `tools.describe({ path, server })` and `tools.call(path, args, { server })`, so the script reaches the tool it found even when two servers expose the same name, as with `toolPrefix: "none"`.
-- A search that cannot run returns `items: []` with `error: { code, message }`, using the same codes as `mcp({ search })`, such as `empty_query`, `server_disabled`, `server_backoff`, and `invalid_pattern`.
-- Annotations are the server's own hints, not guarantees. Script searches never activate `directTools: "search"` tools, and every call still goes through the normal approval gate.
+An invalid entry, a name another tool already has, and a project entry that isn't approved each show a warning once per session and are listed in `/mcp-adapter`. When a script tool can't run, its result says why, and `details.error` names the reason: `script_file_missing`, `script_file_unreadable`, `script_file_empty`, `script_file_too_large`, `nested_script_tool`, or `codemode_unavailable` when the Pi build doesn't let extensions run codemode. Through `mcp`, a call that Pi blocks or rejects before the script runs, for example in a `tool_call` hook, returns `nested_call_failed`. A script that throws returns codemode's own error output.
 
-See the bundled `mcp-scripting` skill for the complete workflow guide. The API is `await tools.search({ query, server?, regex?, searchMode?, limit?, offset? })`, `await tools.describe({ path, server? })`, `tools.call(path, args, { server }?)`, direct flat calls, `emit(value)`, and a captured `console`. Use ordinary JavaScript loops and Promise utilities for composition; fluent helpers such as `tools.find(...).one()`, `tools.parallel(...)`, and `tools.retry(...)` are not provided. MCP calls return `{ ok: true, data }` or `{ ok: false, error: { code, message } }`, so a failed call does not stop the rest of the script. Result details include a concise `calls` trace with each operation, its path or query, outcome, and duration. Emitted values and console output appear before the script's final return value, and the combined result uses the normal MCP output guard. The default timeout is 30 seconds; each script runs in a worker thread that is terminated at the deadline, including for infinite loops.
+### Saving a script as a tool
 
-Successful intermediate results reach the script without presentation truncation, details summaries, or output-guard spill files. Each script has a fixed **16 MiB cumulative UTF-8 JSON transfer budget** for successful intermediate data, shared by sequential and parallel calls. A result that cannot fit returns `{ ok: false, error: { code: "intermediate_result_too_large", message } }` and a failed call trace; rejected bytes do not consume the budget, and the script can continue. Request less data or start a new script; there is no configuration option for this cap. Resource calls retain their text-result semantics. Only script-selected output (`emit`, captured console, and `return`) reaches the final output guard; ordinary MCP calls remain guarded as before.
+When the model has written a script worth keeping, it can save it as a script tool with `mcp({ action: "save-script", args: { name, description, code, inputSchema } })`. `name`, `description` and `inputSchema` are the entry's fields described above, and `code` is the script. `target` is `"global"`, the default, or `"project"`, and can go in `args` or next to `action`. Any other key in `args` is refused, `declare` included.
 
-The upstream tool executes before this check and may already have side effects. This is a transfer budget, not a total-memory limit: SDK responses, JSON serialization (including rejected results), copies, concurrent responses, and script-created values still allocate memory. Synchronous serialization can delay deadline handling.
+Pi asks you twice before anything is written. The first dialog is a summary: the tool name, the script file and the config file, each marked new or replaced, a diff of the config change, and a diff of the script when the save replaces one. It also says when the name already runs a script from another config file, which the new entry replaces, and when the config file's comments and formatting will be rewritten. The diffs show the changed lines with three lines around them, up to 60 lines and 8 KB each. A diff too large to work out, such as between two long scripts, is replaced by a line that says so, and you read the new script in the editor. The dialog starts on "Don't save", so a stray Enter writes nothing. If you choose "Review the script", the whole script opens in Pi's editor. You can change it there, and what you save is what gets written; the result tells the model when you edited it. Escape writes nothing.
 
-For a tool-restricted subagent, launch the child Pi with its tool allowlist set to `["mcpScript"]`. Have the parent discover MCP tool names with `mcp({ search: "..." })` and include the relevant prefixed names in the child's task; the child can then loop, filter, and chain those MCP calls without filesystem, shell, or edit tools. The adapter's ordinary lazy connection, authentication, abort handling, and approval gates still apply to every call.
+`target: "global"` writes the script to `~/.pi/agent/mcp-scripts/<name>.js` and the entry to `~/.pi/agent/mcp-adapter.json`. With `--mcp-config`, the entry goes to that file and the script to an `mcp-scripts` folder beside it. `target: "project"` writes `.pi/mcp-scripts/<name>.js` and `.pi/mcp-adapter.json`. If `mcp-scripts` is a link, for example into a dotfiles repository, the summary also names the folder the script is written to. The entry's `file` is `mcp-scripts/<name>.js`, relative to the config file, so a project save works in every git worktree. A save never sets `declare`, so a saved tool adds nothing to the model's prompt. If the config write fails, the save removes the script file it wrote, or restores the one it replaced.
 
-`mcpScript` runs in an isolated QuickJS/WASM VM with a 64 MiB memory cap, a 16 MiB serialized output-block budget, and no Node.js, filesystem, network, timer, or process globals. Script error messages are capped at 64 KiB. MCP tool calls can still have external side effects and remain subject to the adapter's normal approval gates. It is distinct from Pi's code-mode skill: Pi's skill batches general Pi tools, while `mcpScript` exposes MCP calls only and can be the child's sole tool.
+The saved tool works right away as `mcp__script__<name>`, without `/reload`. Once `freezeDirectTools` has frozen the tool surface, it works after `/reload`. Under `MCP_DIRECT_TOOLS=__none__`, call it with `mcp({ tool: "<name>", args })`. If the tool list can't be refreshed after the files are written, the save still succeeds, and the result says the tool works after `/reload`.
+
+Some saves are refused before Pi asks anything. Saving needs an interactive terminal session, so print, JSON and RPC sessions and subagents are refused, and it can't be requested from inside another tool, such as a `codemode` script. It needs Pi 0.99.0 or later. A name another tool already has is refused, and so is a global save of a name a project config file defines, because the project entry would win. A project save needs project trust, and `PI_MCP_CONFIG_MODE=exclusive` refuses it. When you approve a project save, the adapter records the approval, so the next session doesn't ask again; as for any project script tool, the approval doesn't cover later edits to the script file.
+
+If the script file or its config entry changed after you approved the save, nothing is written. A refused save returns a message and a `details.error` code. That case, a config file that can't be read, a script path that isn't a regular file, an existing script file larger than 1 MiB, an `mcp-scripts` that isn't a folder, and a failed write return `script_save_failed`, which is reported as an error. Other refusals, such as `declined`, `headless` or `name_unavailable`, are plain results. Set `settings.allowScriptToolSave` to `false` to refuse every save; that also removes the action's line from the `mcp` tool description.
+
+## Moving from the adapter's own script tool
+
+The adapter used to ship its own script tool. It's gone, and Pi's `codemode` replaces it. A config that still sets that tool's settings loads as before and shows a notice that names the file and the keys to remove; then add `"+codemode"` to `defaultTools`. Scripts written for the old tool need small changes: find tools with `searchTools()` and `describeTool()`, call them as `tools.mcp__<server>__<tool>(args)`, read the `CallToolResult` instead of an `{ ok, data }` wrapper, and classify with `models.classify()`.
+
+The recipe for a tool-restricted subagent, a child Pi whose only tool was the old script tool, is gone too. A child with `codemode` can also reach the session's other tools, so there is no MCP-only equivalent.

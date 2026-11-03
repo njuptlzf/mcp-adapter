@@ -1,5 +1,21 @@
 import { INPUT_REQUIRED_NEEDS_UI } from "./errors.ts";
 
+// A script tool that could not run, or was refused, is a failed call too. So is a call the gateway
+// handed off as a nested Pi call that Pi blocked or rejected before the tool ran, and a script tool
+// save that can't be written, found before the dialogs (an unreadable config, a script path that
+// isn't a regular file, an existing script over 1 MiB, an mcp-scripts that isn't a directory) or
+// when the approved write fails, so the model does not believe the tool exists.
+const SCRIPT_TOOL_FAILURES = new Set([
+  "codemode_unavailable",
+  "nested_call_failed",
+  "nested_script_tool",
+  "script_file_missing",
+  "script_file_unreadable",
+  "script_file_empty",
+  "script_file_too_large",
+  "script_save_failed",
+]);
+
 /**
  * Decide the `isError` override for a finished tool result in the `tool_result` hook.
  *
@@ -16,15 +32,7 @@ import { INPUT_REQUIRED_NEEDS_UI } from "./errors.ts";
 export function toolErrorOverride(details: unknown): { isError: true } | undefined {
   if (details && typeof details === "object" && "error" in details) {
     const code = (details as { error?: unknown }).error;
-    if (code === "tool_error" || code === "call_failed" || code === INPUT_REQUIRED_NEEDS_UI) {
-      return { isError: true };
-    }
-  }
-  if (details && typeof details === "object" && (details as { mode?: unknown }).mode === "script") {
-    const calls = (details as { calls?: unknown }).calls;
-    if (Array.isArray(calls) && calls.some((call) => (
-      !!call && typeof call === "object" && (call as { error?: unknown }).error === INPUT_REQUIRED_NEEDS_UI
-    ))) {
+    if (code === "tool_error" || code === "call_failed" || code === INPUT_REQUIRED_NEEDS_UI || (typeof code === "string" && SCRIPT_TOOL_FAILURES.has(code))) {
       return { isError: true };
     }
   }

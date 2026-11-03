@@ -1,24 +1,28 @@
 // Dev-only benchmark: token cost of MCP tasks with Pi's built-in MCP and with
 // this adapter. Results are in docs/pi-builtin-comparison.md#measured-token-cost.
 //
-//   node bench/token-cost/run.mjs [--setups builtin,adapter,scripts]
+//   node bench/token-cost/run.mjs [--setups builtin,adapter,codemode]
 //     [--tasks single,prose,filter,batch,pipe] [--runs 3] [--concurrency 5]
-//     [--model gpt=openai-codex/gpt-6.1-sol] [--model claude=anthropic/claude-sonnet-5]
+//     [--model gpt=openai/gpt-6.1-sol] [--model claude=pi-claude/claude-sonnet-5]
 //     [--extension <path>] [--adapter <checkout>] [--out <dir>]
 //
 // Setups:
 //   builtin  Pi's built-in MCP with its default codemode exposure:
 //            pi -ne -e builtin:mcp -e builtin:codemode -e builtin:tool-search
-//   adapter  this adapter with default settings (scripts off)
-//   scripts  this adapter with settings.scriptMode: true, bulk tasks only
-//            (filter, batch, pipe)
+//   adapter  this adapter with default settings, no codemode
+//   codemode this adapter with Pi's codemode turned on, bulk tasks only (filter, batch, pipe):
+//            pi -ne -e <adapter> -e builtin:codemode --tools +codemode
 //
 // Each run is a headless `pi -p` session under --out (default: a temp directory) against
 // server.mjs's issue tracker and notes servers, using your installed `pi` and its credentials.
-// --model is label=provider/id; --extension loads e.g. a provider bridge. Answers are checked
+// --model is label=provider/id; --extension loads e.g. a provider bridge. GPT runs through the
+// `openai` provider. Claude runs as pi-claude/claude-sonnet-5, which needs
+// --extension <pi-claude-bridge checkout>, as the published Claude runs did. Each run gets the
+// adapter's defaults: MCP_DIRECT_TOOLS is removed from the child's environment, and result.json
+// records the adapter checkout and commit, the Pi version and the model. Answers are checked
 // against data.mjs, writes against the servers' call log. Unreported cost uses Sonnet prices per
 // million: $3 in, $3.75 cache write, $0.30 cache read, $15 out. Not part of CI; no thresholds.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -29,11 +33,11 @@ import { truth } from "./data.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const { values: opts } = parseArgs({
   options: {
-    setups: { type: "string", default: "builtin,adapter,scripts" },
+    setups: { type: "string", default: "builtin,adapter,codemode" },
     tasks: { type: "string", default: "single,prose,filter,batch,pipe" },
     runs: { type: "string", default: "3" },
     concurrency: { type: "string", default: "5" },
-    model: { type: "string", multiple: true, default: ["gpt=openai-codex/gpt-6.1-sol", "claude=anthropic/claude-sonnet-5"] },
+    model: { type: "string", multiple: true, default: ["gpt=openai/gpt-6.1-sol", "claude=pi-claude/claude-sonnet-5"] },
     extension: { type: "string", multiple: true, default: [] },
     adapter: { type: "string", default: resolve(here, "../..") },
     out: { type: "string" },
@@ -41,8 +45,16 @@ const { values: opts } = parseArgs({
 });
 const models = Object.fromEntries(opts.model.map((m) => { const at = m.indexOf("="); if (at < 1) throw new Error(`--model ${m}: use label=provider/id`); return [m.slice(0, at), m.slice(at + 1)]; }));
 const setups = opts.setups.split(",");
-for (const s of setups) if (!["builtin", "adapter", "scripts"].includes(s)) throw new Error(`unknown setup ${s}`);
+for (const s of setups) if (!["builtin", "adapter", "codemode"].includes(s)) throw new Error(`unknown setup ${s}`);
 const out = opts.out ? resolve(opts.out) : mkdtempSync(join(tmpdir(), "pi-mcp-token-cost-"));
+// A machine's own adapter settings must not change what a setup measures.
+const childEnv = { ...process.env, PI_MCP_CONFIG_MODE: "exclusive" };
+delete childEnv.MCP_DIRECT_TOOLS;
+const provenance = {
+  adapter: opts.adapter,
+  adapterCommit: execFileSync("git", ["-C", opts.adapter, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+  piVersion: execFileSync("pi", ["--version"], { encoding: "utf8" }).trim(),
+};
 
 const numbers = (text) => new Set((text.match(/\d+/g) ?? []).map(Number));
 const tasks = {
@@ -95,7 +107,7 @@ const jobs = [];
 for (let run = 1; run <= Number(opts.runs); run++)
   for (const model of Object.keys(models))
     for (const task of opts.tasks.split(","))
-      for (const setup of setups) if (setup !== "scripts" || tasks[task].bulk) jobs.push({ id: `${model}-${task}-${setup}-${run}`, model, task, setup });
+      for (const setup of setups) if (setup !== "codemode" || tasks[task].bulk) jobs.push({ id: `${model}-${task}-${setup}-${run}`, model, task, setup });
 
 function runJob(job) {
   const dir = join(out, job.id);
@@ -108,12 +120,13 @@ function runJob(job) {
     writeFileSync(join(dir, ".pi/mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2));
     args = ["-p", "--mode", "json", "-ne", "-e", "builtin:mcp", "-e", "builtin:codemode", "-e", "builtin:tool-search", "--approve", ...common, tasks[job.task].prompt];
   } else {
-    writeFileSync(join(dir, "mcp.json"), JSON.stringify({ mcpServers: servers, settings: { scriptMode: job.setup === "scripts" } }, null, 2));
-    args = ["-p", "--mode", "json", "-ne", "-e", join(opts.adapter, "index.ts"), ...common, "--mcp-config", join(dir, "mcp.json"), tasks[job.task].prompt];
+    writeFileSync(join(dir, "mcp.json"), JSON.stringify({ mcpServers: servers }, null, 2));
+    const codemode = job.setup === "codemode" ? ["-e", "builtin:codemode", "--tools", "+codemode"] : [];
+    args = ["-p", "--mode", "json", "-ne", "-e", join(opts.adapter, "index.ts"), ...codemode, ...common, "--mcp-config", join(dir, "mcp.json"), tasks[job.task].prompt];
   }
   const started = Date.now();
   return new Promise((done) => {
-    const child = spawn("pi", args, { cwd: dir, env: { ...process.env, PI_MCP_CONFIG_MODE: "exclusive" }, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("pi", args, { cwd: dir, env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr += d));
@@ -133,7 +146,7 @@ function runJob(job) {
       const verdict = tasks[job.task].check({ answer, log });
       const first = assistant[0]?.usage ?? {};
       const result = {
-        ...job, modelId: models[job.model], code, wallMs: Date.now() - started, turns: assistant.length, input, cacheRead, cacheWrite, output,
+        ...job, modelId: models[job.model], ...provenance, code, wallMs: Date.now() - started, turns: assistant.length, input, cacheRead, cacheWrite, output,
         promptTokens: input + cacheRead + cacheWrite, firstTurnPromptTokens: (first.input ?? 0) + (first.cacheRead ?? 0) + (first.cacheWrite ?? 0),
         cost: reported > 0 ? reported : (input * 3 + cacheWrite * 3.75 + cacheRead * 0.3 + output * 15) / 1e6, costReported: reported > 0,
         toolCalls, ok: verdict.ok, detail: verdict.detail, answer: answer.slice(0, 400), stderrTail: stderr.slice(-500),
@@ -154,7 +167,7 @@ console.log("\nmodel   task    setup    pass  prompt   out  turns  1st-turn  scr
 for (const model of Object.keys(models)) for (const task of opts.tasks.split(",")) for (const setup of setups) {
   const g = results.filter((r) => r.model === model && r.task === task && r.setup === setup);
   if (!g.length) continue;
-  const scripts = g.reduce((a, r) => a + (r.toolCalls.codemode ?? 0) + (r.toolCalls.mcpScript ?? 0), 0);
+  const scripts = g.reduce((a, r) => a + (r.toolCalls.codemode ?? 0), 0);
   console.log(model.padEnd(7), task.padEnd(7), setup.padEnd(8), `${g.filter((r) => r.ok).length}/${g.length}`.padStart(4), String(med(g.map((r) => r.promptTokens))).padStart(7),
     String(med(g.map((r) => r.output))).padStart(5), String(med(g.map((r) => r.turns))).padStart(6), String(med(g.map((r) => r.firstTurnPromptTokens))).padStart(9),
     String(scripts).padStart(8), (med(g.map((r) => r.cost)) * 100).toFixed(1).padStart(10));

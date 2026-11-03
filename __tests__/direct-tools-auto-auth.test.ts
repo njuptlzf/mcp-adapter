@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   getFailureAgeSeconds: vi.fn(),
   clearFailure: vi.fn(),
   authenticate: vi.fn(),
-  supportsOAuth: vi.fn(),
 }));
 
 vi.mock("../init.ts", () => ({
@@ -17,7 +16,6 @@ vi.mock("../init.ts", () => ({
 
 vi.mock("../mcp-auth-flow.ts", () => ({
   authenticate: mocks.authenticate,
-  supportsOAuth: mocks.supportsOAuth,
 }));
 
 describe("direct tools auto auth", () => {
@@ -27,7 +25,6 @@ describe("direct tools auto auth", () => {
     mocks.getFailureAgeSeconds.mockReset().mockReturnValue(null);
     mocks.clearFailure.mockReset();
     mocks.authenticate.mockReset().mockResolvedValue("authenticated");
-    mocks.supportsOAuth.mockReset().mockReturnValue(true);
   });
 
   it("auto-authenticates and retries direct tool execution once", async () => {
@@ -69,7 +66,6 @@ describe("direct tools auto auth", () => {
         incrementInFlight: vi.fn(),
         decrementInFlight: vi.fn(),
       },
-      toolMetadata: new Map(),
       failureTracker: new Map(),
       ui: { setStatus: vi.fn() },
       completedUiSessions: [],

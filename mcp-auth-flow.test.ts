@@ -19,7 +19,6 @@ import {
   getAuthStatus,
   getValidToken,
   removeAuth,
-  supportsOAuth,
   extractOAuthConfig,
   initializeOAuth,
   shutdownOAuth,
@@ -27,6 +26,7 @@ import {
 } from "./mcp-auth-flow.ts"
 import { isCallbackServerRunning } from "./mcp-callback-server.ts"
 import { updateTokens, updateClientInfo, getAuthForUrl, clearAllCredentials } from "./mcp-auth.ts"
+import { supportsOAuth } from "./utils.ts"
 import type { ServerEntry } from "./types.ts"
 
 describe("mcp-auth-flow", () => {
