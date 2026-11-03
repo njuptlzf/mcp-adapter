@@ -55,7 +55,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --deny-warnings",
     "test": "npm run test:prebuild && vitest run",
-    "test:prebuild": "cd examples/interactive-visualizer && npm run build",
+    "test:prebuild": "npm run build:mcp-server && cd examples/interactive-visualizer && npm run build",
     "upstream:check": "tsx scripts/upstream-divergence.ts",
     "verify:deploy": "tsx scripts/deploy-verify.ts",
     "check:large-functions": "tsx scripts/check-large-functions.ts",
