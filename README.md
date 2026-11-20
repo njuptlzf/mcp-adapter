@@ -16,7 +16,7 @@ Paste either line into your AI coding agent and let it do the work. "Latest" res
 **Upgrade to the latest:**
 > Update the `@njuptlzf/mcp-adapter` MCP server to the latest published version and verify it still connects.
 
-Prefer to do it yourself? See [Install](#install) below.
+No npm? Download the prebuilt `mcp-server.mjs` from [Releases](https://github.com/njuptlzf/mcp-adapter/releases/latest) and run it with `node` — see [Prebuilt bundle](#prebuilt-bundle--no-npm-run-with-node). Prefer to do it yourself? See [Install](#install) below.
 
 ## What this fork changes
 
@@ -113,6 +113,57 @@ Add this to your agent's MCP config (Cursor, Claude Code, Codex, VS Code, etc.).
 ```
 
 If you already installed the package globally, `"command": "mcp-server"` works too.
+
+### Prebuilt bundle — no npm, run with node
+
+Don't want a package manager? Every GitHub Release ships a self-contained `mcp-server.mjs` (Node and the MCP SDK are bundled in). Download it once and run it directly with `node` — works in agents like Qoder that just exec a command:
+
+```bash
+# Current release (7.0.1-0.0.1)
+curl -fL -o /home/lib/mcp-server/mcp-server.mjs \
+  https://github.com/njuptlzf/mcp-adapter/releases/download/v7.0.1-0.0.1/mcp-server.mjs
+```
+
+For the newest build, use the `mcp-server.mjs` asset on the [latest release](https://github.com/njuptlzf/mcp-adapter/releases/latest) (or the stable URL `https://github.com/njuptlzf/mcp-adapter/releases/latest/download/mcp-server.mjs`).
+
+Then register **one** MCP server — the adapter — in your agent, pointing at that file:
+
+```json
+{
+  "mcpServers": {
+    "mcp-adapter": {
+      "command": "node",
+      "args": [
+        "/home/lib/mcp-server/mcp-server.mjs",
+        "--config",
+        "/root/.config/mcp/mcp.json"
+      ]
+    }
+  }
+}
+```
+
+Adjust the two paths for your machine: the first is where you saved `mcp-server.mjs`, the second is the adapter's own config file (`--config`; you can also set `MCP_CONFIG_PATH`). `--version` prints the bundle version, `--help` shows all options.
+
+**Move your real MCP servers into the adapter config.** The file passed to `--config` (`/root/.config/mcp/mcp.json` above) uses the same `mcpServers` shape. Take the server entries you used to configure directly in the agent and put them here instead — the adapter proxies all of them behind one `mcp` tool:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/lib"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
+    }
+  }
+}
+```
+
+Now your agent sees a single adapter instead of every server's full tool list. The adapter watches this config file and reloads automatically when you add or change a server (`MCP_CONFIG_WATCH=0` disables that).
 
 ## Entry points
 
