@@ -6,6 +6,18 @@
 
 Use MCP servers without burning your context window: one ~200-token proxy tool instead of hundreds of tool definitions. Servers start lazily on first use, and tool metadata is cached so search/describe work with no live connection.
 
+## Quick install — tell your agent
+
+Paste either line into your AI coding agent and let it do the work. "Latest" resolves to the current published version at the time you ask — no version number to look up.
+
+**Install:**
+> Add `@njuptlzf/mcp-adapter` as an MCP server in my config, using `npx -y @njuptlzf/mcp-adapter` as the stdio command. Then confirm the `mcp` tool is available.
+
+**Upgrade to the latest:**
+> Update the `@njuptlzf/mcp-adapter` MCP server to the latest published version and verify it still connects.
+
+Prefer to do it yourself? See [Install](#install) below.
+
 ## What this fork changes
 
 - **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `7.0.0-0.0.1` (tracks upstream `v7.0.0`).
@@ -13,17 +25,6 @@ Use MCP servers without burning your context window: one ~200-token proxy tool i
 - **Pure upstream core** — `index.ts`, `config.ts`, `agent-dir.ts`, etc. run as upstream code; the fork's host layer lives in `adapters/` (and `interfaces/`) so upstream merges stay surgical.
 - **Universal host** — `adapters/universal-host.ts` impersonates Pi's `ExtensionAPI`, so the same engine runs unchanged behind the `mcp-server` stdio layer for any MCP-compatible agent.
 - **Prebuilt subpath exports** — `@njuptlzf/mcp-adapter/types`, `/config`, and `/metadata-cache` ship compiled `.js` + `.d.ts` from `dist/`.
-## What's new in 7.0
-
-https://github.com/user-attachments/assets/a3fc7834-2540-45b6-a80e-d9c17125a66c
-
-On servers that support MCP Tasks, add `"protocolVersion": "auto"` and slow tools run in the background while the agent keeps working. Tool search can rank tools by meaning and send full schemas only for the ones that fit. And `extract` hands the agent just the values it asked for from a long result. Everything else is in the [changelog](CHANGELOG.md).
-
-## What's new in 7.0
-
-https://github.com/user-attachments/assets/a3fc7834-2540-45b6-a80e-d9c17125a66c
-
-On servers that support MCP Tasks, add `"protocolVersion": "auto"` and slow tools run in the background while the agent keeps working. Tool search can rank tools by meaning and send full schemas only for the ones that fit. And `extract` hands the agent just the values it asked for from a long result. Everything else is in the [changelog](CHANGELOG.md).
 
 ## What's new in 7.0
 
@@ -98,13 +99,20 @@ Restart Pi. Standard MCP files (`.mcp.json`, `~/.config/mcp/mcp.json`) are disco
 
 ### Any other MCP-compatible agent
 
+Add this to your agent's MCP config (Cursor, Claude Code, Codex, VS Code, etc.). `npx -y` fetches and runs the latest published version automatically — no global install needed:
+
 ```json
 {
   "mcpServers": {
-    "mcp-adapter": { "command": "mcp-server" }
+    "mcp-adapter": {
+      "command": "npx",
+      "args": ["-y", "@njuptlzf/mcp-adapter", "mcp-server"]
+    }
   }
 }
 ```
+
+If you already installed the package globally, `"command": "mcp-server"` works too.
 
 ## Entry points
 

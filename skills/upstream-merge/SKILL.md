@@ -43,7 +43,12 @@ separately:
    see AGENTS.md "Branch Policy (HARD RULE)"). All Step 1 work happens on
    this branch. The branch name MUST follow `upstream-merge/<upstream-version>`
    (e.g., `upstream-merge/v2.10.0`) so the §5.5 PR template can auto-extract
-   the version.
+   the version. **If `upstream-merge/<version>` already exists as a stale remote
+   branch from a prior merge** (PR #38 left `origin/upstream-merge/v7.0.1` behind),
+   append a suffix such as `upstream-merge/<version>-followups` for the incremental
+   sync — upstream may ship post-tag fixes without bumping the version, so a
+   second sync against the same version is legitimate. Keep the `upstream-merge/`
+   prefix (CI/PR conventions match on it); put the real target SHA in the PR body.
 1. **Fetch upstream** — `git fetch upstream` (GnuTLS workaround per the §2
    note if needed).
 2. **Run pre-flight** — `npm run upstream:check` (§3) to see live divergence.
@@ -58,7 +63,10 @@ separately:
    fork-specific work. The merge is now from main (the merged PR) to the
    working branch.
 6. **Short-circuit** — if `<working-branch> == main` and the §5.5 PR has
-   already merged to main, skip step 5. The flow ends at step 4.
+   already merged to main, skip step 5. The flow continues to step 7.
+7. **Optional release** — once `main` is synced, invoke the `release` skill
+   (§5.6) to decide whether to publish a fork release. Not every merge ships
+   one; the release skill owns version bump, CHANGELOG/README, tagging and publish.
 
 **Anti-pattern (do not):** Running `git merge upstream/main` directly on
 `<working-branch>`. This creates a large blast radius of conflicts between
@@ -68,8 +76,8 @@ confine the conflict surface to the smaller `main` branch.
 
 **Anti-pattern (do not):** Committing the merge directly to `main` (even if
 `pre-push` hook is somehow disabled). This bypasses the §5.5 PR flow, which
-means no `pr-divergence-check` CI, no review checkpoint, no squash-merge
-cleanup. The hook exists for a reason; respect it.
+means no CI gate, no review checkpoint, no squash-merge cleanup. The hook
+exists for a reason; respect it.
 
 ## 2. When to invoke
 
@@ -97,20 +105,38 @@ If on `main` already, the flow ends at Step 1.
 > http.sslVerify=false fetch upstream --tags` (verbatim from
 > `08-LEARNINGS.md` L-4).
 >
-> **Proxy workaround (Windows sandboxes, 2026-11-20):** If fetch fails with
+> **Proxy workaround (Windows sandboxes, 2026-11-20; revised 2026-11-20 follow-ups):** If fetch fails with
 > `CONNECT tunnel failed, response 502` even though `https_proxy` is set in the
 > environment, Git Bash does not always honour the env vars. Set the proxy
-> explicitly: `git config --global http.proxy http://127.0.0.1:60105` (and
-> `https.proxy` the same; use the actual local proxy port). Direct connections
-> fail in these sandboxes — do not bother unsetting the proxy. The
-> `upstream:check` script shells out to `git fetch` internally, so this must be
+> explicitly from the **live** environment value — do NOT hardcode a port:
+>
+> ```bash
+> echo "$https_proxy"          # e.g. http://127.0.0.1:55173 — the port CHANGES between sandbox sessions
+> git config --global http.proxy "$https_proxy"
+> git config --global https.proxy "$https_proxy"
+> ```
+>
+> Concrete ports seen: `60105` (2026-11-20 earlier session), `55173` (2026-11-20 follow-ups session).
+> A stale hardcoded port fails with `Failed to connect to github.com:443 over proxy ... Could not connect to server`.
+> Direct connections fail in these sandboxes — do not bother unsetting the proxy.
+> The `upstream:check` script shells out to `git fetch` internally, so this must be
 > configured before running the pre-flight check or it exits 2.
+> Even with the correct proxy, a one-off `RPC failed; curl 7 CONNECT tunnel failed, response 502` can happen on fetch/pull — **retry once** (e.g. `git -c http.proxy="$https_proxy" -c https.proxy="$https_proxy" fetch origin`) before treating it as fatal; the follow-ups session hit this on the post-merge `pull` and a plain retry succeeded.
 
 ## 3. Read the special-cases registry and run the divergence check
 
 Two inputs are required before any merge decision: (1) read `references/special-cases.md` for the 15-17 hand-curated cases (Phase 8 manifest footnotes + expansion), and (2) run `npm run upstream:check` to see live divergence against `upstream/main`. The script replaces the Phase 8 "manifest freshness" check: instead of comparing manifest row counts to `git diff` output, it classifies each diverged file as `registered` / `diverged-but-not-registered` / `stale` against the registry.
 
 > **Run the pre-flight check BEFORE `git merge`, not after (2026-11-20):** once the merge is in progress, `package.json` may carry conflict markers, and EVERY Node tool launched in the repo (`npx tsx`, `npm run upstream:check`, `tsc`, `vitest`) fails at startup with `ERR_INVALID_PACKAGE_CONFIG` (surfaced by `npx` as the misleading "Could not determine Node.js install directory"). If you hit that error, it almost always means an unresolved `package.json` conflict — resolve/stage it first (§3.5), then re-run. The §3 pre-flight should be done on a clean tree; the §5(e) re-run happens only after all conflicts are cleared.
+
+**Dry-run the merge to preview conflicts (2026-11-20 follow-ups):** before touching the working tree, `git merge-tree` computes the exact three-way result and prints a `CONFLICT (...)` line per conflicting file. Use it to build the resolution plan (§3.5) up front — the follow-ups merge predicted all 11 conflicts this way, matching the real `git merge` exactly:
+
+```bash
+git merge-tree --write-tree main upstream/main > /tmp/mt.txt 2>&1   # exit 1 = conflicts present (expected)
+grep -nE '^(CONFLICT|changed in both|  (base|ours|theirs))' /tmp/mt.txt
+```
+
+This is read-only — no branch switch, no staged changes. Note: because the fork squash-merges PRs, `git merge-base main upstream/main` stays at the old divergence point (e.g. `4b08a15`), so `git rev-list main..upstream/main` can report 80+ commits even when only 8 are genuinely new — trust `git log <last-tag>..upstream/main` for the real increment. The conflict *set* from `merge-tree` is still accurate.
 
 **How to look up a file in the registry:**
 
@@ -294,13 +320,23 @@ Run all 8 checks before declaring the upstream-merge flow complete. Each is a si
 - **(g) Commit message prefix is `upstream-merge:`** — e.g., `upstream-merge: sync v2.10.0 (N files, M conflicts resolved)`. The body should list `ours` / `theirs` / `assess` row counts and any `Refs #N` follow-up issue links.
 - **(h) Step 2 propagation complete (skipped if working branch is `main`)** — `git checkout <working-branch> && git merge main` succeeds as a fast-forward or a clean small merge. The working branch now contains the upstream changes from Step 1; if conflicts appear, they are fork-vs-fork, not upstream-vs-fork, and the resolution strategy is the fork's own (consult the relevant Phase plan, not the §4 decision tree). After Step 2, re-run (c) and (d) on the working branch to confirm the propagated state still builds and tests pass.
 
+> **GitNexus pre-commit check (per AGENTS.md) + its side effects (2026-11-20):** `gitnexus_detect_changes` is mandatory before committing. On a fresh clone the index is absent (`No indexed repositories found`) — run `gitnexus analyze` once first (~77 s, builds ~9.5k nodes). Beware: `analyze` REWRITES `AGENTS.md` / `CLAUDE.md` GitNexus stat numbers (e.g. 2995→9460 symbols) and touches the six `.claude/skills/gitnexus/*.md` files (LF/CRLF churn). These are tool side effects, NOT part of your merge — restore them before staging/committing:
+>
+> ```bash
+> gitnexus detect-changes          # expect: Risk level low, affected processes 0 for a docs/config-only merge
+> git checkout HEAD -- AGENTS.md CLAUDE.md .claude/skills/gitnexus/
+> git status                       # only your intended merge files remain
+> ```
+
 When steps (a)–(g) PASS, the merge is locally complete on the feature branch. **Do NOT push directly to `main`** — proceed to the §5.5 PR sub-flow below. When step (h) also PASS (post-PR-merge), the upstream-merge flow is fully complete on both `main` and the working branch.
 
 ## 5.5 PR sub-flow (mandatory — bridges local merge to merged `main`)
 
 Per the project-wide rule "**绝对不允许直接提交到main分支**" (enforced by `.githooks/pre-push` and `.github/workflows/no-direct-main-push.yml`, see AGENTS.md "Branch Policy (HARD RULE)"), every upstream-merge MUST go through a PR. This sub-flow replaces the previous single-line "push the merge branch and open a PR" instruction with a deterministic 5-step procedure.
 
-**Naming contract**: the feature branch MUST be `upstream-merge/<upstream-version>` (e.g., `upstream-merge/v2.10.0`). This is what the PR template and the `pr-divergence-check` CI match against. If you deviated from this naming in §1 step 0, rename with `git branch -M upstream-merge/<correct-version>` before continuing.
+**Naming contract**: the feature branch MUST be `upstream-merge/<upstream-version>` (e.g., `upstream-merge/v2.10.0`). This is what the PR template and the CI conventions match against. If you deviated from this naming in §1 step 0, rename with `git branch -M upstream-merge/<correct-version>` before continuing. (For a post-tag incremental sync reusing a version whose branch name is taken, the `<version>-followups` suffix from §1 step 0 is acceptable — keep the `upstream-merge/` prefix.)
+
+> **CRITICAL — always pass `--repo` to every `gh pr` command (2026-11-20):** this repo has TWO remotes (`origin` = fork `njuptlzf/mcp-adapter`, `upstream` = `nicobailon/pi-mcp-adapter`). Without `--repo njuptlzf/mcp-adapter`, `gh` may resolve the "current" repo to the upstream by looking at remotes, and `gh pr create --base main --head <branch>` then fails with the misleading `GraphQL: ... No commits between main and <branch>, Head ref must be a branch`. Worse, with an explicit `--head owner:branch` it can silently open the PR against the WRONG repo (the follow-ups session opened `nicobailon/pi-mcp-adapter#953` by mistake and had to close it). **Always include `--repo njuptlzf/mcp-adapter` on `gh pr create`, `gh pr checks`, `gh pr view`, `gh pr merge`.** Verify after creation that the returned URL host path is `njuptlzf/mcp-adapter`, not `nicobailon`.
 
 ### 5.5.1 Push the feature branch
 
@@ -316,6 +352,7 @@ Use the body template at `references/pi-coupling-markers.md §"PR template"`. Au
 
 ```bash
 gh pr create \
+  --repo njuptlzf/mcp-adapter \
   --base main \
   --head upstream-merge/<version> \
   --title "upstream-merge: sync <version> (<N> commits, <M> files diverged)" \
@@ -340,159 +377,78 @@ If `gh` CLI is not authenticated, log in first: `gh auth login` (or use a Person
 ### 5.5.3 Wait for CI
 
 ```bash
-gh pr checks --watch
+gh pr checks <PR#> --repo njuptlzf/mcp-adapter --watch
 ```
 
-Required CI workflows (per `.github/workflows/`):
+Actual CI workflows in this fork (per `.github/workflows/`, verified 2026-11-20 follow-ups):
 
-- `pr-divergence-check.yml` — runs `npm run upstream:check` on the PR. **MUST be green.**
+- `ci.yml` — jobs `test` (~4 min, full vitest on Linux) and `windows-recheck-paths`; **MUST be green**. This is the authoritative full-suite signal — use it instead of the flaky local `npm test` (§5(d)).
+- `check-pi-coupling.yml` — job "Detect Pi-coupling re-introduction"; **MUST be green** (the CI twin of §4.1).
 - `no-direct-main-push.yml` — advisory; should not fire on a PR (the merge happens via `gh pr merge`, not `git push`).
+- `release.yml` — tag-driven, not relevant to the PR check.
 
-If `pr-divergence-check` fails: it means the registry gained new stale entries between PR open and the check. Update `references/special-cases.md`, **amend the merge commit** on the feature branch (`git commit --amend --no-edit`), force-push (`git push --force-with-lease`), and re-run.
+> **Stale reference:** `pr-divergence-check.yml` no longer exists (fork deleted its own test CI with `c6e593b`; see the curation footer in `references/special-cases.md`). Older AGENTS.md/SKILL.md text still names it — ignore those mentions. Registry staleness is now caught locally by §5(e) `npm run upstream:check`, not by a dedicated CI workflow.
 
-If the check is still in progress after 5 minutes, do not panic — the script does its own `git fetch upstream` which can be slow. Re-run `gh pr checks` periodically.
+If the check is still in progress after 5 minutes, do not panic — the script does its own `git fetch upstream` which can be slow. Re-run `gh pr checks <PR#> --repo njuptlzf/mcp-adapter` periodically.
 
 ### 5.5.4 Merge the PR
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge <PR#> --repo njuptlzf/mcp-adapter --admin --squash --delete-branch
 ```
 
+- `--repo njuptlzf/mcp-adapter`: mandatory (see §5.5 CRITICAL note) — without it `gh` targets the wrong repo.
+- `--admin`: **required in practice**. This repo has branch protection requiring a review approval, and GitHub forbids self-approving your own PR (even the org owner cannot `gh pr review --approve` their own PR). Use `--admin` to merge as an admin — verified working in both PR #38 and PR #39. (If the acting account is not an admin, request a review from someone else instead.)
 - `--squash`: collapses the merge commit + any follow-up commits into a single commit on `main`. The squash commit message is auto-populated from the PR title; the body becomes the merge commit body (preserves the §5 checklist summary).
-- `--delete-branch`: removes both remote (`origin/upstream-merge/<version>`) and local feature branch (cleanup step).
+- `--delete-branch`: removes only the **remote** branch. The **local** feature branch is NOT deleted — remove it manually (see §5.5.5).
 
 If the PR is a fast-forward (no merge commit on the feature branch — rare for upstream-merge but possible for tiny patches), use `--merge` or `--rebase` instead of `--squash`.
-
-If `gh pr merge` is blocked by branch protection (e.g., "Reviews required"), request a review first (`gh pr review --approve` if you have permission, or use the GitHub web UI).
 
 ### 5.5.5 Verify and clean up
 
 ```bash
-# Confirm main now has the merge
-git fetch origin && git log --oneline origin/main -5
-# Confirm local branch is gone (--delete-branch handles this)
+# 1. Switch to main and refresh origin (retry the fetch once on a transient 502 — §2)
+git checkout main
+git -c http.proxy="$https_proxy" -c https.proxy="$https_proxy" fetch origin
+git log --oneline origin/main -5     # squash commit should be on top
+git merge --ff-only origin/main      # local main -> merged squash commit
+
+# 2. Delete the LOCAL feature branch (--delete-branch only removed the remote one)
+git branch -d upstream-merge/<version>   # -d is safe; git warns "not merged to HEAD" because squash rewrote history — harmless
+
+# 3. Confirm clean state
 git branch | grep upstream-merge  # should be empty
-# Confirm working tree is clean
-git status
+git status                        # working tree clean
+node mcp-server.mjs --version     # re-confirm §5(f) version consistency post-merge
 ```
 
 If anything looks wrong (missing commits, wrong files, CI failure surfaced post-merge), `git revert` the PR merge commit on `main` and investigate. **Do NOT push a fix commit directly to `main`** — branch, fix, and PR (per AGENTS.md Branch Policy).
 
----
+## 5.6 Final optional step: publish a fork release
 
-## 6. Fork architecture principles (NEW, v3.1)
+After the merge PR is on `main`, `main` is synced locally, and the tree is clean (§5.5.5), invoke the **`release` skill** to decide whether this merge warrants a published release:
 
-> **Purpose**: Prevent future merge conflicts at the source, not just resolve them better.
-> Source: User insight 2026-07-01 ("fork 引入的代码，如果是独立的，应该独立成文件") + retrospective §3.2.1 L1/L2/L3 decision matrix.
-
-### 6.1 Core principle
-
-**When introducing fork-only code, ALWAYS prefer "独立文件" over "修改 upstream 文件".**
-
-The conflict resolution cost grows with granularity:
-
-| 粒度 | 冲突表现 | 解决成本 |
-|------|---------|---------|
-| 文件级 | 整个文件 conflict | 🟢 1 行 |
-| 段落级 | 文件内某段 conflict | 🟡 需 §4.4 5 步 |
-| 函数级 | 同一函数内 conflict | 🟠 需 §4.4 5 步 |
-| 行级大块 | 同一函数 343 行同时被改 | 🔴 灾难 |
-
-**Target: 把所有 fork 引入的独立代码推到"文件级"粒度。**
-
-### 6.2 L1/L2/L3 decision matrix (for current fork state)
-
-> Full matrix in `docs/upstream-merge-retrospective.md` §3.2.1.
-
-| Layer | Category | Action |
-|-------|----------|--------|
-| **L1** | REPLACEMENTS（9 个 Phase 3 抽象改造）| **接受冲突**——撤回 = 撤销 universal 目标 |
-| **L2** | ADDITIONS（8 个 fork 加 universal 段）| 大部分已优化（Phase 12 删除 per-agent）；剩余不值得抽 |
-| **L3** | TESTS（~10 个 fork universal 测试）| 按 Plan 14-04 拆 init-elicitation |
-
-### 6.3 Future-proofing rules (apply to all new fork code)
-
-When adding new fork-only functionality:
-
-1. **New agent adapter** → create `adapters/<new-agent>.ts`, NOT modify `adapters/entry.ts`
-2. **New test scenario** → create `__tests__/<new-scenario>.test.ts`, NOT extend existing `__tests__/init-*.test.ts`
-3. **New abstract type** → extend `interfaces/agent-api.ts`, NOT import Pi types directly in core
-4. **New universal helper** → create `adapters/<helper>.ts` or `utils/<helper>.ts`, NOT add as inline closure in `entry.ts`
-5. **New fork-only documentation** → create `docs/<new-topic>.md`, NOT extend `docs/upstream-merge-retrospective.md` in place (use references + cross-links)
-
-**Anti-pattern**: Adding a new `registerCommand` or `registerTool` call inline in `adapters/entry.ts` `createMcpAdapter` body. This creates future merge conflict at the function level (243-line function body).
-
-**Correct pattern**: Create a new file like `adapters/commands/<new-command>.ts` exporting a `setup<NewCommand>(agentapi, getState, getInitPromise)` function, then call that function from `createMcpAdapter`.
-
-### 6.4 Pre-commit guardrail (CI in Phase 15)
-
-Phase 15 P2-3 will add a CI check that runs:
-
-```bash
-# Count: new files vs modified files in this PR
-new_files=$(git diff --name-only --diff-filter=A origin/main...HEAD | wc -l)
-modified_files=$(git diff --name-only --diff-filter=M origin/main...HEAD | wc -l)
-
-# Warn if too many modifications relative to new files
-# (suggests inline additions rather than new file extractions)
-ratio=$(echo "scale=2; $modified_files / ($new_files + 1)" | bc)
-if (( $(echo "$ratio > 2.0" | bc -l) )); then
-  echo "⚠ High modify-to-new ratio: $ratio. Consider extracting independent code to new files."
-fi
+```
+Skill /release
 ```
 
-**Target ratio**: ≤ 2.0 modifications per new file. If exceeded, PR review should consider whether fork code could be extracted to a new file.
+The `release` skill owns version bumping (`<upstream-version>-0.0.N`), CHANGELOG + README updates, the version-consistency gate, annotated tagging, and the tag-triggered publish workflow. It decides first whether the merge changed the published surface — **not every upstream merge ships a release**. Do not bump versions or push tags from within this skill; delegate to `release` so the publishing flow stays in one place.
 
-### 6.5 Cross-references
+If the user declines a release (or the skill determines it is docs/meta-only), the upstream-merge flow ends here. Otherwise follow the `release` skill through tag push and publication verification.
 
-- `docs/upstream-merge-retrospective.md` §3.2.1 — full L1/L2/L3 matrix with empirical data (249 fork-only commits, 278 diverged files)
-- `docs/upstream-merge-retrospective.md` §2.4 — multi-perspective reflection on conflict granularity
-- SKILL.md §1 — Two-step git merge flow (the merge strategy that this principle supports)
+---
 
-### 6.6 Code structure optimization: how to reduce future conflicts (v3.2)
+## 6. Fork architecture principles (summary)
 
-Based on the 2026-07-01 first merge attempt (11 conflicts, 249 fork-only commits, 278 diverged files), the following code structure changes would reduce future conflict frequency:
+These are background principles for preventing merge conflicts at the source, not
+steps in the merge execution flow. The full content — granularity cost table,
+L1/L2/L3 decision matrix, future-proofing rules, the large-function heuristic, the
+pre-commit modify-to-new guardrail, and code-structure optimizations — lives in
+[references/fork-architecture.md](references/fork-architecture.md) (read it when
+introducing new fork-only code or reviewing conflict-prone structure).
 
-**1. Fork-only code in independent files (not modify upstream files)**
-
-When adding new fork-only functionality, create new files — do NOT add code to upstream files that upstream will also modify:
-
-- ✅ New agent adapter → `adapters/<new-agent>.ts` (not modify `adapters/entry.ts`)
-- ✅ New test scenario → `__tests__/<new-scenario>.test.ts` (not extend `__tests__/init-*.test.ts`)
-- ✅ New abstract type → extend `interfaces/agent-api.ts` (not import Pi types in core)
-- ✅ New universal helper → `adapters/<helper>.ts` or `utils/<helper>.ts` (not inline in `entry.ts`)
-- ✅ New fork-only doc → `docs/<new-topic>.md` (not extend `docs/upstream-merge-retrospective.md` in place)
-
-**2. Avoid large functions that both sides will modify** (REVISED 2026-07-02: heuristic, not absolute)
-
-The 2026-07-01 attempt showed `adapters/entry.ts` `createMcpAdapter` (324 lines) as the hardest conflict — both fork and upstream modify the same function body. Break large functions into smaller, independently-modifiable units:
-
-- ❌ One 324-line function → ✅ 4 small functions (~80 lines each) + thin orchestrator
-- ❌ Inline session lifecycle in `createMcpAdapter` → ✅ Extract to `setupSessionHandlers()`
-- ❌ Inline command registration → ✅ Extract to `registerCommands()`
-
-> **Heuristic, not absolute rule** (REVISED 2026-07-02): "Large function" is not well-defined — 30 lines of pure logic is large, but 300+ lines of YAML/JSON/case-statement config may be reasonable. Use `npm run check:large-functions` (default 300 lines) as a **heuristic indicator**, not an absolute threshold. A function being detected as "large" does NOT automatically mean it should be refactored — **refactor only if**:
->
-> 1. The function is in a file that both fork and upstream actively modify (verify with `git log upstream/main..main -- <file>` + `git log main..upstream/main -- <file>`)
-> 2. AND the function has been the source of past merge conflicts (check retrospective)
-> 3. AND the function's body is "structurally simple" (not just long due to data tables/cases)
->
-> If any of the above conditions is false, the line count is not a merge-conflict risk — leave it alone. **The root cause of merge conflicts is "both sides modify the same function", not "the function is long".**
-
-**3. Keep import sections stable**
-
-Import conflicts are the easiest to resolve but still cost time. Minimize import churn:
-
-- Use `interfaces/agent-api.ts` abstractions instead of direct Pi type imports (fork-specific imports don't conflict with upstream Pi imports)
-- Group imports consistently (std → external → internal → relative)
-- When adding a new dependency, add it in a new file, not in an existing core file
-
-**4. Separate fork-only config from upstream config**
-
-- ✅ Fork config in `.planning/` (fork-only, never conflicts)
-- ✅ Fork CI in `.github/workflows/` (fork-only, never conflicts)
-- ❌ Fork config inline in `package.json` or `tsconfig.json` (shared with upstream, will conflict)
-
-**5. Run `npm run upstream:check` before every PR**
-
-The `--json` mode (CI-02) provides machine-readable divergence data. Use it to detect new divergence early.
+Core rule in one line: **prefer new independent files (`adapters/<x>.ts`,
+`__tests__/<x>.ts`, `docs/<x>.md`) over editing files upstream also touches** — this
+pushes fork code to file-level granularity (1-line conflict resolution). The
+`resolve-conflicts` skill (§3.5) handles the higher-granularity cases. Run
+`npm run upstream:check` before every PR.

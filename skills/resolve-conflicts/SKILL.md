@@ -106,7 +106,7 @@ Based on the assessment, create a structured plan before resolving any conflicts
 If there are deleted-but-modified files (status: DU, UD, DD, UA, AU):
 
 ```bash
-.forge/skills/resolve-conflicts/scripts/handle-deleted-modified.sh
+skills/resolve-conflicts/scripts/handle-deleted-modified.sh
 ```
 
 This script will:
@@ -244,6 +244,12 @@ Read `references/patterns.md` section "Test Conflicts" for detailed examples.
    git add <generated-file>
    ```
 
+   If the file lives under a gitignored directory but is **already tracked** (e.g. `dist/*.js.map`, `dist/*.d.ts` under a `dist/` rule), plain `git add` is refused with `The following paths are ignored by one of your .gitignore files`. Force-add the tracked file:
+   ```bash
+   git add -f <generated-file>      # e.g. git add -f dist/config.js.map
+   ```
+   This also applies to `git checkout --ours/--theirs <file>` followed by staging — checkout works, but staging needs `-f`. (The follow-ups merge hit this on `dist/config.js.map` and `dist/config.d.ts`.)
+
 **When unsure if a file is generated**: Check for auto-generation markers in the file header, or ask the user if you should regenerate or manually merge the file.
 
 #### Configuration Files
@@ -305,7 +311,7 @@ Read `references/patterns.md` section "Code Logic Conflicts" for detailed exampl
 After completing all resolution phases in your plan, validate that all conflicts are resolved:
 
 ```bash
-.forge/skills/resolve-conflicts/scripts/validate-conflicts.sh
+skills/resolve-conflicts/scripts/validate-conflicts.sh
 ```
 
 This script checks for:
@@ -314,6 +320,8 @@ This script checks for:
 - Unmerged paths in git status
 - Deleted-modified conflicts
 - Merge state files
+
+> **Known false positive (2026-11-20):** while a merge is still in progress (before `git merge --continue` / `git commit`), this script reports `✗ Conflicts still exist` and `Repository is still in merge state` purely because `MERGE_HEAD` / `.git/MERGE_*` exist — even when every hunk is resolved, staged, and there are zero unmerged paths. It is checking merge *state*, not unresolved *content*. At that point the authoritative check is `git diff --name-only --diff-filter=U | wc -l` == 0 plus a marker scan (`git grep -nE '^(<<<<<<< |=======$|>>>>>>> )'` over the changed files). Do not re-resolve files to satisfy the script — proceed to `git merge --continue` / commit, then re-run the script on the post-commit tree where it will pass.
 
 ### Step 6: Compile and Test
 
