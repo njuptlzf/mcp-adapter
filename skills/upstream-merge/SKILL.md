@@ -63,7 +63,10 @@ separately:
    fork-specific work. The merge is now from main (the merged PR) to the
    working branch.
 6. **Short-circuit** — if `<working-branch> == main` and the §5.5 PR has
-   already merged to main, skip step 5. The flow ends at step 4.
+   already merged to main, skip step 5. The flow continues to step 7.
+7. **Optional release** — once `main` is synced, invoke the `release` skill
+   (§5.6) to decide whether to publish a fork release. Not every merge ships
+   one; the release skill owns version bump, CHANGELOG/README, tagging and publish.
 
 **Anti-pattern (do not):** Running `git merge upstream/main` directly on
 `<working-branch>`. This creates a large blast radius of conflicts between
@@ -420,6 +423,18 @@ node mcp-server.mjs --version     # re-confirm §5(f) version consistency post-m
 ```
 
 If anything looks wrong (missing commits, wrong files, CI failure surfaced post-merge), `git revert` the PR merge commit on `main` and investigate. **Do NOT push a fix commit directly to `main`** — branch, fix, and PR (per AGENTS.md Branch Policy).
+
+## 5.6 Final optional step: publish a fork release
+
+After the merge PR is on `main`, `main` is synced locally, and the tree is clean (§5.5.5), invoke the **`release` skill** to decide whether this merge warrants a published release:
+
+```
+Skill /release
+```
+
+The `release` skill owns version bumping (`<upstream-version>-0.0.N`), CHANGELOG + README updates, the version-consistency gate, annotated tagging, and the tag-triggered publish workflow. It decides first whether the merge changed the published surface — **not every upstream merge ships a release**. Do not bump versions or push tags from within this skill; delegate to `release` so the publishing flow stays in one place.
+
+If the user declines a release (or the skill determines it is docs/meta-only), the upstream-merge flow ends here. Otherwise follow the `release` skill through tag push and publication verification.
 
 ---
 
