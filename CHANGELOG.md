@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.1-0.0.1] - 2026-11-20
+
+> Fork release of upstream [`v7.0.1`](https://github.com/nicobailon/pi-mcp-adapter/releases/tag/v7.0.1). Syncs 88 upstream commits across PRs #38 and #39 (40 merge conflicts resolved) on top of `v7.0.0-0.0.1`.
+
+### Changed
+
+- **Upstream sync to `v7.0.1`** (#38, #39) — 80 commits plus 8 follow-up commits merged from `upstream/main`, with fork overlays (universal host, config-watch self-heal, npm scope, skills) preserved through 29 + 11 conflict resolutions.
+- **Fork version track advanced** to `7.0.1-0.0.1`; `package.json` / `package-lock.json` / README fork line and the `mcp-server` CLI version all report the new version.
+
+### Fixed
+
+- Inherited from upstream `v7.0.1`: long tool/resource names no longer break provider requests with a 64-character tool-name limit; faster adapter startup with large tool sets; invalid `mcp` `action` values now return an error listing valid actions; wrapped sign-in links stay clickable; unknown tool-schema `format` values no longer spam warnings.
+- **Merge/conflict skills** (#40) — folded v7.0.1 follow-up lessons into `upstream-merge` and `resolve-conflicts` skills (stale script paths, `validate-conflicts.sh` false positive during merge, `git add -f` for gitignored tracked files).
+
 ## [3.1.0-universal] - 2026-07-01
 
 > Fork release of upstream `v3.0.0` + governance improvements. See `.planning/milestones/v3.1-MILESTONE-AUDIT.md` for full audit.

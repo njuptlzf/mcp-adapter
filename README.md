@@ -20,7 +20,7 @@ Prefer to do it yourself? See [Install](#install) below.
 
 ## What this fork changes
 
-- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `7.0.0-0.0.1` (tracks upstream `v7.0.0`).
+- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `7.0.1-0.0.1` (tracks upstream `v7.0.1`).
 - **Config-watch self-heal for the stdio entry** (issue #34) — `mcp-server` fingerprints every config file it loaded and re-checks them on a timer; a manifest written *after* startup no longer leaves the process stuck with stale servers. On drift the adapter logs the truth and exits(0) so a supervising client respawns it with the fresh config; `mcp({ action: "reload" })` forces the same restart manually, and `MCP_CONFIG_WATCH=0` downgrades to warn-only. `mcp({})` status and tool-not-found results report the config paths and whether they changed since process start.
 - **Pure upstream core** — `index.ts`, `config.ts`, `agent-dir.ts`, etc. run as upstream code; the fork's host layer lives in `adapters/` (and `interfaces/`) so upstream merges stay surgical.
 - **Universal host** — `adapters/universal-host.ts` impersonates Pi's `ExtensionAPI`, so the same engine runs unchanged behind the `mcp-server` stdio layer for any MCP-compatible agent.
