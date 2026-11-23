@@ -20,7 +20,7 @@ No npm? Download the prebuilt `mcp-server.mjs` from [Releases](https://github.co
 
 ## What this fork changes
 
-- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `7.0.1-0.0.1` (tracks upstream `v7.0.1`).
+- **Repackaged as `@njuptlzf/mcp-adapter`** — org-scoped npm package, currently `7.0.1-0.0.2` (tracks upstream `v7.0.1`).
 - **Config-watch self-heal for the stdio entry** (issue #34) — `mcp-server` fingerprints every config file it loaded and re-checks them on a timer; a manifest written *after* startup no longer leaves the process stuck with stale servers. On drift the adapter logs the truth and exits(0) so a supervising client respawns it with the fresh config; `mcp({ action: "reload" })` forces the same restart manually, and `MCP_CONFIG_WATCH=0` downgrades to warn-only. `mcp({})` status and tool-not-found results report the config paths and whether they changed since process start.
 - **Pure upstream core** — `index.ts`, `config.ts`, `agent-dir.ts`, etc. run as upstream code; the fork's host layer lives in `adapters/` (and `interfaces/`) so upstream merges stay surgical.
 - **Universal host** — `adapters/universal-host.ts` impersonates Pi's `ExtensionAPI`, so the same engine runs unchanged behind the `mcp-server` stdio layer for any MCP-compatible agent.
@@ -119,9 +119,9 @@ If you already installed the package globally, `"command": "mcp-server"` works t
 Don't want a package manager? Every GitHub Release ships a self-contained `mcp-server.mjs` (Node and the MCP SDK are bundled in). Download it once and run it directly with `node` — works in agents like Qoder that just exec a command:
 
 ```bash
-# Current release (7.0.1-0.0.1)
+# Current release (7.0.1-0.0.2)
 curl -fL -o /home/lib/mcp-server/mcp-server.mjs \
-  https://github.com/njuptlzf/mcp-adapter/releases/download/v7.0.1-0.0.1/mcp-server.mjs
+  https://github.com/njuptlzf/mcp-adapter/releases/download/v7.0.1-0.0.2/mcp-server.mjs
 ```
 
 For the newest build, use the `mcp-server.mjs` asset on the [latest release](https://github.com/njuptlzf/mcp-adapter/releases/latest) (or the stable URL `https://github.com/njuptlzf/mcp-adapter/releases/latest/download/mcp-server.mjs`).

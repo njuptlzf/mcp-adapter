@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [7.0.1-0.0.2] - 2026-11-23
+
+> Fork release on upstream [`v7.0.1`](https://github.com/nicobailon/pi-mcp-adapter/releases/tag/v7.0.1). Fixes #44 (orphaned adapter + child watchers on stdin EOF).
+
+### Added
+
+- **stdin EOF guard** in `bin/mcp-server.ts` (#45) — on stdin `end`/`close`/`error` the adapter stops the config-watch keep-alive, fires `session_shutdown` so the engine closes all child transports, closes its own transport, and exits 0 (with a 2s force-exit backstop). A client closing stdin without a signal is now a clean shutdown instead of leaving orphaned processes.
+- **Escape hatch** for hosts that intentionally keep the adapter resident after stdin EOF: `--exit-on-eof=false` or `MCP_ADAPTER_EXIT_ON_EOF=0` restores the previous behavior. Both are documented in `mcp-server --help`.
+- **Regression tests** (`__tests__/mcp-server-stdin-eof.test.ts` + fixture) covering EOF exit, both opt-outs, and child reaping.
+
+### Fixed
+
+- **Orphaned adapter and MCP children** (#44) — when 4 clients registered the same adapter config, closing stdin without a signal left the adapter and every spawned child alive as `ppid=1` orphans. Stateful children such as `codebase-memory-mcp` then became concurrent writers on the same SQLite index, tripping `store.auto_clean` corruption detection, rotating the db to `.db.corrupt`, and forcing ~150s full rebuilds that killed incremental watching. EOF now reaps the whole process tree.
+
 ## [7.0.1-0.0.1] - 2026-11-20
 
 > Fork release of upstream [`v7.0.1`](https://github.com/nicobailon/pi-mcp-adapter/releases/tag/v7.0.1). Syncs 88 upstream commits across PRs #38 and #39 (40 merge conflicts resolved) on top of `v7.0.0-0.0.1`.
