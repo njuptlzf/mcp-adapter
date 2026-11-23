@@ -45,7 +45,7 @@ import { UniversalMcpHost } from "../adapters/universal-host.ts";
 import { ProtocolSamplingForwarder } from "../adapters/protocol-sampling-forwarder.ts";
 import { ProtocolElicitationForwarder } from "../adapters/protocol-elicitation-forwarder.ts";
 import { getConfigSources, loadMcpConfig } from "../config.ts";
-import { getConfigWatch, startConfigWatch } from "../config-watch.ts";
+import { getConfigWatch, startConfigWatch, stopConfigWatch } from "../config-watch.ts";
 import { createUniversalResolver } from "../interfaces/agent-paths.ts";
 import type { AgentChannel, FormConfig, UISystem } from "../interfaces/host-types.ts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -88,14 +88,18 @@ Universal MCP stdio server — bridges mcp-adapter proxy tool into any
 MCP-compatible agent via stdio transport.
 
 Options:
-  --config <path>   Path to mcp.json config file
-  --help            Show this help message
-  --version         Show version (tag, commit hash, build date)
+  --config <path>        Path to mcp.json config file
+  --exit-on-eof[=bool]   Exit when stdin reaches EOF (default: true). Set false
+                         to keep the adapter resident after the client closes stdin.
+  --help                 Show this help message
+  --version              Show version (tag, commit hash, build date)
 
 Environment:
-  MCP_CONFIG_PATH   Alternative way to specify config path
-  MCP_CONFIG_WATCH  "0"/"off"/"false" disables the auto-restart when watched
-                    config files change after startup (warn-only instead)
+  MCP_CONFIG_PATH         Alternative way to specify config path
+  MCP_CONFIG_WATCH        "0"/"off"/"false" disables the auto-restart when watched
+                          config files change after startup (warn-only instead)
+  MCP_ADAPTER_EXIT_ON_EOF "0"/"off"/"false" keeps the adapter resident after stdin
+                          EOF — use only when a host intentionally holds stdin open.
 
 Config discovery (in priority order):
   1. --config flag
@@ -105,10 +109,12 @@ Config discovery (in priority order):
 `);
 }
 
-function parseArgs(argv: string[]): { configPath?: string; showHelp: boolean; showVersion: boolean } {
+function parseArgs(argv: string[]): { configPath?: string; showHelp: boolean; showVersion: boolean; exitOnEof: boolean } {
 	let configPath: string | undefined;
 	let showHelp = false;
 	let showVersion = false;
+	// stdin EOF guard is on by default; both the flag and the env var can opt out.
+	let exitOnEof = exitOnEofFromEnv(process.env.MCP_ADAPTER_EXIT_ON_EOF);
 
 	for (let i = 2; i < argv.length; i++) {
 		const arg = argv[i];
@@ -124,6 +130,11 @@ function parseArgs(argv: string[]): { configPath?: string; showHelp: boolean; sh
 			}
 		} else if (arg.startsWith("--config=")) {
 			configPath = arg.slice("--config=".length);
+		} else if (arg === "--exit-on-eof") {
+			// Bare flag means "true"; an explicit false is only via = or the env var.
+			exitOnEof = true;
+		} else if (arg.startsWith("--exit-on-eof=")) {
+			exitOnEof = parseBoolFlag(arg.slice("--exit-on-eof=".length));
 		} else {
 			console.error(`Unknown option: ${arg}`);
 			console.error("Run 'mcp-server --help' for usage.");
@@ -136,7 +147,90 @@ function parseArgs(argv: string[]): { configPath?: string; showHelp: boolean; sh
 		configPath = process.env.MCP_CONFIG_PATH;
 	}
 
-	return { configPath, showHelp, showVersion };
+	return { configPath, showHelp, showVersion, exitOnEof };
+}
+
+/** "0"/"off"/"false"/"no" (case-insensitive) mean false; anything else means true. */
+function parseBoolFlag(raw: string | undefined): boolean {
+	return !["0", "off", "false", "no"].includes((raw ?? "").trim().toLowerCase());
+}
+
+/** Absent/empty env var keeps the EOF guard enabled; explicit false disables it. */
+function exitOnEofFromEnv(raw: string | undefined): boolean {
+	if (raw === undefined || raw.trim() === "") return true;
+	return parseBoolFlag(raw);
+}
+
+// ---------------------------------------------------------------------------
+// stdin EOF guard (issue #44)
+// ---------------------------------------------------------------------------
+
+/** Max time to wait for graceful cleanup before force-exiting on stdin EOF. */
+const SHUTDOWN_GRACE_MS = 2000;
+
+/**
+ * A client that closes stdin without sending a signal is a *normal* MCP
+ * shutdown, but the SDK's StdioServerTransport does not exit the process on
+ * stdin `end`. Without this guard the adapter — and every stdio child it
+ * spawned — lingers as an orphan (ppid=1). Stateful children then fight over
+ * the same on-disk store (issue #44: concurrent SQLite writers corrupt the
+ * codebase-memory-mcp index and kill incremental watching).
+ *
+ * Idempotent: `end`/`close`/`error` can all fire for one EOF, and a self-restart
+ * can race with it — shutdown must happen exactly once.
+ *
+ * Skipped on a TTY so local `npx tsx bin/mcp-server.ts` debugging is unaffected.
+ */
+function installStdinEofGuard(host: UniversalMcpHost, transport: StdioServerTransport): void {
+	if (process.stdin.isTTY) return;
+
+	let shuttingDown = false;
+	const shutdown = (reason: string): void => {
+		if (shuttingDown) return;
+		shuttingDown = true;
+		console.error(`[mcp-server] stdin ${reason} — shutting down`);
+
+		// 1) Stop the config-watch poll timer: on its own it keeps the event loop
+		//    alive forever, which is the reason the process never exited.
+		stopConfigWatch();
+
+		// 2) Backstop: regardless of what graceful cleanup does, leave within the
+		//    grace window. unref() so this timer never keeps the loop alive itself.
+		const forceExit = setTimeout(() => {
+			console.error("[mcp-server] shutdown grace period elapsed; forcing exit");
+			process.exit(0);
+		}, SHUTDOWN_GRACE_MS);
+		forceExit.unref?.();
+
+		// 3) Graceful: session_shutdown runs the engine's closeAll() so child
+		//    transports close and their stdio pipes signal EOF to the children.
+		//    Closing our own transport then releases stdin/stdout. process.exit()
+		//    is the final guarantee (fd close reaps anything still attached).
+		void (async () => {
+			try {
+				await host.fireSessionShutdown();
+			} catch {
+				// Non-fatal — process.exit() closes all fds regardless.
+			}
+			try {
+				await transport.close();
+			} catch {
+				// Already closed (e.g. an EOF-triggered close won the race).
+			}
+			process.exit(0);
+		})();
+	};
+
+	process.stdin.on("end", () => shutdown("end"));
+	process.stdin.on("close", () => shutdown("close"));
+	process.stdin.on("error", () => shutdown("error"));
+
+	// Make sure the stream flows so `end` fires even if no other data listener
+	// was attached (belt-and-suspenders; StdioServerTransport normally does this).
+	process.stdin.resume();
+
+	// EOF may have arrived between connect() and listener installation.
+	if (process.stdin.readableEnded) shutdown("already ended");
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +371,13 @@ async function main(): Promise<void> {
 	// Step 7: CRITICAL — Connect transport BEFORE fireSessionStart (Pitfall 1)
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
+
+	// Step 7b (issue #44): exit when the host closes stdin without a signal.
+	// Installed after connect so a clean client disconnect reaps this process and
+	// all its children instead of leaving orphaned watchers behind.
+	if (args.exitOnEof) {
+		installStdinEofGuard(host, transport);
+	}
 
 	// Step 8: CRITICAL — Check client capabilities via getClientCapabilities() (Pitfall 5)
 	const clientCaps = server.getClientCapabilities();
